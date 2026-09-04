@@ -189,7 +189,7 @@ class Akwam : MainAPI() {
     val plot = mainDoc.selectFirst("h2:contains(قصة المسلسل) + div > p")?.text()?.trim()
         ?: mainDoc.selectFirst("meta[name=description]")?.attr("content")?.trim()
 
-    // استخراج قيمة التقييم الرقمية
+    // استخراج قيمة التقييم الرقمية كـ Double
     val scoreValue = mainDoc.selectFirst("span.mx-2:contains(/)")
         ?.text()?.substringAfter("/")?.trim()?.toDoubleOrNull()
 
@@ -242,8 +242,8 @@ class Akwam : MainAPI() {
             this.plot = plot
             this.year = year
             this.tags = tags
-            // استخدام كائن Score لتعيين التقييم بسلامة
-            this.score = scoreValue?.let { Score(it, 10) }
+            // استخدام الدالة التوسيعية المعتمدة toScore()
+            this.score = scoreValue?.toScore()
             this.recommendations = recommendations
         }
     }
@@ -288,8 +288,8 @@ class Akwam : MainAPI() {
             this.plot = plot
             this.year = year
             this.tags = tags
-            // استخدام كائن Score لتعيين التقييم بسلامة
-            this.score = scoreValue?.let { Score(it, 10) }
+            // استخدام الدالة التوسيعية المعتمدة toScore()
+            this.score = scoreValue?.toScore()
             this.recommendations = recommendations
         }
     }
@@ -305,12 +305,11 @@ class Akwam : MainAPI() {
         this.plot = plot
         this.year = year
         this.tags = tags
-        // استخدام كائن Score لتعيين التقييم بسلامة
-        this.score = scoreValue?.let { Score(it, 10) }
+        // استخدام الدالة التوسيعية المعتمدة toScore()
+        this.score = scoreValue?.toScore()
         this.recommendations = recommendations
     }
 }
-
     private fun getSeasonNumber(seasonName: String): Int {
         val map = mapOf(
             "الاول" to 1,
