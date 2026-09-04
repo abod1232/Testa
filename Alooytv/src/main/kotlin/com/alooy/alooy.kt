@@ -66,7 +66,7 @@ class AlooyTvProvider : MainAPI() {
         }
     }
 
-    override suspend fun getMainPage(page: Int, request: MainPageRequest): newHomePageResponse {
+    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         if (page > 1) throw ErrorLoadingException("لا يوجد صفحات إضافية")
 
         // 1. استخراج النطاق الحقيقي أولاً
