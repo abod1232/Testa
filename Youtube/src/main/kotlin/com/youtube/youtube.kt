@@ -11,8 +11,7 @@ import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import okhttp3.Interceptor
 import okhttp3.Response
 import java.net.URLEncoder
-import java.util.regex.Pattern
-import com.lagradost.cloudstream3.AcraApplication
+import com.lagradost.cloudstream3.CloudStreamApp
 import androidx.preference.PreferenceManager
 import com.lagradost.cloudstream3.ar.youtube.YoutubeProvider.Config.SLEEP_BETWEEN
 import kotlin.collections.remove
@@ -823,18 +822,7 @@ class YoutubeProvider(
 
     private val collectedShorts = mutableListOf<Episode>()
 
-    private fun addShortToCache(title: String, url: String, poster: String?) {
 
-        if (collectedShorts.none { it.data == url }) {
-            collectedShorts.add(
-                newEpisode(url) {
-                    this.name = title
-                    this.posterUrl = poster
-                    this.episode = collectedShorts.size + 1
-                }
-            )
-        }
-    }
 
     private fun safeGet(data: Any?, vararg keys: Any): Any? {
         var current = data
@@ -1253,10 +1241,6 @@ class YoutubeProvider(
         }
     }
 
-    // تأكد من وجود هذه الـ Imports في أعلى الملف
-    // import androidx.preference.PreferenceManager
-    // import com.lagradost.cloudstream3.app
-
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -1267,9 +1251,9 @@ class YoutubeProvider(
         val fullUrl = "https://www.youtube.com/watch?v=$videoId"
 
         // =================================================================
-        // التصحيح هنا: استخدام AcraApplication.context بدلاً من app.context
+        // التصحيح هنا: استخدام CloudStreamApp.context لتجنب فئة AcraApplication المهملة
         // =================================================================
-        val context = AcraApplication.context
+        val context = CloudStreamApp.context
         val playerType = if (context != null) {
             val prefs = PreferenceManager.getDefaultSharedPreferences(context)
             prefs.getString("youtube_player_type", "advanced")
@@ -1286,10 +1270,9 @@ class YoutubeProvider(
             com.youtube.YoutubeExtractor().getUrl(fullUrl, null, subtitleCallback, callback)
         }
 
-        // 3. جلب الترجمات المتقدمة (WebVTT) - (باقي الكود كما هو تماماً بدون تغيير)
+        // 3. جلب الترجمات المتقدمة (WebVTT)
         try {
             val apiUrl = "$mainUrl/youtubei/v1/player"
-            // ... أكمل باقي الكود كما كان ...
             val payload = mapOf(
                 "context" to mapOf(
                     "client" to mapOf(
@@ -1377,7 +1360,6 @@ class YoutubeProvider(
         return true
     }
 
-
     private fun parseM3u8Tag(tag: String, key: String): String? {
 
         val regex = Regex("""$key=("([^"]*)"|([^,]*))""")
@@ -1391,15 +1373,3 @@ class YoutubeProvider(
         return regex.find(this)?.groupValues?.getOrNull(1)
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
