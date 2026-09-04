@@ -90,7 +90,7 @@ class AlooyTvProvider : MainAPI() {
         }
 
         items.addAll(parallelResults)
-        return HomePageResponse(items)
+        return newHomePageResponse(items)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
