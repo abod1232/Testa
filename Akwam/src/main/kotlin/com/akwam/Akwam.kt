@@ -73,7 +73,7 @@ class Akwam : MainAPI() {
         } else base
     }
 
-    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+    override suspend fun getMainPage(page: Int, request: MainPageRequest): newHomePageResponse {
         // في حال تم طلب صفحة تصنيف محددة مباشرة
         if (!request.data.isNullOrBlank()) {
             val base = request.data.trim()
@@ -98,7 +98,7 @@ class Akwam : MainAPI() {
 
             val list = parseMainPageElements(response.document)
             if (list.isEmpty()) throw ErrorLoadingException()
-            return HomePageResponse(listOf(HomePageList(request.name ?: "قائمة", list)))
+            return newHomePageResponse(listOf(HomePageList(request.name ?: "قائمة", list)))
         }
 
         // قائمة المسارات النسبية للأقسام
@@ -154,7 +154,7 @@ class Akwam : MainAPI() {
         items.addAll(parallelResults)
 
         if (items.isEmpty()) throw ErrorLoadingException()
-        return HomePageResponse(items)
+        return newHomePageResponse(items)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
