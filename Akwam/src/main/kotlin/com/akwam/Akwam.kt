@@ -73,7 +73,7 @@ class Akwam : MainAPI() {
         } else base
     }
 
-    override suspend fun getMainPage(page: Int, request: MainPageRequest): newHomePageResponse {
+    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         // في حال تم طلب صفحة تصنيف محددة مباشرة
         if (!request.data.isNullOrBlank()) {
             val base = request.data.trim()
