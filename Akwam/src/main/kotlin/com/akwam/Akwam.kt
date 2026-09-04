@@ -178,135 +178,138 @@ class Akwam : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val parts = url.split("#")
-        val pageUrl = parts[0]
-        val poster = parts.getOrNull(1)?.ifBlank { null }
+    val parts = url.split("#")
+    val pageUrl = parts[0]
+    val poster = parts.getOrNull(1)?.ifBlank { null }
 
-        val defaultHeaders = mapOf("Referer" to mainUrl)
-        val mainDoc = app.get(pageUrl, headers = defaultHeaders).document
+    val defaultHeaders = mapOf("Referer" to mainUrl)
+    val mainDoc = app.get(pageUrl, headers = defaultHeaders).document
 
-        val title = mainDoc.selectFirst("h1.entry-title")?.text()?.trim() ?: "Unknown"
-        val plot = mainDoc.selectFirst("h2:contains(قصة المسلسل) + div > p")?.text()?.trim()
-            ?: mainDoc.selectFirst("meta[name=description]")?.attr("content")?.trim()
+    val title = mainDoc.selectFirst("h1.entry-title")?.text()?.trim() ?: "Unknown"
+    val plot = mainDoc.selectFirst("h2:contains(قصة المسلسل) + div > p")?.text()?.trim()
+        ?: mainDoc.selectFirst("meta[name=description]")?.attr("content")?.trim()
 
-        val rating = mainDoc.selectFirst("span.mx-2:contains(/)")
-            ?.text()?.substringAfter("/")?.trim()?.toRatingInt()
+    // استخراج قيمة التقييم الرقمية
+    val scoreValue = mainDoc.selectFirst("span.mx-2:contains(/)")
+        ?.text()?.substringAfter("/")?.trim()?.toDoubleOrNull()
 
-        val tags =
-            mainDoc.select("div.font-size-16.text-white a[href*='/genre/'], div.font-size-16.text-white a[href*='/category/']")
-                .map { it.text() }
+    val tags =
+        mainDoc.select("div.font-size-16.text-white a[href*='/genre/'], div.font-size-16.text-white a[href*='/category/']")
+            .map { it.text() }
 
-        val year =
-            mainDoc.select("div.font-size-16.text-white a[href*='/year/']").firstOrNull()?.text()
-                ?.toIntOrNull()
+    val year =
+        mainDoc.select("div.font-size-16.text-white a[href*='/year/']").firstOrNull()?.text()
+            ?.toIntOrNull()
 
+    val recommendations = mainDoc.select("div.widget-body div[class*='col-']").mapNotNull {
+        val recTitle = it.selectFirst("h3 a")?.text()?.trim() ?: return@mapNotNull null
+        val recHref = it.selectFirst("a")?.attr("href") ?: return@mapNotNull null
+        val recPoster = getPoster(it)
+        val urlWithPoster = "$recHref#${recPoster ?: ""}"
+        newMovieSearchResponse(recTitle, urlWithPoster, TvType.Movie) {
+            this.posterUrl = recPoster
+        }
+    }
 
-        val recommendations = mainDoc.select("div.widget-body div[class*='col-']").mapNotNull {
-            val recTitle = it.selectFirst("h3 a")?.text()?.trim() ?: return@mapNotNull null
-            val recHref = it.selectFirst("a")?.attr("href") ?: return@mapNotNull null
-            val recPoster = getPoster(it)
-            val urlWithPoster = "$recHref#${recPoster ?: ""}"
-            newMovieSearchResponse(recTitle, urlWithPoster, TvType.Movie) {
-                this.posterUrl = recPoster
+    val seasonsMap = linkedMapOf<String, Pair<String, String>>()
+    val currentSeasonName = mainDoc.selectFirst("h1.entry-title")?.text()?.trim() ?: title
+    seasonsMap[pageUrl] = Pair(currentSeasonName, pageUrl)
+
+    val seasonSelector = "div.widget-body > a.btn[href*='/series/']"
+    mainDoc.select(seasonSelector).forEach { a ->
+        val href = a.attr("href")
+        if (href.isNotBlank()) {
+            val seasonUrl = if (href.startsWith("http")) href else "$mainUrl$href"
+            val seasonName = a.text().trim()
+            if (!seasonsMap.containsKey(seasonUrl)) {
+                seasonsMap[seasonUrl] = Pair(seasonName, seasonUrl)
             }
         }
+    }
 
-        val seasonsMap = linkedMapOf<String, Pair<String, String>>()
-        val currentSeasonName = mainDoc.selectFirst("h1.entry-title")?.text()?.trim() ?: title
-        seasonsMap[pageUrl] = Pair(currentSeasonName, pageUrl)
+    val directEpisodes = mainDoc.select("div#series-episodes div[class*='col-']")
+    val isSeries = seasonsMap.size > 1 || directEpisodes.isNotEmpty()
 
-        val seasonSelector = "div.widget-body > a.btn[href*='/series/']"
-        mainDoc.select(seasonSelector).forEach { a ->
-            val href = a.attr("href")
-            if (href.isNotBlank()) {
-                val seasonUrl = if (href.startsWith("http")) href else "$mainUrl$href"
-                val seasonName = a.text().trim()
-                if (!seasonsMap.containsKey(seasonUrl)) {
-                    seasonsMap[seasonUrl] = Pair(seasonName, seasonUrl)
-                }
-            }
-        }
-
-        val directEpisodes = mainDoc.select("div#series-episodes div[class*='col-']")
-        val isSeries = seasonsMap.size > 1 || directEpisodes.isNotEmpty()
-
-        if (!isSeries) {
-            return newMovieLoadResponse(
-                name = title,
-                url = pageUrl,
-                type = TvType.Movie,
-                dataUrl = pageUrl
-            ) {
-                this.posterUrl = poster
-                this.backgroundPosterUrl = poster
-                this.plot = plot
-                this.year = year
-                this.tags = tags
-                this.rating = rating
-                this.recommendations = recommendations // <-- إضافة التوصيات هنا
-            }
-        }
-
-        val sortedSeasons = seasonsMap.values.sortedBy { getSeasonNumber(it.first) }
-        val allEpisodes = mutableListOf<Episode>()
-        val docCache = mutableMapOf(pageUrl to mainDoc)
-
-        for ((seasonName, seasonUrl) in sortedSeasons) {
-            val seasonNumber = getSeasonNumber(seasonName)
-            val seasonDoc = docCache.getOrPut(seasonUrl) {
-                app.get(seasonUrl, headers = defaultHeaders).document
-            }
-            seasonDoc.select("div#series-episodes div.col-lg-4, div#series-episodes div.col-md-6")
-                .forEach { episodeContainer ->
-                    val episodeLink =
-                        episodeContainer.selectFirst("a[href*='/episode/']") ?: return@forEach
-                    val epUrl = episodeLink.attr("abs:href")
-                    val epName =
-                        episodeLink.selectFirst("h2")?.text()?.trim() ?: episodeLink.text().trim()
-                    val epPoster = getPoster(episodeContainer)
-                    if (epUrl.isNotBlank() && epName.isNotBlank()) {
-                        allEpisodes.add(newEpisode(epUrl) {
-                            name = epName
-                            this.season = seasonNumber
-                            this.episode = getEpisodeNumberFromString(epName)
-                            this.posterUrl = epPoster
-                        })
-                    }
-                }
-        }
-
-        if (allEpisodes.isEmpty()) {
-            return newMovieLoadResponse(
-                name = title,
-                url = pageUrl,
-                type = TvType.Movie,
-                dataUrl = pageUrl
-            ) {
-                this.posterUrl = poster
-                this.backgroundPosterUrl = poster
-                this.plot = plot
-                this.year = year
-                this.tags = tags
-                this.rating = rating
-                this.recommendations = recommendations // <-- إضافة التوصيات هنا
-            }
-        }
-
-        return newTvSeriesLoadResponse(
+    if (!isSeries) {
+        return newMovieLoadResponse(
             name = title,
             url = pageUrl,
-            type = TvType.TvSeries,
-            episodes = allEpisodes
+            type = TvType.Movie,
+            dataUrl = pageUrl
         ) {
             this.posterUrl = poster
             this.backgroundPosterUrl = poster
             this.plot = plot
             this.year = year
             this.tags = tags
-            this.rating = rating
-            this.recommendations = recommendations // <-- إضافة التوصيات هنا
+            // استخدام كائن Score لتعيين التقييم بسلامة
+            this.score = scoreValue?.let { Score(it, 10) }
+            this.recommendations = recommendations
         }
     }
+
+    val sortedSeasons = seasonsMap.values.sortedBy { getSeasonNumber(it.first) }
+    val allEpisodes = mutableListOf<Episode>()
+    val docCache = mutableMapOf(pageUrl to mainDoc)
+
+    for ((seasonName, seasonUrl) in sortedSeasons) {
+        val seasonNumber = getSeasonNumber(seasonName)
+        val seasonDoc = docCache.getOrPut(seasonUrl) {
+            app.get(seasonUrl, headers = defaultHeaders).document
+        }
+        seasonDoc.select("div#series-episodes div.col-lg-4, div#series-episodes div.col-md-6")
+            .forEach { episodeContainer ->
+                val episodeLink =
+                    episodeContainer.selectFirst("a[href*='/episode/']") ?: return@forEach
+                val epUrl = episodeLink.attr("abs:href")
+                val epName =
+                    episodeLink.selectFirst("h2")?.text()?.trim() ?: episodeLink.text().trim()
+                val epPoster = getPoster(episodeContainer)
+                if (epUrl.isNotBlank() && epName.isNotBlank()) {
+                    allEpisodes.add(newEpisode(epUrl) {
+                        name = epName
+                        this.season = seasonNumber
+                        this.episode = getEpisodeNumberFromString(epName)
+                        this.posterUrl = epPoster
+                    })
+                }
+            }
+    }
+
+    if (allEpisodes.isEmpty()) {
+        return newMovieLoadResponse(
+            name = title,
+            url = pageUrl,
+            type = TvType.Movie,
+            dataUrl = pageUrl
+        ) {
+            this.posterUrl = poster
+            this.backgroundPosterUrl = poster
+            this.plot = plot
+            this.year = year
+            this.tags = tags
+            // استخدام كائن Score لتعيين التقييم بسلامة
+            this.score = scoreValue?.let { Score(it, 10) }
+            this.recommendations = recommendations
+        }
+    }
+
+    return newTvSeriesLoadResponse(
+        name = title,
+        url = pageUrl,
+        type = TvType.TvSeries,
+        episodes = allEpisodes.distinctBy { it.data }
+    ) {
+        this.posterUrl = poster
+        this.backgroundPosterUrl = poster
+        this.plot = plot
+        this.year = year
+        this.tags = tags
+        // استخدام كائن Score لتعيين التقييم بسلامة
+        this.score = scoreValue?.let { Score(it, 10) }
+        this.recommendations = recommendations
+    }
+}
 
     private fun getSeasonNumber(seasonName: String): Int {
         val map = mapOf(
