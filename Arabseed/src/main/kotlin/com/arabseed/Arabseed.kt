@@ -300,7 +300,7 @@ class Arabseed : MainAPI() {
         val seriesUrl = doc.select(".bread__crumbs li a[href*='/selary/']")
             .lastOrNull {
                 val href = it.attr("href")
-                !href.contains("/%d8%a7%d9%84%d9%85%d9%88%d8%b3%d9%85-") && !href.contains("/%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-")
+                !href.contains("/%d8%a7%d9%84%d9%85%d9%88%d8%b3%d9%85-") && !href.contains("/%d8%a7%d9%84%d8%ad%d9%84%d9%8%d8%a9-")
             }
             ?.attr("href")?.toAbsolute()
             ?: url.substringBefore("/%d8%a7%d9%84%d9%85%d9%88%d8%b3%d9%85-").substringBefore("/%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-").toAbsolute()
@@ -340,7 +340,6 @@ class Arabseed : MainAPI() {
         val seasonsListDiv = seriesDoc.selectFirst("div#seasons__list")
         val episodeElements = doc.select("ul.episodes__list li a")
 
-
         val isTvSeries = seasonsListDiv != null || episodeElements.isNotEmpty()
 
         if (isTvSeries) {
@@ -373,7 +372,8 @@ class Arabseed : MainAPI() {
                     .let { Regex("""['"]csrf__token['"]\s*:\s*['"]([^'"]+)['"]""").find(it)?.groupValues?.get(1) }
 
                 if (!csrfToken.isNullOrBlank()) {
-                    val parallelEpisodes = otherSeasonsElements.apmap { seasonEl ->
+                    // تم التعديل هنا لضمان التوافقية والسلامة من القيم الفارغة باستخدام amap
+                    val parallelEpisodes = otherSeasonsElements?.amap { seasonEl ->
                         val seasonId = seasonEl.attr("data-term").trim()
                         val seasonName = seasonEl.selectFirst("span")?.text()?.trim() ?: ""
                         val seasonNum = Regex("""\d+""").find(seasonName)?.value?.toIntOrNull()
@@ -430,7 +430,11 @@ class Arabseed : MainAPI() {
                         }
                         currentSeasonEpisodes.reversed()
                     }
-                    episodes.addAll(parallelEpisodes.flatten())
+
+                    // دمج الحلقات المستخرجة بأمان بعد التحقق من عدم كون القائمة فارغة
+                    parallelEpisodes?.flatten()?.let {
+                        episodes.addAll(it)
+                    }
                 } else {
                     Log.e(name, "CRITICAL: CSRF token not found for AJAX seasons request.")
                 }
@@ -448,7 +452,7 @@ class Arabseed : MainAPI() {
             }
 
         } else {
-            // هذا الجزء خاص بالأفلام (مثل Boulevard)
+            // هذا الجزء خاص بالأفلام
             Log.i(name, "Content identified as Movie")
             return newMovieLoadResponse(title, url, TvType.Movie, url) {
                 this.posterUrl = poster?.takeIf { it.isNotBlank() }
