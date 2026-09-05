@@ -62,66 +62,69 @@ class Aflaam : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse? {
-        val document = app.get(url).document
+    val document = app.get(url).document
 
-        val title = document.selectFirst("h1.font-size-44")?.text()?.trim() ?: return null
-        val posterUrl = document.selectFirst("a.movie-poster > img")?.attr("src")?.let { fixUrl(it) }
-        val plot = document.selectFirst("div#movie-tab-2 div.widget-body > p")?.text()?.trim()
+    val title = document.selectFirst("h1.font-size-44")?.text()?.trim() ?: return null
+    val posterUrl = document.selectFirst("a.movie-poster > img")?.attr("src")?.let { fixUrl(it) }
+    val plot = document.selectFirst("div#movie-tab-2 div.widget-body > p")?.text()?.trim()
 
-        val yearText = document.select("div.movie-container > div.d-flex")
-            .find { it.text().contains("سنة الإنتاج") }?.text()
-        val year = yearText?.substringAfter(":")?.trim()?.toIntOrNull()
+    val yearText = document.select("div.movie-container > div.d-flex")
+        .find { it.text().contains("سنة الإنتاج") }?.text()
+    val year = yearText?.substringAfter(":")?.trim()?.toIntOrNull()
 
-        val tags = document.select("a.movie-category").map { it.text() }
-        val rating = document.selectFirst("span.font-size-24")?.text()?.toRatingInt()
+    val tags = document.select("a.movie-category").map { it.text() }
+    
+    // 1. استخراج التقييم كـ Double بدلاً من toRatingInt() المهملة
+    val scoreValue = document.selectFirst("span.font-size-24")?.text()?.toDoubleOrNull()
 
-        // إصلاح خطأ ActorData
-        // داخل دالة load
-        val cast = document.select("div.entry-box-2 a").mapNotNull {
-            val name = it.selectFirst("h3.entry-name")?.text() ?: return@mapNotNull null
-            val image = it.selectFirst("img")?.attr("src")?.let { src -> fixUrl(src) }
-            // نستخدم كلاس Actor مباشرة
-            Actor(name, image)
+    // إصلاح خطأ ActorData
+    val cast = document.select("div.entry-box-2 a").mapNotNull {
+        val name = it.selectFirst("h3.entry-name")?.text() ?: return@mapNotNull null
+        val image = it.selectFirst("img")?.attr("src")?.let { src -> fixUrl(src) }
+        // نستخدم كلاس Actor مباشرة
+        Actor(name, image)
+    }
+
+    val trailerUrl = document.selectFirst("div#movie-tab-3 iframe")?.attr("src")
+
+    if (url.contains("/series/")) {
+        val episodes = document.select("div#movie-tab-1 div.entry-box-3").mapNotNull {
+            val epLink = it.selectFirst("a")?.attr("href")?.let { href -> fixUrl(href) } ?: return@mapNotNull null
+            val epTitleFull = it.selectFirst("h3.entry-title")?.text()
+            val epNum = it.selectFirst("span.font-size-50")?.text()?.toIntOrNull()
+            val epName = epTitleFull?.replaceFirst(Regex("^\\d+"), "")?.trim()
+            val epThumb = it.selectFirst("img")?.attr("src")?.let { src -> fixUrl(src) }
+
+            newEpisode(epLink) {
+                this.name = epName
+                this.episode = epNum
+                this.posterUrl = epThumb
+            }
+        }.reversed()
+
+        return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
+            this.posterUrl = posterUrl
+            this.year = year
+            this.plot = plot
+            this.tags = tags
+            // 2. استخدام التحديث الجديد للتقييم
+            this.score = Score.from10(scoreValue)
+            addActors(cast) // استخدام الدالة المساعدة
+            addTrailer(trailerUrl)
         }
-
-        val trailerUrl = document.selectFirst("div#movie-tab-3 iframe")?.attr("src")
-
-        if (url.contains("/series/")) {
-            val episodes = document.select("div#movie-tab-1 div.entry-box-3").mapNotNull {
-                val epLink = it.selectFirst("a")?.attr("href")?.let { href -> fixUrl(href) } ?: return@mapNotNull null
-                val epTitleFull = it.selectFirst("h3.entry-title")?.text()
-                val epNum = it.selectFirst("span.font-size-50")?.text()?.toIntOrNull()
-                val epName = epTitleFull?.replaceFirst(Regex("^\\d+"), "")?.trim()
-                val epThumb = it.selectFirst("img")?.attr("src")?.let { src -> fixUrl(src) }
-
-                newEpisode(epLink) {
-                    this.name = epName
-                    this.episode = epNum
-                    this.posterUrl = epThumb
-                }
-            }.reversed()
-
-            return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
-                this.posterUrl = posterUrl
-                this.year = year
-                this.plot = plot
-                this.tags = tags
-                this.rating = rating
-                addActors(cast) // استخدام الدالة المساعدة
-                addTrailer(trailerUrl)
-            }
-        } else {
-            return newMovieLoadResponse(title, url, TvType.Movie, url) {
-                this.posterUrl = posterUrl
-                this.year = year
-                this.plot = plot
-                this.tags = tags
-                this.rating = rating
-                addActors(cast) // استخدام الدالة المساعدة
-                addTrailer(trailerUrl)
-            }
+    } else {
+        return newMovieLoadResponse(title, url, TvType.Movie, url) {
+            this.posterUrl = posterUrl
+            this.year = year
+            this.plot = plot
+            this.tags = tags
+            // 3. استخدام التحديث الجديد للتقييم
+            this.score = Score.from10(scoreValue)
+            addActors(cast) // استخدام الدالة المساعدة
+            addTrailer(trailerUrl)
         }
     }
+}
 
     override suspend fun loadLinks(
         data: String,
