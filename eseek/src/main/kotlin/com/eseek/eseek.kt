@@ -1,7 +1,6 @@
 package com.eseek
 
 import android.util.Base64
-import com.google.gson.Gson
 import java.net.URLDecoder
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
@@ -21,6 +20,7 @@ import java.net.URI
 import kotlin.collections.component1
 import kotlin.collections.component2
 import kotlin.collections.forEach
+import com.fasterxml.jackson.annotation.JsonProperty // استيراد Jackson لتأمين فك البيانات
 
 class GessehProvider : MainAPI() {
     override var mainUrl = "https://qeseh.net"
@@ -326,13 +326,6 @@ class GessehProvider : MainAPI() {
         return null
     }
 
-
-
-
-    // تأكد من وجود هذه الاستيرادات في أعلى الملف
-
-// ... باقي الاستيرادات الخاصة بك ...
-
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -461,14 +454,12 @@ class GessehProvider : MainAPI() {
         return true
     }
 
-    // === التعديل الجوهري هنا: إرجاع Dailymotion لكي لا يكون null ===
     private fun buildEmbedUrl(serverName: String, serverId: String): String? {
         val lower = serverName.lowercase()
         return when {
             lower.contains("youtube_in") || lower.contains("youtube-in") -> "https://www.youtube.com/embed/$serverId"
             lower.contains("youtube") -> "https://www.youtube.com/embed/$serverId"
             lower == "express" -> serverId
-            // إضافة Dailymotion هنا ليتم التقاطه في processLink
             lower.contains("daily") || lower.contains("dailymotion") -> "https://www.dailymotion.com/embed/video/$serverId"
             lower.contains("facebook") -> "https://app.videas.fr/embed/media/$serverId"
             lower.contains("estream") -> "https://arabveturk.com/embed-$serverId.html"
@@ -556,9 +547,6 @@ class GessehProvider : MainAPI() {
         }
     }
 
-    // --------------------------------------------------------
-// المستخرج المخصص الخاص بك يجب أن يكون خارج GessehProvider (أو كـ inner class)
-// --------------------------------------------------------
     class QesehDailymotionExtractor : ExtractorApi() {
         override val mainUrl = "https://www.dailymotion.com"
         override val name = "Dailymotion (Qeseh)"
@@ -576,11 +564,10 @@ class GessehProvider : MainAPI() {
             val id = getVideoId(embedUrl) ?: return
             val metaDataUrl = "$baseUrl/player/metadata/video/$id"
 
-            // نثبت الريفير دائماً على دومين الموقع الأصلي لتجاوز الحماية
             val response = app.get(metaDataUrl, referer = "https://qeseh.net/").text
 
-            val gson = Gson()
-            val meta = gson.fromJson(response, MetaData::class.java)
+            // تم استبدال Gson بـ parseJson المعتمدة رسمياً في Jackson
+            val meta = parseJson<MetaData>(response)
 
             meta.qualities?.get("auto")?.forEach { quality ->
                 val videoUrl = quality.url
@@ -614,11 +601,20 @@ class GessehProvider : MainAPI() {
         }
 
         data class MetaData(
-            val qualities: Map<String, List<Quality>>?,
-            val subtitles: SubtitlesWrapper?
+            @JsonProperty("qualities") val qualities: Map<String, List<Quality>>?,
+            @JsonProperty("subtitles") val subtitles: SubtitlesWrapper?
         )
-        data class Quality(val type: String?, val url: String?)
-        data class SubtitlesWrapper(val enable: Boolean, val data: Map<String, SubtitleData>?)
-        data class SubtitleData(val label: String, val urls: List<String>)
+        data class Quality(
+            @JsonProperty("type") val type: String?,
+            @JsonProperty("url") val url: String?
+        )
+        data class SubtitlesWrapper(
+            @JsonProperty("enable") val enable: Boolean,
+            @JsonProperty("data") val data: Map<String, SubtitleData>?
+        )
+        data class SubtitleData(
+            @JsonProperty("label") val label: String,
+            @JsonProperty("urls") val urls: List<String>
+        )
     }
-    }
+}
