@@ -123,7 +123,7 @@ class animerco : MainAPI() {
                 toSearchResponse(it)
             }.let { if (it.isNotEmpty()) homePageList.add(HomePageList("آخر الأفلام المضافة", it)) }
 
-        return HomePageResponse(homePageList)
+        return newHomePageResponse(homePageList)
     }
 
     // ضع هذه التعريفات في أعلى class animerco (قبل استخدامهم)
