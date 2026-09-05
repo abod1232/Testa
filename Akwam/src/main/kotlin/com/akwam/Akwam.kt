@@ -189,7 +189,7 @@ class Akwam : MainAPI() {
     val plot = mainDoc.selectFirst("h2:contains(قصة المسلسل) + div > p")?.text()?.trim()
         ?: mainDoc.selectFirst("meta[name=description]")?.attr("content")?.trim()
 
-    // استخراج قيمة التقييم الرقمية كـ Double
+    // استخراج قيمة التقييم كـ Double
     val scoreValue = mainDoc.selectFirst("span.mx-2:contains(/)")
         ?.text()?.substringAfter("/")?.trim()?.toDoubleOrNull()
 
@@ -242,8 +242,8 @@ class Akwam : MainAPI() {
             this.plot = plot
             this.year = year
             this.tags = tags
-            // استخدام الدالة التوسيعية المعتمدة toScore()
-            this.score = scoreValue?.toScore()
+            // استدعاء صريح ومباشر للكائن المرافق (Companion Object)
+            this.score = scoreValue?.let { Score.Companion.invoke(it, 10) }
             this.recommendations = recommendations
         }
     }
@@ -288,8 +288,8 @@ class Akwam : MainAPI() {
             this.plot = plot
             this.year = year
             this.tags = tags
-            // استخدام الدالة التوسيعية المعتمدة toScore()
-            this.score = scoreValue?.toScore()
+            // استدعاء صريح ومباشر للكائن المرافق (Companion Object)
+            this.score = scoreValue?.let { Score.Companion.invoke(it, 10) }
             this.recommendations = recommendations
         }
     }
@@ -305,8 +305,8 @@ class Akwam : MainAPI() {
         this.plot = plot
         this.year = year
         this.tags = tags
-        // استخدام الدالة التوسيعية المعتمدة toScore()
-        this.score = scoreValue?.toScore()
+        // استدعاء صريح ومباشر للكائن المرافق (Companion Object)
+        this.score = scoreValue?.let { Score.Companion.invoke(it, 10) }
         this.recommendations = recommendations
     }
 }
