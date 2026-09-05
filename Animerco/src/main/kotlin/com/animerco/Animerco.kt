@@ -233,7 +233,7 @@ class animerco : MainAPI() {
             val plot = doc.selectFirst("div.media-story div.content p")?.text()
             val tags = doc.select("div.genres a").map { it.text() }
             val year = doc.select("ul.media-info li:contains(بداية العرض) a").text().toIntOrNull()
-            val rating = doc.selectFirst("div.votes span.score")?.text()?.toRatingInt()
+            val scoreValue = doc.selectFirst("div.votes span.score")?.text()?.toRatingInt()
 
             // أقوى كشف للفيلم: نص النوع أو URL يحتوي /movies/ أو /movie/
             val typeText = doc.select("div.media-info li:contains(النوع) span").text()
@@ -254,7 +254,7 @@ class animerco : MainAPI() {
                     this.plot = plot
                     this.tags = tags
                     this.year = year
-                    this.rating = rating
+                    this.score = Score.from10(scoreValue)
                 }
             }
 
@@ -311,7 +311,7 @@ class animerco : MainAPI() {
                     this.plot = plot
                     this.tags = tags
                     this.year = year
-                    this.rating = rating
+                    this.score = Score.from10(scoreValue)
                 }
             }
 
@@ -341,7 +341,7 @@ class animerco : MainAPI() {
                 this.plot = plot
                 this.tags = tags
                 this.year = year
-                this.rating = rating
+                this.score = Score.from10(scoreValue)
             }
         } catch (e: Exception) {
             Log.e("AnimercoLoad", "load failed: ${e.message}", e)
