@@ -127,43 +127,44 @@ class Aflaam : MainAPI() {
 }
 
     override suspend fun loadLinks(
-        data: String,
-        isCasting: Boolean,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean {
-        val document = app.get(data).document
-        val watchPageLinks = document.select("div.qualities a.link-show").map {
-            fixUrl(it.attr("href"))
-        }
-
-        var linksLoaded = false
-        watchPageLinks.apmap { watchUrl ->
-            try {
-                val watchPageDoc = app.get(watchUrl).document
-                watchPageDoc.select("video#player source").forEach { source ->
-                    val src = source.attr("src")
-                    if (src.isNotBlank()) {
-                        val qualityName = source.attr("size").ifEmpty { "720" }
-
-                        // إصلاح خطأ ExtractorLink و tryParse
-                        callback.invoke(
-                            newExtractorLink(
-                                source = this.name,
-                                name = "${this.name} - ${qualityName}p",
-                                url = src,
-                            ) {
-                                referer = mainUrl
-                                quality = qualityName.toIntOrNull() ?: Qualities.Unknown.value
-                            }
-                        )
-                        linksLoaded = true
-                    }
-                }
-            } catch (e: Exception) {
-                // error logging
-            }
-        }
-        return linksLoaded
+    data: String,
+    isCasting: Boolean,
+    subtitleCallback: (SubtitleFile) -> Unit,
+    callback: (ExtractorLink) -> Unit
+): Boolean {
+    val document = app.get(data).document
+    val watchPageLinks = document.select("div.qualities a.link-show").map {
+        fixUrl(it.attr("href"))
     }
+
+    var linksLoaded = false
+    // تم استبدال apmap بـ amap الآمنة وغير الحاظرة للمسارات
+    watchPageLinks.amap { watchUrl ->
+        try {
+            val watchPageDoc = app.get(watchUrl).document
+            watchPageDoc.select("video#player source").forEach { source ->
+                val src = source.attr("src")
+                if (src.isNotBlank()) {
+                    val qualityName = source.attr("size").ifEmpty { "720" }
+
+                    // إصلاح خطأ ExtractorLink و tryParse
+                    callback.invoke(
+                        newExtractorLink(
+                            source = this.name,
+                            name = "${this.name} - ${qualityName}p",
+                            url = src,
+                        ) {
+                            referer = mainUrl
+                            quality = qualityName.toIntOrNull() ?: Qualities.Unknown.value
+                        }
+                    )
+                    linksLoaded = true
+                }
+            }
+        } catch (e: Exception) {
+            // error logging
+        }
+    }
+    return linksLoaded
+}
 }
