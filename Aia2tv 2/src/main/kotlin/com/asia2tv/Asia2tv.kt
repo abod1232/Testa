@@ -29,7 +29,7 @@ class Asia2tvProvider : MainAPI() {
             Pair("$mainUrl/completed-dramas/", "دراما مكتملة")
         )
 
-        val items = urls.apmap { (url, name) ->
+        val items = urls.amap { (url, name) ->
             val pageUrl = if (page > 1) "$url/page/$page/" else url
             val soup = app.get(pageUrl).document
             val home = soup.select("div.box-item").mapNotNull {
@@ -44,7 +44,7 @@ class Asia2tvProvider : MainAPI() {
             }
             HomePageList(name, home)
         }
-        return HomePageResponse(items.filter { it.list.isNotEmpty() })
+        return newHomePageResponse(items.filter { it.list.isNotEmpty() })
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
@@ -145,7 +145,7 @@ class Asia2tvProvider : MainAPI() {
             it.attr("data-server")
         }
 
-        serverUrls.apmap { url ->
+        serverUrls.amap { url ->
             loadExtractor(url, mainUrl, subtitleCallback, callback)
         }
         return true
