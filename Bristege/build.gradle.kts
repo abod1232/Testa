@@ -1,44 +1,26 @@
+version = 33
 
-plugins {
-    id("com.android.library")
-    id("org.jetbrains.kotlin.android")
-}
-//m
-repositories {
-    mavenCentral()
-    maven { url = uri("https://jitpack.io") }
-}
+cloudstream {
+    //language = "hi"
+    // All of these properties are optional, you can safely remove them
 
-android {
-    namespace = "com.arabseed"
-    compileSdk = 34
+    description = "Includes Topmovies"
+     authors = listOf("megix")
 
-    defaultConfig {
-        minSdk = 21
-    }
+    /**
+     * Status int as the following:
+     * 0: Down
+     * 1: Ok
+     * 2: Slow
+     * 3: Beta only
+     * */
+    status = 1 // will be 3 if unspecified
+    tvTypes = listOf(
+        "TvSeries",
+        "Movie",
+        "AsianDrama",
+        "Anime"
+    )
 
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
-    }
-}
-
-kotlin {
-    compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_1_8)
-        freeCompilerArgs.add("-XXLanguage:+BreakContinueInInlineLambdas")
-    }
-}
-
-
-dependencies {
-    // FIXME remove this when crossplatform is fully supported
-    val cloudstream by configurations
-    implementation("com.google.android.material:material:1.13.0")
-    implementation("androidx.browser:browser:1.9.0")
-    implementation("androidx.room:room-ktx:2.8.0")
-    testImplementation("junit:junit:4.13.2")
-        cloudstream("com.lagradost:cloudstream3:pre-release")
-
-
+    iconUrl = "https://github.com/SaurabhKaperwan/CSX/raw/refs/heads/master/Moviesmod/icon.png"
 }
