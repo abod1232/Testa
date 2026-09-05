@@ -191,7 +191,6 @@ class animerco : MainAPI() {
 
 
 
-    // ------------------ LOAD ------------------
     override suspend fun load(url: String): LoadResponse? {
         fun normalizeUrl(u: String?): String? {
             if (u.isNullOrBlank()) return null
@@ -233,7 +232,7 @@ class animerco : MainAPI() {
             val plot = doc.selectFirst("div.media-story div.content p")?.text()
             val tags = doc.select("div.genres a").map { it.text() }
             val year = doc.select("ul.media-info li:contains(بداية العرض) a").text().toIntOrNull()
-            val scoreValue = doc.selectFirst("div.votes span.score")?.text()?.toRatingInt()
+            val scoreValue = doc.selectFirst("div.votes span.score")?.text()?.toDoubleOrNull()
 
             // أقوى كشف للفيلم: نص النوع أو URL يحتوي /movies/ أو /movie/
             val typeText = doc.select("div.media-info li:contains(النوع) span").text()
