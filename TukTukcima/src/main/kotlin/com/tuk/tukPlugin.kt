@@ -1,0 +1,14 @@
+package com.tuk
+
+import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
+import com.lagradost.cloudstream3.plugins.Plugin
+import android.content.Context
+
+@CloudstreamPlugin
+class TukTukHdPlugin: Plugin() {
+    override fun load(context: Context) {
+        // تسجيل الكلاس
+        registerMainAPI(TukTukHd())
+        registerExtractorAPI(VideolandExtractor())
+    }
+}
