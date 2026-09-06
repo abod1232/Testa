@@ -16,7 +16,7 @@ import com.lagradost.cloudstream3.syncproviders.providers.OpenSubtitlesApi.Compa
 
 class eishk : MainAPI() {
     override var mainUrl = "https://3esk.onl"
-    override var name = "قصة عق"
+    override var name = "قصة عشق"
     override val supportedTypes = setOf(TvType.TvSeries, TvType.Movie)
     override var lang = "ar"
     override val hasMainPage = true
