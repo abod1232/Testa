@@ -18,14 +18,10 @@ import android.widget.Button
 import android.widget.FrameLayout
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
-
-// الكلاس الآن يرجع الرابط النهائي والكوكيز فقط
 internal data class SolverResult(val finalUrl: String, val cookies: String?)
 
 internal object CloudflareSolver {
     private const val TAG = "CF_Cookie_Hunter"
-
-    // 🚨 تم إضافة الـ User-Agent الجديد هنا
     private const val USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36"
 
     suspend fun solve(activity: Activity?, initialUrl: String, userAgent: String = USER_AGENT): SolverResult? {
@@ -56,7 +52,6 @@ internal object CloudflareSolver {
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
-                // 🚨 الكود ظاهر تماماً هنا 🚨
                 webView.alpha = 1f
                 webView.isFocusable = true
                 webView.isFocusableInTouchMode = true
@@ -102,11 +97,7 @@ internal object CloudflareSolver {
                         Log.i(TAG, "إغلاق | السبب: $reason | الرابط النهائي: $finalUrl")
 
                         cookieManager.flush()
-
-                        // سحب الكوكيز للرابط النهائي
                         val finalCookies = cookieManager.getCookie(finalUrl)
-
-                        // طباعة الكوكيز الذي تم صيده بوضوح في الـ Logs
                         if (!finalCookies.isNullOrEmpty()) {
                             Log.w(TAG, "🍪 تم صيد الكوكيز بنجاح: $finalCookies")
                         } else {
@@ -118,8 +109,6 @@ internal object CloudflareSolver {
                             rootView.removeView(container)
                             webView.destroy()
                         } catch (e: Exception) {}
-
-                        // إرجاع الرابط الجديد والكوكيز (بدون HTML)
                         continuation.resume(SolverResult(finalUrl, finalCookies))
                     }
                 }
@@ -206,7 +195,6 @@ internal object CloudflareSolver {
                     val currentCookies = cookieManager.getCookie(currentLiveUrl)
 
                     if (currentCookies != null && currentCookies.contains("cf_clearance")) {
-                        // بمجرد صيد الكوكي، أغلق فوراً!
                         finishSuccess(currentLiveUrl, "تم صيد الكوكيز بنجاح")
                         return
                     }
@@ -231,8 +219,6 @@ internal object CloudflareSolver {
                 }
 
                 rootView.addView(container)
-
-                // 🚨🚨 إضافة الهيدرات الجديدة هنا 🚨🚨
                 val customHeaders = mapOf(
                     "sec-ch-ua" to "\"Chromium\";v=\"148\", \"Google Chrome\";v=\"148\", \"Not/A)Brand\";v=\"99\"",
                     "sec-ch-ua-mobile" to "?1",
@@ -248,8 +234,6 @@ internal object CloudflareSolver {
                     "priority" to "u=0, i",
                     "User-Agent" to USER_AGENT // من الجيد تمريره ضمن الهيدرز أيضاً
                 )
-
-                // تمرير الرابط والهيدرات
                 webView.loadUrl(initialUrl, customHeaders)
             }
         }

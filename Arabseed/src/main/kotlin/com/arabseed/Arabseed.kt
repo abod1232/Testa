@@ -43,10 +43,6 @@ class Arabseed : MainAPI() {
             else -> mainUrl.trimEnd('/') + this
         }
     }
-
-    // ================== نظام تخطي كلاودفلير (التعديل الجديد) ==================
-
-    // محاولة جلب الـ Activity النشط حالياً لتمريره لـ CloudflareSolver
     @SuppressLint("DiscouragedPrivateApi", "PrivateApi")
     private fun getCurrentActivity(): Activity? {
         try {
@@ -72,16 +68,12 @@ class Arabseed : MainAPI() {
     }
 
     private fun isCloudflareBlock(code: Int, text: String): Boolean {
-        // كلاودفلير عادة يرجع 503 أو 403 للتحدي
         if (code in listOf(403, 503, 429)) return true
         val lowerText = text.lowercase()
-        // التحقق من وجود كلمات كلاودفلير في الصفحة في حال رجع 200 OK
         return lowerText.contains("cloudflare") && lowerText.contains("checking your browser") ||
                 lowerText.contains("just a moment") ||
                 lowerText.contains("cf-browser-verification")
     }
-
-    // الهيدرات الأساسية التي تجعل طلبك مطابقاً تماماً لمتصفح حقيقي (نفس التي استخدمناها في WebView)
     private val browserHeaders = mapOf(
         "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
         "Accept-Language" to "ar-EG,ar;q=0.9",
@@ -97,18 +89,9 @@ class Arabseed : MainAPI() {
 
     private suspend fun applyCookiesAndAgent(url: String, originalHeaders: Map<String, String>): Map<String, String> {
         val newHeaders = mutableMapOf<String, String>()
-
-        // 1. إضافة جميع هيدرات المتصفح الحقيقي أولاً
         newHeaders.putAll(browserHeaders)
-
-        // 2. إضافة أي هيدرات إضافية تم تمريرها (مثل X-Requested-With في طلبات الـ AJAX)
         newHeaders.putAll(originalHeaders)
-
-        // 3. توحيد الـ User-Agent ليكون مطابقاً للسولفر
         newHeaders["User-Agent"] = appUserAgent
-
-        // 4. جلب جميع الكوكيز المحفوظة في النظام بدون استثناء
-        // نستخدم mainUrl لضمان جلب كوكيز النطاق الرئيسي (Domain) بالكامل حتى لو كان الرابط فرعياً
         val cookiesUrl = if (url.contains(mainUrl)) url else mainUrl
         val allCookies = CookieManager.getInstance().getCookie(cookiesUrl)
 
@@ -125,20 +108,14 @@ class Arabseed : MainAPI() {
 
         if (isCloudflareBlock(response.code, response.text)) {
             Log.w(name, "Cloudflare detected on GET: $url (Code: ${response.code}). Waiting for lock...")
-
-            // استخدام القفل لمنع فتح السولفر أكثر من مرة في نفس الوقت
             solverMutex.withLock {
-                // بعد الدخول للقفل، نتحقق مرة أخرى: هل قام طلب آخر بحل المشكلة أثناء انتظارنا؟
                 currentHeaders = applyCookiesAndAgent(url, headers)
                 response = app.get(url, referer = referer, headers = currentHeaders, allowRedirects = true)
-
-                // إذا لا يزال محظوراً، نفتح السولفر
                 if (isCloudflareBlock(response.code, response.text)) {
                     Log.w(name, "Still blocked. Triggering Solver for GET...")
                     val activity = getCurrentActivity()
                     if (activity != null) {
                         CloudflareSolver.solve(activity, url)
-                        // بعد الحل، نحدث الكوكيز ونجرب الطلب النهائي
                         currentHeaders = applyCookiesAndAgent(url, headers)
                         response = app.get(url, referer = referer, headers = currentHeaders, allowRedirects = true)
                     } else {
@@ -158,20 +135,14 @@ class Arabseed : MainAPI() {
 
         if (isCloudflareBlock(response.code, response.text)) {
             Log.w(name, "Cloudflare detected on POST: $url (Code: ${response.code}). Waiting for lock...")
-
-            // استخدام القفل لمنع فتح السولفر أكثر من مرة في نفس الوقت
             solverMutex.withLock {
-                // بعد الدخول للقفل، نتحقق مرة أخرى: هل قام طلب آخر بحل المشكلة أثناء انتظارنا؟
                 currentHeaders = applyCookiesAndAgent(url, headers)
                 response = app.post(url, data = data, referer = referer, headers = currentHeaders, allowRedirects = true)
-
-                // إذا لا يزال محظوراً، نفتح السولفر
                 if (isCloudflareBlock(response.code, response.text)) {
                     Log.w(name, "Still blocked. Triggering Solver for POST...")
                     val activity = getCurrentActivity()
                     if (activity != null) {
                         CloudflareSolver.solve(activity, url)
-                        // بعد الحل، نحدث الكوكيز ونجرب الطلب النهائي
                         currentHeaders = applyCookiesAndAgent(url, headers)
                         response = app.post(url, data = data, referer = referer, headers = currentHeaders, allowRedirects = true)
                     } else {
@@ -184,11 +155,8 @@ class Arabseed : MainAPI() {
         }
         return response
     }
-    // ================== البحث (التعديل الجديد) ==================
     override suspend fun search(query: String): List<SearchResponse> {
         val homeUrl = "$mainUrl/home/"
-
-        // 1. جلب الصفحة الرئيسية لاستخراج الـ csrf_token بشكل ديناميكي
         val homeResponse = safeGet(homeUrl)
         val homeDoc = homeResponse.document
         val csrfToken = homeDoc.select("script").html()
@@ -198,8 +166,6 @@ class Arabseed : MainAPI() {
             Log.e(name, "CRITICAL: CSRF token not found during search.")
             return emptyList()
         }
-
-        // 2. إرسال طلب البحث (POST) محاكياً الطلب المرفق
         val searchResponse = safePost(
             "$mainUrl/find__posts/",
             data = mapOf(
@@ -216,8 +182,6 @@ class Arabseed : MainAPI() {
 
         val html = searchResponse?.html
         if (html.isNullOrBlank()) return emptyList()
-
-        // 3. تحليل النتائج المسترجعة داخل الـ HTML
         val doc = Jsoup.parse(html)
         return doc.select("ul.res__ul > li").amap { li ->
             val a = li.selectFirst("a.search__item") ?: return@amap null
@@ -227,8 +191,6 @@ class Arabseed : MainAPI() {
             val posterUrl = a.selectFirst("img")?.let { img ->
                 (img.attr("data-src").ifBlank { img.attr("src") }).toAbsolute()
             }
-
-            // تحديد نوع العمل بشكل ذكي من وسوم التصنيفات المدمجة بالنتائج
             val tagsText = li.select("ul li").text()
             val isMovie = href.contains("/%d9%81%d9%8a%d9%84%d9%85-") ||
                     href.contains("/film-") ||
@@ -245,7 +207,6 @@ class Arabseed : MainAPI() {
             }
         }.filterNotNull()
     }
-    // ================== الصفحة الرئيسية ==================
     override val mainPage = mainPageOf(
         "$mainUrl/home/" to "الرئيسية",
         "$mainUrl/recently/" to "مضاف حديثا",
@@ -257,7 +218,6 @@ class Arabseed : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = if (page > 1) "${request.data}page/$page/" else request.data
-        // استخدام safeGet بدلاً من app.get
         val document = safeGet(url).document
         val items = document.select(".movie__block").amap {
             val title = it.selectFirst("h3")?.text() ?: return@amap null
@@ -282,12 +242,8 @@ class Arabseed : MainAPI() {
     override suspend fun load(url: String): LoadResponse {
         Log.i(name, "================ LOAD START ================ ")
         Log.d(name, "load() initiated with URL: $url")
-
-        // 1. جلب الصفحة الأولى والاحتفاظ بالاستجابة لمعرفة الرابط النهائي
         val initialResponse = safeGet(url)
         val doc = initialResponse.document
-
-        // 2. إعداد rightLink مبدئياً من الرابط النهائي للصفحة الأولى
         var rightLink = mainUrl
         try {
             val urlObj = java.net.URL(initialResponse.url)
@@ -295,8 +251,6 @@ class Arabseed : MainAPI() {
         } catch (e: Exception) {
             Log.d(name, "Failed to parse initial rightLink: ${e.message}")
         }
-
-        // استخلاص الرابط الرئيسي للمسلسل من breadcrumbs
         val seriesUrl = doc.select(".bread__crumbs li a[href*='/selary/']")
             .lastOrNull {
                 val href = it.attr("href")
@@ -359,10 +313,6 @@ class Arabseed : MainAPI() {
                     this.posterUrl = poster?.takeIf { it.isNotBlank() }
                 })
             }
-
-            // ==========================================
-            // 2. جلب باقي المواسم (عبر AJAX)
-            // ==========================================
             val otherSeasonsElements = seasonsListDiv?.select("ul li[data-term]")
 
             if (!otherSeasonsElements.isNullOrEmpty()) {
@@ -372,7 +322,6 @@ class Arabseed : MainAPI() {
                     .let { Regex("""['"]csrf__token['"]\s*:\s*['"]([^'"]+)['"]""").find(it)?.groupValues?.get(1) }
 
                 if (!csrfToken.isNullOrBlank()) {
-                    // تم التعديل هنا لضمان التوافقية والسلامة من القيم الفارغة باستخدام amap
                     val parallelEpisodes = otherSeasonsElements?.amap { seasonEl ->
                         val seasonId = seasonEl.attr("data-term").trim()
                         val seasonName = seasonEl.selectFirst("span")?.text()?.trim() ?: ""
@@ -430,8 +379,6 @@ class Arabseed : MainAPI() {
                         }
                         currentSeasonEpisodes.reversed()
                     }
-
-                    // دمج الحلقات المستخرجة بأمان بعد التحقق من عدم كون القائمة فارغة
                     parallelEpisodes?.flatten()?.let {
                         episodes.addAll(it)
                     }
@@ -452,7 +399,6 @@ class Arabseed : MainAPI() {
             }
 
         } else {
-            // هذا الجزء خاص بالأفلام
             Log.i(name, "Content identified as Movie")
             return newMovieLoadResponse(title, url, TvType.Movie, url) {
                 this.posterUrl = poster?.takeIf { it.isNotBlank() }
@@ -475,12 +421,9 @@ class Arabseed : MainAPI() {
         Log.i(name, "Input data URL: $data")
 
         try {
-            // 1. جلب الصفحة الرئيسية للفيلم/الحلقة
             var watchUrl = data
             val mainPageResponse = safeGet(data)
             val mainPageDoc = mainPageResponse.document
-
-            // التحقق مما إذا كان هناك زر "للمشاهدة" للانتقال إليه
             val watchBtnUrl = mainPageDoc.selectFirst("a.btton.watch__btn")?.attr("href")
             val watchPageDoc = if (!watchBtnUrl.isNullOrBlank()) {
                 watchUrl = if (watchBtnUrl.startsWith("http")) watchBtnUrl else "$mainUrl$watchBtnUrl"
@@ -497,12 +440,8 @@ class Arabseed : MainAPI() {
                 val urlObj = java.net.URL(finalResolvedWatchUrl)
                 rightLink = "${urlObj.protocol}://${urlObj.host}"
             } catch (e: Exception) {}
-
-            // 2. استخراج توكن الحماية (CSRF Token)
             val csrfToken = watchPageDoc.select("script").html()
                 .let { Regex("""['"]csrf__token['"]\s*:\s*['"]([^'"]+)['"]""").find(it)?.groupValues?.get(1) }
-
-            // 3. استخراج جميع السيرفرات المتاحة من الكود الجديد
             val serverElements = watchPageDoc.select(".servers__list li")
 
             if (serverElements.isEmpty()) {
@@ -511,23 +450,18 @@ class Arabseed : MainAPI() {
             }
 
             Log.i(name, "Found ${serverElements.size} servers. Processing...")
-
-            // استخدام amap للبحث في جميع السيرفرات في نفس الوقت لتقليل وقت التحميل
             serverElements.amap { serverEl ->
                 val serverName = serverEl.selectFirst("span")?.text()?.trim() ?: "عرب سيد"
                 val quality = serverEl.attr("data-qu").ifBlank { "1080" }
                 val postId = serverEl.attr("data-post")
                 val serverId = serverEl.attr("data-server")
                 var playerUrl = serverEl.attr("data-player-url").trim()
-
-                // الحالة الأولى: الرابط موجود مباشرة في HTML (مثل السيرفر الرئيسي لعرب سيد)
                 if (playerUrl.isNotBlank()) {
                     Log.i(name, "Direct URL found for server: $serverName")
                     playerUrl = playerUrl.replace("m.arabseed.me", "m.reviewrate.net")
                     val finalUrl = "$playerUrl#quality=$quality"
                     loadExtractor(finalUrl, finalResolvedWatchUrl, subtitleCallback, callback)
                 }
-                // الحالة الثانية: الرابط غير موجود ونحتاج لطلبه عبر الـ AJAX
                 else if (postId.isNotBlank() && serverId.isNotBlank() && !csrfToken.isNullOrBlank()) {
                     Log.i(name, "Fetching AJAX URL for server: $serverName")
                     val watchAjaxUrl = "$rightLink/get__watch__server/"
@@ -549,7 +483,6 @@ class Arabseed : MainAPI() {
                         var ajaxIframeUrl = serverResponse?.server
 
                         if (!ajaxIframeUrl.isNullOrBlank()) {
-                            // فك تشفير Base64 إذا كان الرابط مخفياً خلف play.php
                             if (ajaxIframeUrl.contains("/play.php?url=")) {
                                 try {
                                     val encodedUrl = ajaxIframeUrl.substringAfter("url=")
@@ -561,8 +494,6 @@ class Arabseed : MainAPI() {
                                     Log.e(name, "Failed to decode base64 URL", e)
                                 }
                             }
-
-                            // استبدال النطاقات القديمة بالجديدة إن وجدت
                             ajaxIframeUrl = ajaxIframeUrl.replace("m.arabseed.me", "m.reviewrate.net")
 
                             val finalUrl = "$ajaxIframeUrl#quality=$quality"

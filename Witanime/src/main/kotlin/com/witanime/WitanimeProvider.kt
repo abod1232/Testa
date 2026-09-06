@@ -58,26 +58,18 @@ class WitAnime : MainAPI() {
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie)
     private val userAgent =
         "Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.106 Mobile Safari/537.36"
-
-    // 🌟 كلاس حماية استاتيكي على مستوى نظام جافا (JVM) لمنع التكرار وتكديس النوافذ نهائياً
     companion object {
         @Volatile var isWebViewOpen = false
         @Volatile var lastWebViewOpenTime = 0L
         private const val DEBOUNCE_DELAY_MS = 10000L // 🌟 مهلة 10 ثوانٍ كاملة لمنع فتح نافذتين في نفس الوقت
     }
-
-    // 🌟 1. كائن مستقل ومطور بالكامل لمراقبة وإدارة مشغل الفيديو ريفلكتيفلي مع ميزة قفل حلقة المراقبة المكررة (Loop Lock)
     object PlayerAccess {
 
         private val handler = android.os.Handler(android.os.Looper.getMainLooper())
         private var isMonitoring = false
         private var lastHookedPlayer: Any? = null
         private var activeDialog: Dialog? = null
-
-        // 🌟 قفل استاتيكي صارم لمنع تشغيل أكثر من حلقة مراقبة واحدة في خلفية التطبيق كلياً
         private var isLoopStarted = false
-
-        // قفل أمان لحظي متزامن لمنع إطلاق كورتينات مكررة نهائياً أثناء الأحداث السريعة
         @Volatile var isWebViewOpen = false
 
         private val monitorRunnable = object : Runnable {
@@ -89,7 +81,6 @@ class WitAnime : MainAPI() {
         }
 
         fun startMonitoring() {
-            // 🌟 إذا كانت حلقة المراقبة تعمل بالفعل في الذاكرة، تجاهل طلب التشغيل فوراً لمنع التكرار
             if (isLoopStarted) {
                 android.util.Log.d("WitAnimeScanner", "⏭️ حلقة المراقبة تعمل بالفعل في الذاكرة، تم تجاهل الطلب المكرر.")
                 return
@@ -99,8 +90,6 @@ class WitAnime : MainAPI() {
             android.util.Log.d("WitAnimeScanner", "🚀 تم بدء تشغيل دالة مراقبة مشغل الفيديو بنجاح لأول مرة كحلقة وحيدة!")
             handler.post(monitorRunnable)
         }
-
-        // دالة تتبع شجري تبحث برمجياً داخل الحزمة الرسمية لمشغل تطبيق Cloudstream
         private fun findFragmentRecursive(fragment: androidx.fragment.app.Fragment, packageName: String): androidx.fragment.app.Fragment? {
             if (fragment.javaClass.name.startsWith(packageName)) return fragment
             try {
@@ -114,8 +103,6 @@ class WitAnime : MainAPI() {
             } catch (e: Exception) {}
             return null
         }
-
-        // جلب الـ Activity النشطة حالياً عبر نظام أندرويد ريفلكتيفلي
         fun getActiveActivity(): Activity? {
             return try {
                 val activityThreadClass = Class.forName("android.app.ActivityThread")
@@ -142,8 +129,6 @@ class WitAnime : MainAPI() {
                 null
             }
         }
-
-        // جلب الـ Fragment الخاص بالمشغل النشط حالياً ريفلكتيفلي
         fun getPlayerFragment(): Any? {
             val activity = getActiveActivity()
             if (activity == null) {
@@ -169,8 +154,6 @@ class WitAnime : MainAPI() {
                 null
             }
         }
-
-        // جلب مشغل الفيديو النشط ريفلكتيفلي
         fun currentPlayer(): Any? {
             val fragment = getPlayerFragment() as? androidx.fragment.app.Fragment ?: return null
             return try {
@@ -186,8 +169,6 @@ class WitAnime : MainAPI() {
                 }
             }
         }
-
-        // جلب الـ Context العام لنظام الأندرويد ريفلكتيفلي
         fun getAppContext(): Context? {
             return try {
                 val activityThreadClass = Class.forName("android.app.ActivityThread")
@@ -197,8 +178,6 @@ class WitAnime : MainAPI() {
                 null
             }
         }
-
-        // إيقاف مشغل الفيديو مؤقتاً ريفلكتيفلي
         fun pausePlayer() {
             val player = currentPlayer() ?: return
             try {
@@ -229,8 +208,6 @@ class WitAnime : MainAPI() {
                 e.printStackTrace()
             }
         }
-
-        // جلب مشغل ExoPlayer الحقيقي المخفي داخل كلاس الحماية وفحص الكلاسات المستبعدة كـ SimpleCache
         fun getRealExoPlayer(player: Any): Any? {
             val rootClassName = player.javaClass.name
             if (rootClassName.contains("Player", ignoreCase = true) && !rootClassName.contains("Cache", ignoreCase = true)) {
@@ -261,8 +238,6 @@ class WitAnime : MainAPI() {
             } catch (e: Exception) {}
             return null
         }
-
-        // حقن مستمع (ExoPlayer Listener) ديناميكي في الذاكرة متوافق مع كافة الإصدارات ريفلكتيفلي مع فك تشفير دوال الـ Object
         private fun hookPlayerListener() {
             val rawPlayer = currentPlayer() ?: return
             val player = getRealExoPlayer(rawPlayer) ?: return // جلب المشغل الحقيقي من داخل كلاس الحماية
@@ -285,8 +260,6 @@ class WitAnime : MainAPI() {
                     object : java.lang.reflect.InvocationHandler {
                         override fun invoke(proxy: Any, method: java.lang.reflect.Method, args: Array<out Any>?): Any? {
                             val methodName = method.name
-
-                            // معالجة دوال الجافا القياسية لتجنب الـ NullPointerException والـ Unboxing
                             if (methodName == "equals") {
                                 return proxy === (args?.get(0))
                             }
@@ -296,8 +269,6 @@ class WitAnime : MainAPI() {
                             if (methodName == "toString") {
                                 return "ExoPlayerProxyListener"
                             }
-
-                            // عند حدوث أي حدث، نفحص الرابط بشرط مرور وقت كافٍ
                             handler.post {
                                 checkMegaPlayback(player)
                             }
@@ -320,8 +291,6 @@ class WitAnime : MainAPI() {
                 android.util.Log.e("WitAnimeScanner", "❌ فشل حقن مستمع الـ ExoPlayer", e)
             }
         }
-
-        // ماسح ذاكرة متداخل يبحث ديناميكياً عن رابط mega-webview داخل كائنات المشغل
         private fun findUrlInObject(obj: Any, depth: Int = 0): String? {
             if (depth > 3) return null
             try {
@@ -360,28 +329,19 @@ class WitAnime : MainAPI() {
                 findUrlInObject(player)
             }
         }
-
-        // دالة تفحص ما إذا كان الرابط المختار هو سيرفر Mega المخصص وتطبق القفل الزمني
         private fun checkMegaPlayback(player: Any) {
             val currentTime = System.currentTimeMillis()
-
-            // قفل التزامن الحديدي على مستوى نظام جافا (Thread Synchronization)
             synchronized(WitAnime::class.java) {
-                // إذا كانت نافذة الـ WebView مفتوحة حالياً، أو لم يمر 10 ثوانٍ على إغلاق النافذة السابقة، الغي تشغيل أي نافذة أخرى فوراً!
                 if (WitAnime.isWebViewOpen || (currentTime - WitAnime.lastWebViewOpenTime) < 10000L || activeDialog?.isShowing == true) {
                     return
                 }
 
                 val playingUrl = getPlayingUrl(player) ?: return
                 if (playingUrl.contains("mega-webview://")) {
-
-                    // تفعيل أقفال الحماية والوقت فوراً وبشكل متزامن يمنع أي حدث مكرر خلفه من المرور
                     WitAnime.isWebViewOpen = true
                     WitAnime.lastWebViewOpenTime = currentTime
 
                     android.util.Log.d("WitAnimeScanner", "🎯 [هدف مكتشف!] تم اعتراض تشغيل سيرفر Mega المخصص بنجاح: $playingUrl")
-
-                    // إيقاف مشغل الفيديو الخلفي مؤقتاً
                     pausePlayer()
 
                     val realMegaUrl = playingUrl.substringAfter("mega-webview://")
@@ -394,8 +354,6 @@ class WitAnime : MainAPI() {
                 }
             }
         }
-
-        // دالة لفتح رابط Mega داخل نافذة WebView مدمجة كاملة الشاشة مع تحويل النوع لـ Activity بشكل صحيح ومضمون
         private suspend fun openMegaPlayer(megaUrl: String) {
             withContext(Dispatchers.Main) {
                 if (activeDialog?.isShowing == true) return@withContext
@@ -409,16 +367,10 @@ class WitAnime : MainAPI() {
                         activeDialog = dialog
 
                         val originalOrientation = activity.requestedOrientation
-
-                        // قفل دوران الشاشة على الوضع الأفقي الذكي
                         activity.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-
-                        // إعادة اتجاه الشاشة الافتراضي وتصفير أقفال جافا والمزامنة بمجرد إغلاق الـ WebView
                         dialog.setOnDismissListener {
                             activity.requestedOrientation = originalOrientation
                             activeDialog = null
-
-                            // تصفير الأقفال الاستاتيكية للسماح بالفتحات المستقبلية بأمان تام
                             synchronized(WitAnime::class.java) {
                                 WitAnime.isWebViewOpen = false
                                 WitAnime.lastWebViewOpenTime = System.currentTimeMillis()
@@ -448,8 +400,6 @@ class WitAnime : MainAPI() {
                         webView.loadUrl(megaUrl)
 
                         frameLayout.addView(webView)
-
-                        // إنشاء زر خروج عائم صغير دائري وأنيق (✕) في أقصى الزاوية
                         val closeButton = android.widget.Button(activity).apply {
                             text = "✕"
                             setTextColor(Color.WHITE)
@@ -873,8 +823,6 @@ class WitAnime : MainAPI() {
 
         return try {
             var html = fetchUrl(data)
-
-            // استخراج أجزاء الـ apiKey بشكل منفصل ومضمون 100% ضد تغيير طريقة الكتابة
             val m1 = Regex("""_m1\s*=\s*"([^"]+)"""").find(html)?.groupValues?.get(1) ?: ""
             val m2 = Regex("""_m2\s*=\s*"([^"]+)"""").find(html)?.groupValues?.get(1) ?: ""
             val m3 = Regex("""_m3\s*=\s*"([^"]+)"""").find(html)?.groupValues?.get(1) ?: ""
@@ -886,8 +834,6 @@ class WitAnime : MainAPI() {
                 } else {
                     "9933bd27-92ea-4ee9-807d-e612029d6318" // القيمة الافتراضية الاحتياطية
                 }
-
-            // تم التحديث إلى _zT و _zV
             var zT: String? =
                 Regex("""var\s+_zT\s*=\s*\"([^\"]+)\"""").find(html)?.groupValues?.get(1)
             var zV: String? =
@@ -984,8 +930,6 @@ class WitAnime : MainAPI() {
                 }
                 return null
             }
-
-            // 🌟 مصفوفة تزامن برمجية لتجميع روابط Mega وتأجيل إرسالها لآخر القائمة
             val megaLinksToEmit = java.util.Collections.synchronizedList(mutableListOf<ExtractorLink>())
 
             supervisorScope {
@@ -1007,7 +951,6 @@ class WitAnime : MainAPI() {
                                 if (finalLink.isNotBlank()) {
                                     if (finalLink.contains("yonaplay.net", ignoreCase = true)) {
                                         try {
-                                            // تمرير مصفوفة الـ megaLinksToEmit المؤجلة
                                             decodeYonaplayAndLoad(
                                                 finalLink,
                                                 data,
@@ -1146,8 +1089,6 @@ class WitAnime : MainAPI() {
                 if (xList3.isNotEmpty()) px_x = xList3
                 if (pMap3.isNotEmpty()) px_p.putAll(pMap3)
             }
-
-            // فك تشفير روابط التحميل وإرسالها
             val downloadLinks = decryptPx9All(px_mr, px_x, px_p)
 
             supervisorScope {
@@ -1175,9 +1116,6 @@ class WitAnime : MainAPI() {
                 }
                 dlTasks.awaitAll()
             }
-
-            // 🌟 الآن بعد انتهاء المشغل من كشط وفك ترجمة وجلب ميديافاير وكل السيرفرات الأخرى كلياً..
-            // نقوم بإرسال روابط Mega المؤجلة ليكون جلوسها في نهاية القائمة مضموناً برمجياً 100%!
             for (link in megaLinksToEmit) {
                 callback(link)
             }
@@ -1240,8 +1178,6 @@ class WitAnime : MainAPI() {
                             android.util.Base64.DEFAULT
                         )
                     ).trim()
-
-                    // 1. إذا كان جوجل درايف
                     if (decodedUrl.contains("drive.google.com/file/d/")) {
                         val fileIdMatch = Regex("""/file/d/([0-9A-Za-z_-]{10,})""").find(decodedUrl)
                         val fileId = fileIdMatch?.groupValues?.get(1)
@@ -1263,8 +1199,6 @@ class WitAnime : MainAPI() {
                             continue
                         }
                     }
-
-                    // 2. إذا كان سيرفر Dotplay
                     if (decodedUrl.contains("dotplay.net")) {
                         try {
                             val code = decodedUrl.trimEnd('/').substringAfterLast("/")
@@ -1302,10 +1236,7 @@ class WitAnime : MainAPI() {
                     }
 
                     Log.d("this", "$decodedUrl")
-
-                    // 🌟 3. إذا كان الرابط يخص Mega.nz، أرسله برابط الفيديو الصامت ليعمل في الخلفية ويفتح الـ WebView فوقه عند الضغط فقط
                     if (decodedUrl.contains("mega.nz")) {
-                        // رابط الفيديو الصامت المعتمد في Cloudstream مدمجاً بـ Hash التشفير لمنع أخطاء المشغل ومنع مص الشبكة بالخلفية كلياً
                         val dummyUrl = "https://raw.githubusercontent.com/Anarios/Cloudstream/master/app/src/main/res/raw/blank.mp4#mega-webview://$decodedUrl"
 
                         megaList.add(
@@ -1321,16 +1252,12 @@ class WitAnime : MainAPI() {
                         )
                         continue
                     }
-
-                    // 4. باقي السيرفرات العادية ترسل لـ loadExtractor
                     loadExtractor(decodedUrl, subtitleCallback, callback)
 
                 } catch (e: Exception) {
                     logError(e)
                 }
             }
-
-            // 5. إرسال جميع روابط Mega المؤجلة والمجهزة مسبقاً بالجودة المنخفضة 10
             for (link in megaList) {
                 callback(link)
             }

@@ -33,8 +33,6 @@ class CinemanaSettings : BottomSheetDialogFragment() {
                 }
                 return pref
             }
-
-            // 1. عام
             val generalCat = PreferenceCategory(context).apply { title = "عام" }
             screen.addPreference(generalCat)
 
@@ -57,8 +55,6 @@ class CinemanaSettings : BottomSheetDialogFragment() {
                 }
             }
             generalCat.addPreference(clearCachePref)
-
-            // 2. الأفلام
             val moviesCat = PreferenceCategory(context).apply { title = "الأفلام (فرز ثابت)" }
             screen.addPreference(moviesCat)
             val movieSwitches = listOf(
@@ -76,8 +72,6 @@ class CinemanaSettings : BottomSheetDialogFragment() {
                 Triple("أفلام - أبجديًا (Z-A)", "cine_mov_en_desc", false)
             )
             movieSwitches.forEach { (title, key, def) -> moviesCat.addPreference(createSwitch(title, key, def)) }
-
-            // 3. المسلسلات
             val seriesCat = PreferenceCategory(context).apply { title = "المسلسلات (فرز ثابت)" }
             screen.addPreference(seriesCat)
             val seriesSwitches = listOf(

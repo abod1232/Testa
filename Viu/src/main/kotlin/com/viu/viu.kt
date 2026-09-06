@@ -26,23 +26,15 @@ class Viu : MainAPI() {
     private val areaId = "1004" // Iraq/MENA
     private val countryCode = "IQ"
     private val languageId = "6" // Arabic
-
-    // Cache for Token
     private var cachedToken: String? = null
     private var tokenExpiry: Long = 0
     private val deviceId = UUID.randomUUID().toString()
-
-    // --- Headers ---
     private val baseHeaders = mapOf(
         "User-Agent" to "Mozilla/5.0 (Linux; Android 12)",
         "Accept" to "application/json",
         "Referer" to "https://www.viu.com/",
         "Origin" to "https://www.viu.com"
     )
-
-    // =========================================================================
-    // Auth
-    // =========================================================================
 
     private suspend fun getAuthToken(): String {
         val currentTime = System.currentTimeMillis() / 1000
@@ -87,18 +79,9 @@ class Viu : MainAPI() {
         val token = getAuthToken()
         return baseHeaders + mapOf("Authorization" to "Bearer $token")
     }
-
-    // =========================================================================
-    // 1. Main Page
-    // =========================================================================
-    // =========================================================================
-    // 1. Main Page (Home)
-    // =========================================================================
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val headers = getAuthenticatedHeaders()
         val items = ArrayList<HomePageList>()
-
-        // الرابط الذي طلبته
         val url = "$mobileApiUrl?r=/home/index" +
                 "&platform_flag_label=phone" +
                 "&language_flag_id=$languageId" +
@@ -109,16 +92,12 @@ class Viu : MainAPI() {
 
         val response = app.get(url, headers = headers).parsedSafe<ViuHomeResponse>()
         val data = response?.data ?: return newHomePageResponse(items)
-
-        // 1️⃣ معالجة البانر (Banners)
         if (!data.banners.isNullOrEmpty()) {
             val bannerItems = data.banners.mapNotNull { it.toSearchResponse() }
             if (bannerItems.isNotEmpty()) {
                 items.add(HomePageList("Featured", bannerItems))
             }
         }
-
-        // 2️⃣ معالجة الأقسام (Grids)
         data.grids?.forEach { grid ->
             val title = grid.name ?: "Unknown Category"
             val products = grid.products?.mapNotNull { it.toSearchResponse() }
@@ -130,12 +109,8 @@ class Viu : MainAPI() {
 
         return newHomePageResponse(items)
     }
-
-    // دالة مساعدة لتحويل العنصر من JSON إلى SearchResponse
     private fun ViuHomeItem.toSearchResponse(): SearchResponse? {
         val name = this.seriesName ?: this.title?.takeIf { it.isNotEmpty() } ?: this.synopsis?.split("-")?.firstOrNull() ?: "Unknown"
-
-        // ✅ التعديل هنا: نختار الصورة الأفقية أولاً
         val image = this.coverLandscapeImage
             ?: this.seriesCoverLandscapeImage
             ?: this.imageUrl // البانر عادة يكون أفقي
@@ -164,12 +139,8 @@ class Viu : MainAPI() {
     }    override suspend fun search(query: String): List<SearchResponse> {
         return search(query, 1)?.items ?: emptyList()
     }
-
-    // هذه الدالة التي تدعم التمرير لجلب المزيد (Pagination)
     override suspend fun search(query: String, page: Int): SearchResponseList? {
         val headers = getAuthenticatedHeaders()
-
-        // ✅ التعديل هنا: نمرر المتغير page بدلاً من تثبيته على 1
         val url =
             "$mobileApiUrl?platform_flag_label=web&r=/search/video" +
                     "&keyword=$query&page=$page&limit=20" +
@@ -179,10 +150,6 @@ class Viu : MainAPI() {
             .parsedSafe<ViuSearchResponse>()
 
         val results = ArrayList<SearchResponse>()
-
-        // =======================
-        // 📺 SERIES
-        // =======================
         resp?.data?.series?.forEach { item ->
             val seriesId = item.seriesId ?: item.id ?: return@forEach
             val title = item.seriesName ?: item.name ?: return@forEach
@@ -199,10 +166,6 @@ class Viu : MainAPI() {
                 }
             )
         }
-
-        // =======================
-        // 🎬 MOVIES
-        // =======================
         resp?.data?.movies?.forEach { item ->
             val productId = item.productId ?: return@forEach
             val title = item.name ?: item.title ?: return@forEach
@@ -219,10 +182,7 @@ class Viu : MainAPI() {
                 }
             )
         }
-
-        // ✅ التعديل المطلوب لإرجاع القائمة مع التحقق من وجود المزيد
         val merged = results
-        // إذا كانت القائمة غير فارغة، نفترض أن هناك المزيد (hasNext = true)
         return newSearchResponseList(merged, merged.isNotEmpty())
     }
 
@@ -230,12 +190,8 @@ class Viu : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse? {
         val headers = getAuthenticatedHeaders()
-
-        // استخراج ID من الرابط
         val uri = android.net.Uri.parse(url)
         val seriesId = uri.getQueryParameter("id") ?: return null
-
-        // رابط الـ API لجلب الحلقات
         val epUrl = "$mobileApiUrl?platform_flag_label=phone&os_flag_id=2" +
                 "&r=/vod/product-list" +
                 "&series_id=$seriesId" +
@@ -244,36 +200,24 @@ class Viu : MainAPI() {
                 "&language_flag_id=$languageId"
 
         val resp = app.get(epUrl, headers = headers).parsedSafe<ViuEpisodeListResponse>()
-
-        // القائمة موجودة داخل product_list حسب الـ JSON الجديد
         val products = resp?.data?.products ?: return null
         if (products.isEmpty()) return null
-
-        // بناء قائمة الحلقات
         val episodes = products.mapNotNull { ep ->
             val ccsId = ep.ccsProductId ?: return@mapNotNull null
             val productId = ep.productId ?: return@mapNotNull null
 
             newEpisode(ccsId) {
-                // تمرير البيانات لـ loadLinks
                 data = mapOf(
                     "ccs" to ccsId,
                     "pid" to productId
                 ).toJson()
-
-                // ✅ هنا التعديل: الاسم موجود في synopsis
-                // إذا كان فارغاً نستخدم الرقم
                 name = ep.synopsis?.trim() ?: "Episode ${ep.number}"
 
                 episode = ep.number?.toIntOrNull()
                 posterUrl = ep.coverImage
-
-                // الوصف الخاص بالحلقة (اختياري)
                 description = ep.description
             }
         }.sortedBy { it.episode }
-
-        // استخدام أول حلقة لجلب معلومات المسلسل العامة
         val first = products.firstOrNull()
         val seriesTitle = first?.seriesCategoryName ?: "Unknown Series" // أو يمكن جلبه من loadLinks لاحقاً
 
@@ -287,11 +231,6 @@ class Viu : MainAPI() {
             plot = first?.description
         }
     }
-
-
-    // =========================================================================
-    // 3. Load Links (Extract Video + Subtitles)
-    // =========================================================================
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -300,7 +239,6 @@ class Viu : MainAPI() {
     ): Boolean {
         println("[VIU-DEBUG] ================= START LOADLINKS =================")
         return try {
-            // 1️⃣ فك البيانات الأولية
             val json = AppUtils.parseJson<Map<String, String>>(data)
             val ccsId = json["ccs"] ?: return false.also { println("[VIU-DEBUG] ❌ Error: ccsId is null") }
             val productId = json["pid"] ?: return false.also { println("[VIU-DEBUG] ❌ Error: productId is null") }
@@ -313,8 +251,6 @@ class Viu : MainAPI() {
                 "Accept" to "application/json",
                 "Referer" to "https://www.viu.com/"
             )
-
-            // 2️⃣ جلب التفاصيل (Subtitle extraction)
             val detailUrl = "$mobileApiUrl?r=/vod/detail" +
                     "&product_id=$productId" +
                     "&platform_flag_label=phone" +
@@ -326,8 +262,6 @@ class Viu : MainAPI() {
             println("[VIU-DEBUG] Fetching Detail URL: $detailUrl")
 
             val rawResponse = app.get(detailUrl, headers = headers).text
-            // طباعة جزء من الرد للتأكد (اختياري)
-            // println("[VIU-DEBUG] Raw Response snippet: ${rawResponse.take(500)}")
 
             val detailResp = AppUtils.parseJson<ViuDetailResponse>(rawResponse)
             val currentProduct = detailResp.data?.currentProduct
@@ -358,8 +292,6 @@ class Viu : MainAPI() {
                     }
                 }
             }
-
-            // 3️⃣ جلب رابط الفيديو (Playback extraction)
             println("[VIU-DEBUG] Fetching Playback Stream...")
             val playUrl = "$playbackUrl?ccs_product_id=$ccsId" +
                     "&platform_flag_label=phone" +
@@ -405,22 +337,16 @@ class Viu : MainAPI() {
         }
     }
 
-    // =========================================================================
-    // Corrected Data Classes (Very Important)
-    // =========================================================================
-
     data class ViuDetailResponse(
         @JsonProperty("data") val data: ViuDetailData?
     )
 
     data class ViuDetailData(
-        // لاحظ هنا استخدام current_product كما في الـ JSON
         @JsonProperty("current_product") val currentProduct: ViuProductDetail?
     )
 
     data class ViuProductDetail(
         @JsonProperty("product_id") val productId: String?,
-        // الخطأ كان هنا سابقاً: المفتاح في JSON هو "subtitle" وليس "subtitles"
         @JsonProperty("subtitle") val subtitles: List<ViuSubtitle>?
     )
 
@@ -521,7 +447,6 @@ class Viu : MainAPI() {
     )
 
     data class ViuEpisodeListData(
-        // في الـ JSON اسم القائمة هو product_list
         @JsonProperty("product_list") val products: List<ViuProductItem>?
     )
 
@@ -529,19 +454,12 @@ class Viu : MainAPI() {
         @JsonProperty("product_id") val productId: String?,
         @JsonProperty("ccs_product_id") val ccsProductId: String?,
         @JsonProperty("number") val number: String?,
-
-        // ✅ هذا هو حقل الاسم حسب الـ JSON
         @JsonProperty("synopsis") val synopsis: String?,
-
-        // ✅ هذا هو الوصف الطويل
         @JsonProperty("description") val description: String?,
 
         @JsonProperty("cover_image_url") val coverImage: String?,
         @JsonProperty("series_category_name") val seriesCategoryName: String?
     )
-    // =========================================================================
-    // Home Page Data Classes
-    // =========================================================================
 
     data class ViuHomeResponse(
         @JsonProperty("data") val data: ViuHomeData?
@@ -566,13 +484,9 @@ class Viu : MainAPI() {
         @JsonProperty("series_name") val seriesName: String?,
         @JsonProperty("title") val title: String?,
         @JsonProperty("synopsis") val synopsis: String?,
-
-        // الصور
         @JsonProperty("image_url") val imageUrl: String?, // عادة للبانر
         @JsonProperty("cover_image_url") val coverImageUrl: String?,
         @JsonProperty("product_image_url") val productImageUrl: String?,
-
-        // ✅ إضافة الصور الأفقية
         @JsonProperty("cover_landscape_image_url") val coverLandscapeImage: String?,
         @JsonProperty("series_cover_landscape_image_url") val seriesCoverLandscapeImage: String?,
 

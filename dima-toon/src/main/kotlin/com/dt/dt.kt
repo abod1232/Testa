@@ -18,8 +18,6 @@ class DimaToonProvider : MainAPI() {
         "series" to "المسلسلات المضافة حديثًا",
         "episodes" to "الحلقات المضافة حديثًا"
     )
-
-    // كاش لحفظ بيانات AJAX عند البحث لتمريرها للصفحات التالية
     private var cachedSearchQuery: String? = null
     private var cachedLoadData: LoadMoreData? = null
 
@@ -48,7 +46,6 @@ class DimaToonProvider : MainAPI() {
     }
 
     private fun Element.toSearchResponse(): SearchResponse? {
-        // التحقق مما إذا كان العنصر من نوع article (كما هو في صفحة البحث الجديدة)
         if (this.tagName() == "article" && this.hasClass("eael-grid-post")) {
             val link = this.selectFirst("a.eael-grid-post-link") ?: return null
             val href = link.attr("href").takeIf { it.isNotBlank() } ?: return null
@@ -61,8 +58,6 @@ class DimaToonProvider : MainAPI() {
 
             return buildSearchResponse(title, href, posterUrl)
         }
-
-        // دعم النمط القديم للصفحة الرئيسية
         val href = this.attr("href")
         if (href.isBlank()) return null
 
@@ -83,18 +78,12 @@ class DimaToonProvider : MainAPI() {
             }
         }
     }
-
-    // دالة البحث القديمة نوجهها لدالة البحث المتقدمة (الصفحة 1)
     override suspend fun search(query: String): List<SearchResponse> {
         return search(query, 1)?.items ?: emptyList()
     }
-
-    // دالة البحث التي تدعم التمرير المستمر (Pagination)
     override suspend fun search(query: String, page: Int): SearchResponseList? {
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
         val searchUrl = "$mainUrl/?s=$encodedQuery"
-
-        // إذا كانت الصفحة الأولى، نجلبها من الرابط العادي ونستخرج التوكنز
         if (page == 1) {
             val response = app.get(
                 searchUrl,
@@ -110,8 +99,6 @@ class DimaToonProvider : MainAPI() {
             val results = document.select("article.eael-grid-post").mapNotNull {
                 it.toSearchResponse()
             }
-
-            // استخراج بيانات زر عرض المزيد للحفظ في الكاش
             val button = document.selectFirst(".eael-load-more-button")
             val nonceRegex = Regex("""var localize\s*=\s*.*?"nonce":"([^"]+)"""")
             val nonce = nonceRegex.find(html)?.groupValues?.get(1)
@@ -135,17 +122,11 @@ class DimaToonProvider : MainAPI() {
             } else {
                 cachedLoadData = null
             }
-
-            // إرجاع النتائج مع تحديد ما إذا كانت هناك صفحات أخرى
             val hasNextPage = (cachedLoadData?.maxPage ?: 1) > 1
             return newSearchResponseList(results, hasNextPage)
         }
-
-        // إذا كانت الصفحة أكبر من 1، نستخدم طلب الأجاكس (AJAX)
         else {
             val loadData = cachedLoadData
-
-            // إذا لم يكن هناك داتا محفوظة أو وصلنا لآخر صفحة، نتوقف
             if (loadData == null || query != cachedSearchQuery || page > loadData.maxPage) {
                 return newSearchResponseList(emptyList(), hasNext = false)
             }
@@ -175,7 +156,6 @@ class DimaToonProvider : MainAPI() {
 
             var htmlSegment = ajaxResponse.text
             try {
-                // الموقع يعيد HTML كنص JSON، نقوم بفكه
                 htmlSegment = AppUtils.parseJson<String>(htmlSegment)
             } catch (e: Exception) {
                 if (htmlSegment.startsWith("\"") && htmlSegment.endsWith("\"")) {
@@ -187,8 +167,6 @@ class DimaToonProvider : MainAPI() {
             val results = Jsoup.parse(htmlSegment)
                 .select("article.eael-grid-post")
                 .mapNotNull { it.toSearchResponse() }
-
-            // تحديد ما إذا كنا سنستمر في التمرير
             val hasNextPage = page < loadData.maxPage
             return newSearchResponseList(results, hasNextPage)
         }
@@ -262,8 +240,6 @@ class DimaToonProvider : MainAPI() {
         return true
     }
 }
-
-// كلاسات مساعدة للـ Pagination الخاص بـ AJAX
 data class TemplateInfo(
     @JsonProperty("dir") val dir: String? = null,
     @JsonProperty("file_name") val fileName: String? = null,

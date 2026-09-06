@@ -473,8 +473,6 @@ class krmzyProvider : MainAPI() {
 
                                 if (!extractedM3u8.isNullOrBlank()) {
                                     val workingReferer = checkWorkingStreamReferer(extractedM3u8, embedUrl, ::log)
-
-                                    // هنا التعديل: استخراج الجودات وإعادة بناء الروابط يدوياً
                                     val qualityLinks = com.lagradost.cloudstream3.utils.M3u8Helper.generateM3u8(
                                         source = this.name,
                                         streamUrl = extractedM3u8,
@@ -484,7 +482,6 @@ class krmzyProvider : MainAPI() {
 
                                     if (qualityLinks.isNotEmpty()) {
                                         qualityLinks.forEach { link ->
-                                            // بدلاً من link.copy ننشئ رابطاً جديداً
                                             callback.invoke(
                                                 newExtractorLink(
                                                     source = link.source,

@@ -142,8 +142,6 @@ class WecimaProvider : MainAPI() {
                 currentCfCookie = null // Invalidate the cookie
             }
         }
-
-        // Fallback: Use CloudflareKiller.
         Log.d(logTag, "Executing POST with CloudflareKiller to get a new session...")
         val response = app.post(
             url,
@@ -152,7 +150,6 @@ class WecimaProvider : MainAPI() {
             headers = getHeaders(isPost = true), // Now without cookie
             interceptor = getInterceptor()       // Now with CloudflareKiller
         )
-        // After a successful request, save the new cookie.
         parseCfClearance(response.headers)
         return response.text
     }
@@ -192,8 +189,6 @@ class WecimaProvider : MainAPI() {
             mapOf("Cookie" to it)
         } ?: emptyMap()
     }
-
-    // ================== Data Classes الجديدة لنتائج البحث ==================
     data class WecimaSearchItem(
         @JsonProperty("title") val title: String? = null,
         @JsonProperty("slug") val slug: String? = null,
@@ -206,10 +201,7 @@ class WecimaProvider : MainAPI() {
         @JsonProperty("status") val status: Boolean? = null,
         @JsonProperty("results") val results: List<WecimaSearchItem>? = null
     )
-
-    // ==================  دالة الفحص الإلزامي ==================
     private suspend fun httpGetRaw(url: String): com.lagradost.nicehttp.NiceResponse {
-        // 1. المحاولة الأولى: استخدام الكوكيز الحالية (بدون Killer)
         if (currentCfCookie != null) {
             try {
                 Log.d(logTag, "⚡ Fast Check: Attempting GET with cached cookie...")
@@ -223,15 +215,12 @@ class WecimaProvider : MainAPI() {
                 if (response.code == 200) {
                     return response
                 }
-                // إذا وصلنا هنا والرد ليس 200، نرمي خطأ لننتقل للخطوة التالية
                 Log.w(logTag, "Cookie expired or invalid (Code: ${response.code})")
             } catch (e: Exception) {
                 Log.w(logTag, "Fast check failed: ${e.message}")
                 currentCfCookie = null // الكوكيز تالف، نحذفه
             }
         }
-
-        // 2. المحاولة الثانية: تشغيل Killer (فقط إذا فشلت المحاولة الأولى)
         Log.d(logTag, "🐢 Slow Check: Triggering CloudflareKiller...")
         val response = app.get(
             url,
@@ -239,12 +228,9 @@ class WecimaProvider : MainAPI() {
             headers = getHeaders(isPost = false), // بدون كوكيز قديمة
             interceptor = cloudflareKiller       // الآن نسمح بالكيلر
         )
-        // حفظ الكوكيز الجديد
         parseCfClearance(response.headers)
         return response
     }
-
-    // ================== دالة جلب الدومين ==================
     private suspend fun getFreshDomainAndCookies(): String {
         return try {
             val response = httpGetRaw(mainUrl)
@@ -263,8 +249,6 @@ class WecimaProvider : MainAPI() {
             return mainUrl
         }
     }
-
-    // ================== دالة مساعدة لتنفيذ طلب البحث ==================
     private suspend fun performSearch(query: String): List<SearchResponse> {
         val activeUrl = getFreshDomainAndCookies()
 
@@ -293,11 +277,7 @@ class WecimaProvider : MainAPI() {
 
                 val type = if (item.istv == 0) TvType.Movie else TvType.TvSeries
                 val prefix = if (item.istv == 0) "/watch/" else "/series/"
-
-                // ترميز الأحرف العربية في السلوج
                 val encodedSlug = java.net.URLEncoder.encode(slug, "UTF-8").replace("+", "%20")
-
-                // بناء الرابط النهائي
                 val itemUrl = if (slug.startsWith("http")) slug else "$mainUrl$prefix$encodedSlug"
 
                 Log.d(logTag, "🔍 Search Result: [$title] -> $itemUrl")
@@ -314,20 +294,12 @@ class WecimaProvider : MainAPI() {
             emptyList()
         }
     }
-
-    // ================== دالة البحث الأساسية (مع نظام Fallback) ==================
     override suspend fun search(query: String): List<SearchResponse> {
-        // 1. تنفيذ البحث بالكلمة الأصلية التي أدخلها المستخدم
         val initialResults = performSearch(query)
-
-        // 2. التحقق: إذا كانت النتائج فارغة، والكلمة المبحوث عنها هي "مسلسل" بالضبط
         if (initialResults.isEmpty() && query.trim() == "مسلسل") {
             Log.d(logTag, "🔄 Fallback triggered: No results for 'مسلسل', searching for 'game of' instead.")
-            // إرجاع نتائج البحث عن "game of" كبديل
             return performSearch("game of")
         }
-
-        // 3. في حال وجود نتائج أو الكلمة لم تكن "مسلسل"، نرجع النتائج العادية
         return initialResults
     }
 
@@ -341,7 +313,6 @@ class WecimaProvider : MainAPI() {
         Log.d(logTag, "isTvSeriesPage: $isTvSeriesPage, isEpisodePage: $isEpisodePage")
 
         if (isTvSeriesPage || isEpisodePage) {
-            // --- HANDLE TV SERIES ---
             val seriesUrl = if (isEpisodePage) {
                 document.selectFirst(".Breadcrumb--UX a[href*='/series/']")?.attr("href")
                     ?: throw ErrorLoadingException("Could not find series URL from episode page")
@@ -420,10 +391,7 @@ class WecimaProvider : MainAPI() {
             }
 
         } else {
-            // --- HANDLE MOVIES ---
             val title = document.selectFirst("div.Title--Content--Single-begin h1")?.text()?.trim() ?: "Movie Title"
-
-            // FIXED POSTER FINDING LOGIC (Same logic as Series)
             val posterUrl = document.select("meta[property=og:image]").attr("content").ifBlank {
                 document.selectFirst("wecima.separated--top")?.let { element ->
                     val style = element.attr("data-lazy-style").ifBlank { element.attr("style") }
@@ -446,16 +414,10 @@ class WecimaProvider : MainAPI() {
             }
         }
     }
-
-    // ================== دالة فك التشفير (تم إصلاحها) ==================
     private fun decodeWecimaUrl(encodedStr: String): String? {
         return try {
             if (encodedStr.isBlank()) return null
-            // وي سيما يضيف علامة "+" كنوع من التمويه، لذا نقوم بإزالتها فقط
-            // ونحافظ على (/) و (=) لأنها من أساسيات تشفير Base64
             val cleanedStr = encodedStr.replace("+", "").trim()
-
-            // إضافة aHR0c (التي تعني http) إذا كان الموقع قد قام بقصها
             val finalB64Str = if (!cleanedStr.startsWith("aHR0c")) "aHR0c$cleanedStr" else cleanedStr
 
             val decodedUrl = String(Base64.decode(finalB64Str, Base64.DEFAULT))
@@ -465,8 +427,6 @@ class WecimaProvider : MainAPI() {
             null
         }
     }
-
-    // ================== دالة جلب الروابط وتمريرها للمستخرجات ==================
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -475,20 +435,15 @@ class WecimaProvider : MainAPI() {
     ): Boolean {
         Log.d(logTag, "🔗 loadLinks initiated for: $data")
         val document = httpGet(data)
-
-        // 1. استخراج سيرفرات المشاهدة (Watch Servers)
         document.select("ul.WatchServersList li btn").amap { serverBtn ->
             val encodedUrl = serverBtn.attr("data-url")
             decodeWecimaUrl(encodedUrl)?.let { decodedUrl ->
                 Log.d(logTag, "📺 Decoded Watch URL: $decodedUrl")
                 if (decodedUrl.startsWith("http")) {
-                    // إرسال الرابط إلى المستخرجات (Extractors) المدمجة في التطبيق
                     loadExtractor(decodedUrl, mainUrl, subtitleCallback, callback)
                 }
             }
         }
-
-        // 2. استخراج سيرفرات التحميل (Download Servers)
         document.select(".openLinkDown").amap { downloadBtn ->
             val encodedUrl = downloadBtn.attr("data-href")
             decodeWecimaUrl(encodedUrl)?.let { decodedUrl ->
@@ -497,8 +452,6 @@ class WecimaProvider : MainAPI() {
                 val qualityText = downloadBtn.selectFirst("resolution")?.text()?.trim() ?: ""
                 val typeText = downloadBtn.selectFirst("quality")?.text()?.trim() ?: "Download"
                 val serverName = "$name $typeText" // مثال: We Cima WEB-DL
-
-                // إرسال رابط التحميل إلى المستخرجات أيضاً (لأن بعض روابط التحميل مثل doodstream تدعم المشاهدة)
                 if (decodedUrl.startsWith("http")) {
                     loadExtractor(decodedUrl, mainUrl, subtitleCallback, callback)
                 }

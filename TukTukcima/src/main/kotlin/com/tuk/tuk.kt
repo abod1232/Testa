@@ -28,40 +28,27 @@ class TukTukHd : MainAPI() {
     override val hasMainPage = true
     override var lang = "ar"
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
-
-    // تعريف صفحات القائمة الرئيسية
     override val mainPage = mainPageOf(
         "$mainUrl/recent/page/" to "المضاف حديثاً",
         "$mainUrl/category/movies-2/page/" to "أحدث الأفلام",
         "$mainUrl/category/series-1/page/" to "أحدث الحلقات",
         "$mainUrl/category/movies-2/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%85%d8%af%d8%a8%d9%84%d8%ac%d8%a9/page/" to "أفلام مدبلجة"
     )
-
-    // دالة جلب الصفحة الرئيسية
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = request.data + page
         val document = app.get(url).document
-
-        // الموقع يستخدم نوعين من الكلاسات للعرض: Small--Box في القوائم و Block--Item في السلايدر
-        // نختار الاثنين لضمان جلب كل شيء
         val home = document.select("li.Small--Box, div.Block--Item").mapNotNull {
             toSearchResult(it)
         }
         return newHomePageResponse(request.name, home)
     }
-
-    // دالة لتحويل عنصر HTML إلى نتيجة بحث
     private fun toSearchResult(element: Element): SearchResponse? {
         val linkTag = element.selectFirst("a") ?: return null
         val title = element.selectFirst(".title")?.text() ?: linkTag.attr("title")
         val href = fixUrl(linkTag.attr("href"))
-
-        // جلب الصورة (دعم Lazy Loading)
         val imgTag = element.selectFirst("img")
         val posterUrl = imgTag?.attr("data-src").takeIf { !it.isNullOrEmpty() }
             ?: imgTag?.attr("src")
-
-        // تحديد النوع
         val isMovie =
             !title.contains("مسلسل") && !title.contains("حلقة") && !href.contains("series")
 
@@ -75,11 +62,6 @@ class TukTukHd : MainAPI() {
             }
         }
     }
-
-
-
-
-        // استدعاء بسيط عند مكالمات قديمة
         override suspend fun search(query: String): List<SearchResponse> {
             return search(query, 1)?.items ?: emptyList()
         }
@@ -87,8 +69,6 @@ class TukTukHd : MainAPI() {
     override suspend fun search(query: String, page: Int): SearchResponseList? = coroutineScope {
 
         val encoded = URLEncoder.encode(query, "utf-8")
-
-        // نحسب الصفحتين
         val page1 = (page - 1) * 2 + 1
         val page2 = page1 + 1
 
@@ -106,8 +86,6 @@ class TukTukHd : MainAPI() {
                 }.getOrDefault(emptyList())
             }
         }.awaitAll().flatten()
-
-        // تنظيف + دمج النتائج
         val cleaned = mergeSimilarResults(results)
 
         newSearchResponseList(cleaned, cleaned.isNotEmpty())
@@ -119,8 +97,6 @@ class TukTukHd : MainAPI() {
         for (item in list) {
 
             val title = item.name
-
-            // إذا يحتوي كلمات فيلم لا ندمجه
             if (title.contains("فيلم", true) ||
                 title.contains("فلم", true) ||
                 title.contains("movie", true)
@@ -128,15 +104,11 @@ class TukTukHd : MainAPI() {
                 grouped[title] = item
                 continue
             }
-
-            // نحذف رقم الحلقة فقط
             val normalized = title
                 .replace(Regex("""الحلقة\s*\d+"""), "")
                 .replace(Regex("""episode\s*\d+""", RegexOption.IGNORE_CASE), "")
                 .replace(Regex("""\d+$"""), "")
                 .trim()
-
-            // لو لم يكن موجود مسبقاً نضيفه
             if (!grouped.containsKey(normalized)) {
                 grouped[normalized] = item
             }
@@ -147,11 +119,7 @@ class TukTukHd : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse {
         val doc = app.get(url).document
-
-        // 1. استخراج المعلومات الأساسية (مشتركة بين الفيلم والمسلسل)
         val fullTitle = doc.selectFirst("h1.post-title a")?.text() ?: doc.selectFirst("h1")?.text() ?: "Unknown"
-
-        // تنظيف الاسم (للمسلسلات نحذف "الحلقة X"، وللأفلام نحذف "مترجم" أو "مدبلج" إذا أردت)
         val cleanTitle = fullTitle.replace(Regex("""\s*(الحلقة\s*\d+|مترجم|مدبلج).*"""), "").trim()
 
         val desc = doc.select(".story p").text()
@@ -161,18 +129,13 @@ class TukTukHd : MainAPI() {
         val year = doc.select(".RightTaxContent a[href*='release-year']").text().filter { it.isDigit() }.toIntOrNull()
         val ratingText = doc.select(".imdbS strong").text()
         val scoreValue = ratingText.toDoubleOrNull()?.times(1000)?.toInt()
-
-        // 2. التحقق: هل هذا مسلسل أم فيلم؟
-        // المسلسل يحتوي على حاوية حلقات (.allepcont) أو حاوية مواسم (.allseasonss)
         val isSeries = doc.select(".allepcont, .allseasonss").isNotEmpty()
 
         if (isSeries) {
-            // --- منطق المسلسلات ---
             val episodesList = ArrayList<Episode>()
             val seasonElements = doc.select(".allseasonss .Block--Item a")
 
             if (seasonElements.isNotEmpty()) {
-                // جلب جميع المواسم بالتوازي
                 seasonElements.amap { seasonEl ->
                     val seasonUrl = fixUrl(seasonEl.attr("href"))
                     val seasonName = seasonEl.select("h3").text()
@@ -197,7 +160,6 @@ class TukTukHd : MainAPI() {
                     }
                 }
             } else {
-                // موسم واحد فقط: جلب الحلقات من الصفحة الحالية
                 doc.select(".allepcont a").forEach { ep ->
                     val epTitle = ep.select(".ep-info h2").text()
                     val epHref = fixUrl(ep.attr("href"))
@@ -214,8 +176,6 @@ class TukTukHd : MainAPI() {
                     )
                 }
             }
-
-            // ترتيب الحلقات لضمان مظهر منظم
             val sortedEpisodes = episodesList.sortedWith(compareBy({ it.season }, { it.episode }))
 
             return newTvSeriesLoadResponse(cleanTitle, url, TvType.TvSeries, sortedEpisodes) {
@@ -226,8 +186,6 @@ class TukTukHd : MainAPI() {
             }
 
         } else {
-            // --- منطق الأفلام ---
-            // الفيلم لا يحتاج لحلقات، نرسل الرابط الحالي كمصدر للمشاهدة
             return newMovieLoadResponse(cleanTitle, url, TvType.Movie, url) {
                 this.posterUrl = poster
                 this.plot = desc
@@ -239,20 +197,14 @@ class TukTukHd : MainAPI() {
 
     private fun extractQuality(resolution: String?): Int {
         val cleanRes = resolution?.lowercase()?.trim() ?: return Qualities.Unknown.value
-
-        // 1. إذا كان النص يحتوي على 'x' مثل "1920x800" نأخذ الرقم الثاني (الارتفاع) مباشرة كجودة فعلية
         if (cleanRes.contains("x")) {
             val height = cleanRes.substringAfter("x").filter { it.isDigit() }.toIntOrNull()
             if (height != null && height > 0) return height
         }
-
-        // 2. إذا لم يحتوي على 'x' ولكنه يحتوي على أرقام فقط مثل "800p" أو "800" نستخرج الرقم مباشرة
         val digits = cleanRes.filter { it.isDigit() }.toIntOrNull()
         if (digits != null && digits > 0) {
             return digits
         }
-
-        // 3. احتياطياً في حال كانت الجودة نصية فقط (مثل HD أو FHD)
         return when {
             cleanRes.contains("4k") || cleanRes.contains("2160") -> 2160
             cleanRes.contains("2k") || cleanRes.contains("1440") -> 1440
@@ -308,8 +260,6 @@ class TukTukHd : MainAPI() {
                 ).parsed<InertiaResponse>()
 
                 val streams = inertiaResponse.props.streams?.data ?: emptyList()
-
-                // جلب المرايا والجودة الرقمية لكل منها
                 val allMirrorsWithQuality = streams.flatMap { streamItem ->
                     val qualityInt = extractQuality(streamItem.resolution ?: streamItem.label)
                     streamItem.mirrors?.map { mirror ->
@@ -320,8 +270,6 @@ class TukTukHd : MainAPI() {
                 allMirrorsWithQuality.amap { (mirror, qualityInt) ->
                     val rawLink = mirror.link ?: return@amap
                     val link = if (rawLink.startsWith("//")) "https:$rawLink" else rawLink
-
-                    // نستخدم اسم السيرفر نظيفاً فقط (مثال: "Share VIP" أو "TukTukVIP")
                     val displayName = mirror.symbol ?: mirror.driver ?: "Server"
 
                     when {
@@ -335,7 +283,6 @@ class TukTukHd : MainAPI() {
 
                         else -> {
                             loadExtractor(link, subtitleCallback) { extractorLink ->
-                                // نقوم بتعديل الجودة مباشرة على الكائن المستخرج دون إعادة بناء المنشئ لتفادي اختلاف توقيع الفئات بين النسخ
                                 if (extractorLink.quality == Qualities.Unknown.value) {
                                     extractorLink.quality = qualityInt
                                 }
@@ -454,7 +401,6 @@ class TukTukHd : MainAPI() {
                         val data = tryParseJson<StrpResponse>(decryptedText)
                         val source = data?.source
                         if (!source.isNullOrBlank()) {
-                            // تصحيح التشوه في البروتوكول (مثل تحويل hÍƅ:// إلى https://)
                             val cleanSource = if (source.contains("://") && !source.startsWith("http")) {
                                 "https" + source.substring(source.indexOf("://"))
                             } else {

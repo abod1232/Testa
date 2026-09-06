@@ -149,8 +149,6 @@ class tunProvider : MainAPI() {
         val poster = doc.selectFirst("meta[property=\"og:image\"]")?.attr("content")
 
         val episodesList = parseEpisodesFlexible(htmlContent)
-
-        // تحديد ما إذا كان العمل مسلسلاً بشكل ديناميكي وذكي للغاية لمنع المشاكل مع العناوين الإنجليزية
         val isSeries = title.contains("مسلسل", ignoreCase = true) ||
                 title.contains("Season", ignoreCase = true) ||
                 title.contains("Saison", ignoreCase = true) ||

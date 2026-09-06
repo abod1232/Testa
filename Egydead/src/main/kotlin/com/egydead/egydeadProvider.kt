@@ -31,11 +31,7 @@ class EgyDead : MainAPI() {
     )
 
     private val userAgent = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"
-
-    // تخزين الكوكيز كنص
     private var savedCookies: String? = null
-
-    // Mutex لمنع تداخل الطلبات المتوازية عند ظهور Cloudflare
     private val cfMutex = Mutex()
 
     private fun log(tag: String, msg: String) {
@@ -51,8 +47,6 @@ class EgyDead : MainAPI() {
             savedCookies?.let { headers["Cookie"] = it }
             return headers
         }
-
-    // بناء الهيدرز بشكل ديناميكي
     private fun buildHeaders(referer: String?): MutableMap<String, String> {
         val headers = mutableMapOf(
             "User-Agent" to userAgent,
@@ -71,8 +65,6 @@ class EgyDead : MainAPI() {
         var headers = buildHeaders(referer)
 
         var res = app.get(currentRequestUrl, headers = headers, timeout = 30)
-
-        // إذا واجهنا حماية Cloudflare
         if (res.code in listOf(403, 503, 429)) {
             cfMutex.withLock {
                 val currentCookies = android.webkit.CookieManager.getInstance().getCookie(currentRequestUrl)
@@ -84,17 +76,13 @@ class EgyDead : MainAPI() {
                     val activity = CommonActivity.activity ?: com.lagradost.cloudstream3.CommonActivity.activity
 
                     if (activity != null) {
-                        // 🚨 نشغل صياد الكوكيز
                         val solverResult = CloudflareSolver.solve(activity, currentRequestUrl, userAgent)
 
                         if (solverResult != null) {
-                            // 1. تحديث الكوكيز
                             if (!solverResult.cookies.isNullOrEmpty()) {
                                 savedCookies = solverResult.cookies
                                 log("GET-REQUEST", "تم حفظ الكوكيز في الإضافة بنجاح.")
                             }
-
-                            // 2. تحديث الرابط الأساسي (إذا حدث توجيه)
                             if (solverResult.finalUrl != currentRequestUrl) {
                                 log("DOMAIN-UPDATE", "تم اكتشاف توجيه من $currentRequestUrl إلى ${solverResult.finalUrl}")
                                 try {
@@ -108,8 +96,6 @@ class EgyDead : MainAPI() {
                     }
                 }
             }
-
-            // 🚨 3. إعادة الطلب باستخدام OkHttp (app.get) بالرابط الجديد والكوكيز
             log("GET-REQUEST", "إعادة الطلب (Retry) بالكوكيز الجديدة للرابط: $currentRequestUrl")
             headers = buildHeaders(referer)
             res = app.get(currentRequestUrl, headers = headers, timeout = 30)
@@ -117,8 +103,6 @@ class EgyDead : MainAPI() {
 
         return res.document
     }
-
-    // --- دالة httpPost المرنة والذكية ---
     private suspend fun httpPost(url: String, data: Map<String, String>, referer: String? = null): Document {
         var currentRequestUrl = url
         log("POST-REQUEST", "Sending to: $currentRequestUrl")
@@ -164,8 +148,6 @@ class EgyDead : MainAPI() {
 
         return res.document
     }
-
-    // --- دالة getMainPage مع Logs مفصلة لكل مرحلة ---
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val logTag = "MAIN-PAGE"
         log(logTag, "Starting getMainPage | Page: $page | Request: ${request.name}")
@@ -211,8 +193,6 @@ class EgyDead : MainAPI() {
 
         return newHomePageResponse(homePageList.filter { it.list.isNotEmpty() })
     }
-
-    // --- دالة المساعد toSearchResponse مع Logs لكل عنصر ---
     private fun Element.toSearchResponse(parentTag: String): SearchResponse? {
         try {
             val linkEl = this.selectFirst("a") ?: return null
@@ -268,8 +248,6 @@ class EgyDead : MainAPI() {
             fixUrl(resolved)
         } catch (e: Exception) { null }
     }
-
-    // -------------------- batchFetch --------------------
     private suspend fun batchFetch(
         urls: List<String>,
         concurrency: Int = 8
@@ -293,8 +271,6 @@ class EgyDead : MainAPI() {
         }
         return out
     }
-
-    // -------------------- discoverSeasonsPreserveOrder --------------------
     private suspend fun discoverSeasonsPreserveOrder(
         startUrl: String,
         concurrency: Int = 8
@@ -328,8 +304,6 @@ class EgyDead : MainAPI() {
         }
         return discovered.distinctBy { it.third }
     }
-
-    // -------------------- extractEpisodesFromSeasonDoc --------------------
     private fun extractEpisodesFromSeasonDoc(seasonUrl: String, doc: Document): List<CS3Episode> {
         val episodes = mutableListOf<CS3Episode>()
         val epsContainer = doc.selectFirst("div.EpsList") ?: doc.selectFirst("div.episodes-list") ?: doc.selectFirst("ul") ?: return emptyList()
@@ -353,8 +327,6 @@ class EgyDead : MainAPI() {
         }
         return episodes.sortedBy { it.episode ?: 9999 }
     }
-
-    // -------------------- parseRecommendations --------------------
     private fun parseRecommendations(doc: Document, base: String): List<SearchResponse> {
         val out = mutableListOf<SearchResponse>()
         val nodes = doc.select(".related-posts li.movieItem, .related-posts a, .related-posts li")
@@ -378,8 +350,6 @@ class EgyDead : MainAPI() {
         }
         return out
     }
-
-    // -------------------- دالة load الكاملة --------------------
     override suspend fun load(url: String): LoadResponse? {
         val document = try {
             httpGet(url)

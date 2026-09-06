@@ -12,8 +12,6 @@ import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 import kotlinx.coroutines.delay
-
-// دالة عامة لتنظيف الروابط وتشفير الحروف العربية لتجنب انهيار الاتصال (OkHttp Referer crash)
 private fun encodeUri(url: String): String {
     return try {
         url.toCharArray().joinToString("") { char ->
@@ -95,7 +93,6 @@ class LodyNet : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        // ترميز نص البحث لحل مشكلة الحروف العربية أثناء البحث
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
         val url = "$searchApi?value=$encodedQuery"
         val response = app.get(url).text

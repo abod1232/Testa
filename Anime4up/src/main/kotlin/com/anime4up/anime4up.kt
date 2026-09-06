@@ -22,8 +22,6 @@ class Anime4up : MainAPI() {
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
     override var lang = "ar"
     override val hasMainPage = true
-
-    // 🚨 متغيرات الكوكيز والـ Mutex لمنع فتح نوافذ كثيرة
     private var savedCookies: String? = null
     private val cfMutex = Mutex()
     private val userAgent = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36"
@@ -43,8 +41,6 @@ class Anime4up : MainAPI() {
         customHeaders?.let { headers.putAll(it) }
         return headers
     }
-
-    // 🚨 الدالة السحرية لإدارة الطلبات وتخطي Cloudflare
     private suspend fun safeGet(
         url: String,
         referer: String? = null,
@@ -54,8 +50,6 @@ class Anime4up : MainAPI() {
         var headers = buildHeaders(referer, customHeaders)
 
         var res = app.get(currentRequestUrl, headers = headers, timeout = 30)
-
-        // إذا واجهنا حماية
         if (res.code in listOf(403, 503, 429)) {
             cfMutex.withLock {
                 val currentCookies = android.webkit.CookieManager.getInstance().getCookie(currentRequestUrl)
@@ -74,8 +68,6 @@ class Anime4up : MainAPI() {
                                 savedCookies = solverResult.cookies
                                 log("SAFE-GET", "تم حفظ الكوكيز بنجاح.")
                             }
-
-                            // تحديث الرابط إذا تغير النطاق
                             if (solverResult.finalUrl != currentRequestUrl) {
                                 log("DOMAIN-UPDATE", "تم التوجيه إلى: ${solverResult.finalUrl}")
                                 try {
@@ -88,8 +80,6 @@ class Anime4up : MainAPI() {
                     }
                 }
             }
-
-            // إعادة الطلب بالكوكيز الجديدة
             headers = buildHeaders(referer, customHeaders)
             res = app.get(currentRequestUrl, headers = headers, timeout = 30)
         }
@@ -98,7 +88,6 @@ class Anime4up : MainAPI() {
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        // استخدمنا safeGet بدلاً من app.get
         val doc = safeGet(mainUrl).document
         val homePageList = ArrayList<HomePageList>()
 
@@ -263,8 +252,6 @@ class Anime4up : MainAPI() {
 
         try {
             val targetUrl = url
-
-            // استخدام safeGet لتخطي الحماية أثناء استخراج الروابط إذا تطلب الأمر
             val initialResponse = safeGet(targetUrl, referer = referer)
             val soup = initialResponse.document
             val version = soup.selectFirst("script[data-page=app]")?.html()?.let {
@@ -280,8 +267,6 @@ class Anime4up : MainAPI() {
                 "X-Inertia-Version" to version,
                 "X-Requested-With" to "XMLHttpRequest"
             )
-
-            // تمرير customHeaders لـ safeGet
             val streamResponse = safeGet(targetUrl, referer = referer, customHeaders = inertiaHeaders)
             val streamJson = parseJson<Share4maxInertiaResponse>(streamResponse.text)
 
@@ -309,23 +294,14 @@ class Anime4up : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val doc = safeGet(data).document
-
-        // 🚨 1. استخدام Set آمنة للخيوط المتعددة (Thread-Safe) لمنع التعارض
         val seenLinks = java.util.Collections.synchronizedSet(mutableSetOf<String>())
-
-        // 🚨 2. تحديد عدد السيرفرات التي تعالج في نفس اللحظة (6 مثلاً لتجنب حظر IP)
         val semaphore = Semaphore(6)
-
-        // 3. استخدام supervisorScope لكي لا تتوقف كل العملية إذا فشل سيرفر واحد
         supervisorScope {
-            // -- أ. مهام سيرفرات المشاهدة --
             val watchTasks = doc.select("ul#episode-servers li[data-watch]").map { li ->
                 async(Dispatchers.IO) {
                     semaphore.withPermit {
                         try {
                             val serverUrl = li.attr("data-watch")
-
-                            // عملية processMegabox تأخذ وقتاً لأنها ترسل طلبات، الآن ستعمل بالتوازي!
                             val linksToProcess = if (serverUrl.contains("share4max") || serverUrl.contains("megamax")) {
                                 processMegabox(serverUrl, data)
                             } else {
@@ -338,13 +314,10 @@ class Anime4up : MainAPI() {
                                 }
                             }
                         } catch (e: Exception) {
-                            // تجاهل الخطأ في سيرفر واحد واستمر في البقية
                         }
                     }
                 }
             }
-
-            // -- ب. مهام سيرفرات التحميل --
             val downloadTasks = doc.select("div.download-list table.table tbody tr").map { tr ->
                 async(Dispatchers.IO) {
                     semaphore.withPermit {
@@ -355,13 +328,10 @@ class Anime4up : MainAPI() {
                                 loadExtractor(downloadLink, data, subtitleCallback, callback)
                             }
                         } catch (e: Exception) {
-                            // تجاهل الخطأ في سيرفر واحد واستمر في البقية
                         }
                     }
                 }
             }
-
-            // 4. تشغيل جميع المهام (المشاهدة والتحميل) معاً وانتظار انتهائها
             (watchTasks + downloadTasks).awaitAll()
         }
 

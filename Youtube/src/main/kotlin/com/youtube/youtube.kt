@@ -522,8 +522,6 @@ class YoutubeProvider(
         get() {
             val list = mutableListOf<MainPageData>()
             val isEn = lang == "en"
-
-            // قراءة الإعداد من SharedPreferences
             if (sharedPref?.getBoolean("show_trending_home", true) == true) {
                 list.add(MainPageData(if (isEn) "Trending" else "الرئيسية (Trending)", "Home"))
             }
@@ -556,13 +554,9 @@ class YoutubeProvider(
             else -> "Custom Section"
         }
     }
-
-    // أضف هذه الدالة المساعدة في أي مكان داخل الكلاس YoutubeProvider
     private fun resetContinuation() {
         savedContinuationToken = null
     }
-
-    // 1. أضف هذا المتغير في أعلى الكلاس YoutubeProvider (مع المتغيرات الأخرى)
     private val continuationTokens = mutableMapOf<String, String>()
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
@@ -572,10 +566,6 @@ class YoutubeProvider(
 
         val requestData = request.data
         val isPlaylist = if (page == 1) requestData.contains("list=") else requestData.startsWith("playlist_")
-
-        // ==========================================
-        // دوال مساعدة مخصصة لقوائم التشغيل (Playlists) فقط
-        // ==========================================
         fun extractPlaylistVideos(items: List<*>) {
             items.forEach { item ->
                 val videoMap = item as? Map<*, *>
@@ -608,10 +598,6 @@ class YoutubeProvider(
             }
             return null
         }
-
-        // ==========================================
-        // بداية المعالجة للصفحة
-        // ==========================================
         try {
             if (page == 1) {
                 continuationTokens.remove(requestData)
@@ -635,7 +621,6 @@ class YoutubeProvider(
                 val initialData = extractYtInitialData(html)
                 if (initialData != null) {
                     if (isPlaylist) {
-                        // 1. المسار الخاص بقوائم التشغيل (Playlists)
                         val contents = safeGet(
                             initialData, "contents", "twoColumnBrowseResultsRenderer", "tabs", 0,
                             "tabRenderer", "content", "sectionListRenderer", "contents",
@@ -647,23 +632,17 @@ class YoutubeProvider(
                             extractPlaylistVideos(contents)
                             nextContinuation = findPlaylistToken(contents)
                         }
-
-                        // إذا لم نجد التوكن في المسار المباشر، نبحث عنه بعمق
                         if (nextContinuation.isNullOrBlank()) {
                             val conts = findContinuationItemsRecursive(initialData)
                             nextContinuation = findPlaylistToken(conts)
                         }
 
                     } else {
-                        // 2. المسار الخاص بـ (Trending) و (Channels) باستخدام كودك الممتاز
                         processRecursive(initialData, results, seenIds, playlistMode = false)
                         nextContinuation = findTokenRecursive(initialData)
                     }
                 }
             } else {
-                // ==========================================
-                // التحميل عند التمرير لأسفل (Pagination)
-                // ==========================================
                 val tokenToUse = continuationTokens[requestData]
                 if (!tokenToUse.isNullOrBlank() && !savedApiKey.isNullOrBlank()) {
                     val decodedToken = java.net.URLDecoder.decode(tokenToUse, "UTF-8")
@@ -686,14 +665,12 @@ class YoutubeProvider(
                     val response = app.post(apiUrl, json = payload, headers = headers, interceptor = ytInterceptor).parsedSafe<Map<String, Any>>()
                     if (response != null) {
                         if (isPlaylist) {
-                            // 1. التمرير الخاص بقوائم التشغيل (Playlists)
                             val continuationItems = findContinuationItemsRecursive(response)
                             if (continuationItems != null) {
                                 extractPlaylistVideos(continuationItems)
                                 nextContinuation = findPlaylistToken(continuationItems)
                             }
                         } else {
-                            // 2. التمرير الخاص بـ (Trending) و (Channels)
                             val actions = response["onResponseReceivedActions"] ?: response["onResponseReceivedCommands"] ?: response["continuationContents"] ?: response
                             processRecursive(actions, results, seenIds, playlistMode = false)
                             nextContinuation = findTokenRecursive(response)
@@ -1249,10 +1226,6 @@ class YoutubeProvider(
     ): Boolean {
         val videoId = data.extractYoutubeId() ?: data
         val fullUrl = "https://www.youtube.com/watch?v=$videoId"
-
-        // =================================================================
-        // التصحيح هنا: استخدام CloudStreamApp.context لتجنب فئة AcraApplication المهملة
-        // =================================================================
         val context = CloudStreamApp.context
         val playerType = if (context != null) {
             val prefs = PreferenceManager.getDefaultSharedPreferences(context)
@@ -1260,17 +1233,11 @@ class YoutubeProvider(
         } else {
             "advanced"
         }
-
-        // 2. اختيار طريقة الاستخراج بناءً على الإعداد
         if (playerType == "classic") {
-            // الخيار الكلاسيكي: استدعاء loadExtractor الداخلي
             loadExtractor(fullUrl, subtitleCallback, callback)
         } else {
-            // الخيار المتقدم: استخدام Extractor الخاص بنا (Piped/YoutubeExtractor)
             com.youtube.YoutubeExtractor().getUrl(fullUrl, null, subtitleCallback, callback)
         }
-
-        // 3. جلب الترجمات المتقدمة (WebVTT)
         try {
             val apiUrl = "$mainUrl/youtubei/v1/player"
             val payload = mapOf(
@@ -1310,8 +1277,6 @@ class YoutubeProvider(
 
                     val baseUrl = baseTrack.optString("baseUrl", "")
                     baseLangCode = baseTrack.optString("languageCode", "original").lowercase()
-
-                    // أ) إضافة الترجمات الأصلية
                     for (i in 0 until captionTracks.length()) {
                         val track = captionTracks.optJSONObject(i)
                         val name = track.optJSONObject("name")?.optString("simpleText") ?: ""
@@ -1325,8 +1290,6 @@ class YoutubeProvider(
                             subtitleCallback(SubtitleFile(displayTitle, vttUrl))
                         }
                     }
-
-                    // ب) إضافة الترجمات التلقائية
                     if (baseUrl.isNotEmpty()) {
                         val autoLangs = listOf(
                             "aa","ab","af","ak","am","ar","as","ay","az","ba","be","bg","bho","bn","bo","br","bs","ca","ceb","co","crs",
@@ -1354,7 +1317,6 @@ class YoutubeProvider(
                 }
             }
         } catch (e: Exception) {
-            // Log.e(name, "Failed to load advanced subtitles", e)
         }
 
         return true

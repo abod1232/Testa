@@ -90,15 +90,6 @@ class FASELHD(private val context: Context) : MainAPI() {
             mainUrl
         }
     }
-//    override val mainPage = mainPageOf(
-////        mainUrl to "الرئيسية",
-//        "$mainUrl/movies" to "أفلام أجنبية",
-//        "$mainUrl/series" to "مسلسلات أجنبية",
-////        "$mainUrl/hindi" to "أفلام هندي",
-////        "$mainUrl/asian-movies" to "أفلام آسيوية",
-//        "$mainUrl/anime" to "أنمي",
-////        "$mainUrl/anime-movies" to "أفلام أنمي"
-//    )
 
     private val cfLock = Mutex()
     private var lastValidUserAgent =
@@ -123,21 +114,15 @@ class FASELHD(private val context: Context) : MainAPI() {
             "priority" to "u=0, i"
         )
     }
-
-    // استخدمناها بدلاً من القديمة
     private fun getProtectedHeaders(): Map<String, String> {
         return getModernHeaders(mainUrl)
     }
-
-    // 🔴 1. دالة smartGet مع تصحيح فحص الخطأ 429 🔴
     private suspend fun smartGet(
         url: String,
         referer: String? = null,
         timeoutSeconds: Long? = null
     ): Document {
         val cleanUrl = if (!url.endsWith("/") && !url.substringAfterLast("/").contains(".")) "$url/" else url
-
-        // نظام إعادة المحاولة الذكي للخطأ 429
         for (attempt in 1..3) {
             try {
                 val headers = getModernHeaders(cleanUrl)
@@ -164,7 +149,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 break
 
             } catch (e: Exception) {
-                // 🔴 التصحيح هنا: نفحص رسالة الخطأ بدلاً من نوعه
                 if (e.message?.contains("429") == true) {
                     Log.w("FASELHD", "Got 429 Exception on attempt $attempt for $cleanUrl. Retrying in $attempt second(s)...")
                     kotlinx.coroutines.delay(1000L * attempt)
@@ -190,16 +174,12 @@ class FASELHD(private val context: Context) : MainAPI() {
     private suspend fun executeRequestWithCloudflareRetry(requestBlock: suspend (String) -> String): String? {
         val base = baseUrl()
         var currentCookies = CookieManager.getInstance().getCookie(base) ?: ""
-
-        // المحاولة الأولى
         try {
             val result = requestBlock(currentCookies)
             if (result.isNotBlank()) return result
         } catch (e: Exception) {
             if (e.message != "403_FORBIDDEN") return null
         }
-
-        // 🔴 اكتشاف 403 يعني انتهاء الصلاحية -> تجديد الكوكيز
         Log.d("FASELHD_RETRY", "403 Detected. Refreshing CF clearance...")
         try {
             cfLock.withLock {
@@ -209,8 +189,6 @@ class FASELHD(private val context: Context) : MainAPI() {
             currentCookies = CookieManager.getInstance().getCookie(base) ?: ""
             if (!currentCookies.contains("cf_clearance")) return null
         } catch (e: Exception) { return null }
-
-        // إعادة المحاولة بالكوكيز الجديدة
         Log.d("FASELHD_RETRY", "Retrying with fresh cookies...")
         return try {
             requestBlock(currentCookies)
@@ -253,12 +231,8 @@ class FASELHD(private val context: Context) : MainAPI() {
 
         val document = smartGet(url)
         val headers = getProtectedHeaders()
-
-        // التحقق مما إذا كنا في الصفحة الرئيسية
         if (request.data.endsWith("/main") || request.data == mainUrl) {
             val lists = mutableListOf<HomePageList>()
-
-            // 1. جلب السلايدر (أحدث الإضافات المميزة)
             val sliderItems = document.select("#homeSlide .swiper-slide").mapNotNull {
                 val slideHref = it.selectFirst("a")?.attr("href") ?: return@mapNotNull null
                 val slideTitle = it.selectFirst(".h1 a")?.text()?.trim() ?: return@mapNotNull null
@@ -271,8 +245,6 @@ class FASELHD(private val context: Context) : MainAPI() {
             if (sliderItems.isNotEmpty()) {
                 lists.add(HomePageList("أحدث الإضافات", sliderItems, isHorizontalImages = true))
             }
-
-            // 2. جلب الأقسام (الفئات) المعروضة في الصفحة الرئيسية
             document.select("section#blockList").forEach { block ->
                 val title = block.selectFirst(".blockHead .h3")?.text()?.trim() ?: return@forEach
                 val items = block.select(".blockMovie, .postDiv, .epDivHome").mapNotNull { it.toSearchResult() }
@@ -281,8 +253,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                     lists.add(HomePageList(title, items))
                 }
             }
-
-            // 3. جلب قسم "الأكثر مشاهدة"
             document.select("div.slider")
                 .firstOrNull { it.selectFirst(".h4")?.text()?.contains("مشاهدة") == true }
                 ?.let { mostWatchedBlock ->
@@ -292,11 +262,8 @@ class FASELHD(private val context: Context) : MainAPI() {
                         lists.add(HomePageList(title, items, isHorizontalImages = true))
                     }
                 }
-
-            // نعطل خيار load more في الصفحة الرئيسية لأنها صفحة واحدة تجمع كل الأقسام
             return newHomePageResponse(lists.filter { it.list.isNotEmpty() }, hasNext = false)
         } else {
-            // هذا الجزء يعمل في حال أضفت مستقبلاً روابط لفئات أخرى تدعم الصفحات (Pagination)
             val items = document.select(".postDiv, .blockMovie").mapNotNull { it.toSearchResult() }
             val hasNext = document.select("ul.pagination a[href*='/page/${page + 1}']").isNotEmpty()
             return newHomePageResponse(request.name, items, hasNext)
@@ -307,8 +274,6 @@ class FASELHD(private val context: Context) : MainAPI() {
     override suspend fun search(query: String, page: Int): SearchResponseList {
         val base = baseUrl()
         val encoded = URLEncoder.encode(query, "UTF-8")
-
-        // بناء رابط البحث الأصلي
         val originalSearch = if (page == 1) {
             "$base/?s=$encoded"
         } else {
@@ -324,8 +289,6 @@ class FASELHD(private val context: Context) : MainAPI() {
         } catch (_: Exception) {
             finalSearchUrl = originalSearch
         }
-
-        // المحاولة الأولى: البحث العادي
         val document = try {
             smartGet(finalSearchUrl, referer = base)
         } catch (e: Exception) {
@@ -344,20 +307,10 @@ class FASELHD(private val context: Context) : MainAPI() {
                         .add("action", "dtc_live")
                         .add("trsearch", query)
                         .build()
-
-                    // ⭐️ استدعاء الدالة المساعدة الجديدة
-
-
-                    // نستدعي الدالة المساعدة
                     val bodyStr = executeRequestWithCloudflareRetry { cookies ->
                         makeAjaxRequest(ajaxUrl, finalSearchUrl, formBody, cookies)
                     }
-
-// ⭐️ الحل هنا: استخدمنا الدالة الآمنة isNullOrBlank
                     if (!bodyStr.isNullOrBlank()) {
-                        // بفضل هذا الشرط الصحيح، Kotlin الآن "ذكية" بما يكفي (Smart Cast)
-                        // لتعرف أن bodyStr هنا لا يمكن أن يكون null.
-                        // لذلك، لم نعد بحاجة لعلامة التعجب (!!) في السطر التالي.
                         val ajaxDoc = Jsoup.parse(bodyStr, baseUrl()) // يعمل الآن بأمان!
 
                         items = ajaxDoc.select("div.postDiv, article, .result, .search-item").mapNotNull { it.toSearchResult() }
@@ -425,11 +378,7 @@ class FASELHD(private val context: Context) : MainAPI() {
     override suspend fun load(url: String): LoadResponse? {
         val base = baseUrl()
         val absoluteUrl = if (url.startsWith("/")) "$base$url" else url
-
-        // 1. جلب الصفحة
         val doc = smartGet(absoluteUrl)
-
-        // تنظيف النصوص
         val rawTitle = doc.selectFirst(".singleInfo .title.h1")?.ownText() ?: ""
         val title = rawTitle.replace("\\n", "").replace("\n", "").trim()
         if (title.isBlank()) return null
@@ -446,8 +395,6 @@ class FASELHD(private val context: Context) : MainAPI() {
             ?.let { fixUrlNull(it) }
 
         val headers = getProtectedHeaders()
-
-        // 2. استخراج بطاقات المواسم
         val seasonCards = doc.select(".seasonDiv")
         val seasonUrlRegex = Regex("""window\.location\.href\s*=\s*['"]([^'"]+)['"]""")
 
@@ -465,14 +412,9 @@ class FASELHD(private val context: Context) : MainAPI() {
 
         val currentSeasonEpisodes = mutableListOf<Episode>()
         val otherSeasonsFakeEpisodes = mutableListOf<Episode>()
-
-        // 3. منطق التفرقة وبناء القائمة الذكية
         if (seasonCards.isNotEmpty()) {
-            // 🔴 منطق جديد ومحسّن لتحديد الموسم الحالي بدقة
             val h1TitleText = doc.selectFirst(".singleInfo .title.h1")?.text() ?: ""
             var currentSeasonIndex = -1
-
-            // الطريقة الأولى: مطابقة الرابط (تعمل عند فتح صفحة الموسم من الاقتراحات)
             seasonCards.forEachIndexed { idx, seasonEl ->
                 val onclickAttr = seasonEl.attr("onclick")
                 val seasonUrlRel = seasonUrlRegex.find(onclickAttr)?.groupValues?.get(1) ?: ""
@@ -481,30 +423,23 @@ class FASELHD(private val context: Context) : MainAPI() {
                     currentSeasonIndex = idx
                 }
             }
-
-            // الطريقة الثانية: مطابقة النص (تعمل عند فتح صفحة حلقة مباشرة من الفئات)
             if (currentSeasonIndex == -1) {
                 seasonCards.forEachIndexed { idx, seasonEl ->
                     val seasonCardTitle = seasonEl.selectFirst(".title")?.text()?.replace("\\n", "")?.trim() ?: ""
-                    // نطابق إذا كان عنوان الصفحة الكبير يحتوي على اسم الموسم من البطاقة
                     if (seasonCardTitle.isNotBlank() && h1TitleText.contains(seasonCardTitle)) {
                         currentSeasonIndex = idx
                     }
                 }
             }
-
-            // إذا فشلت كل الطرق، نفترض أنه الموسم الأول
             if (currentSeasonIndex == -1) currentSeasonIndex = 0
 
 
             var fakeSeasonCounter = 2
             for (i in 0 until seasonCards.size) {
                 val actualSeasonNum = i + 1
-                // 🔴 نحصل على اسم الموسم الحقيقي من بطاقته
                 val seasonName = seasonCards[i].selectFirst(".title")?.text()?.replace("\\n", "")?.trim() ?: "الموسم $actualSeasonNum"
 
                 if (i == currentSeasonIndex) {
-                    // حلقات الموسم الحالي
                     doc.select("div#epAll a").forEach { el ->
                         val epUrlRaw = el.attr("href").trim()
                         if (epUrlRaw.isNotBlank()) {
@@ -512,10 +447,8 @@ class FASELHD(private val context: Context) : MainAPI() {
                             if (!epTitle.contains("باقي الحلقات") && !epTitle.contains("المزيد")) {
                                 val epNum = Regex("""\d+""").find(epTitle)?.value?.toIntOrNull()
                                 currentSeasonEpisodes.add(newEpisode(if (epUrlRaw.startsWith("http")) epUrlRaw else "$base$epUrlRaw") {
-                                    // 🔴 الحل هنا: نستخدم اسم الموسم الصحيح الذي استخرجناه للتو
                                     this.name = "$seasonName - $epTitle"
                                     this.episode = epNum
-                                    // إجبار التطبيق على اعتبار هذا هو الموسم الأول لكي يفتحه مباشرة
                                     this.season = 1
                                     this.posterUrl = poster
                                 })
@@ -523,7 +456,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                         }
                     }
                 } else {
-                    // حلقات المواسم الأخرى (وهمية)
                     otherSeasonsFakeEpisodes.add(newEpisode("$absoluteUrl?s=$actualSeasonNum#fake") {
                         this.name = "($seasonName في الاقتراحات فوق في الزاوية اليسار)"
                         this.episode = 1
@@ -534,7 +466,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 }
             }
         } else {
-            // مسلسل موسم واحد
             doc.select("div#epAll a").forEach { el ->
                 val epUrlRaw = el.attr("href").trim()
                 if (epUrlRaw.isNotBlank()) {
@@ -572,19 +503,14 @@ class FASELHD(private val context: Context) : MainAPI() {
     }
     private fun extractIframeSources(doc: Document): List<String> {
         val results = mutableSetOf<String>()
-
-        // 🔴 الفلتر: قائمة الكلمات الممنوعة في الروابط 🔴
         val blockedKeywords = listOf(
             "google.com/recaptcha",
             "google.com/ads",
             "googlesyndication.com",
             "googletagmanager.com"
         )
-
-        // دالة مساعدة صغيرة لتطبيق الفلتر وتصحيح الرابط
         fun addResult(url: String) {
             val fixedUrl = fixUrl(url)
-            // إذا كان الرابط لا يحتوي على أي من الكلمات الممنوعة، قم بإضافته
             if (blockedKeywords.none { fixedUrl.contains(it) }) {
                 results.add(fixedUrl)
             } else {
@@ -594,14 +520,10 @@ class FASELHD(private val context: Context) : MainAPI() {
 
         Log.d("FASELHD_IFRAME", "========== START iframe extraction ==========")
         Log.d("FASELHD_IFRAME", "Document URL: ${doc.baseUri()}")
-
-        // 1️⃣ iframe مباشر
         doc.select("iframe[src]").forEach { el ->
             val src = el.attr("src")
             if (src.isNotBlank()) addResult(src)
         }
-
-        // 2️⃣ onclick
         val onClickRegex = Regex("""player_iframe\.location\.href\s*=\s*['"]([^'"]+)['"]""")
         doc.select("[onclick]").forEach { el ->
             val onclick = el.attr("onclick")
@@ -609,8 +531,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 addResult(match.groupValues[1])
             }
         }
-
-        // 3️⃣ script
         val scriptRegex = Regex("""https?://[^\s"'<>]+""")
         doc.select("script").forEach { s ->
             val data = s.data()
@@ -623,8 +543,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 }
             }
         }
-
-        // 4️⃣ shortLink / liskSh
         doc.select("div.shortLink, span#liskSh, a[data-src]").forEach { el ->
             val text = el.text().trim()
             if (text.startsWith("http")) addResult(text)
@@ -657,7 +575,6 @@ class FASELHD(private val context: Context) : MainAPI() {
         val originalHost = try { Uri.parse(finalUrl).host?.replace("www.", "") ?: "" } catch (e: Exception) { "" }
 
         activity.runOnUiThread {
-            // === 1. إعداد النافذة لتكون مخفية تماماً وخارج الشاشة (الكود الأصلي الخاص بك) ===
             val dialog = Dialog(activity)
 
             dialog.setCancelable(false)
@@ -669,8 +586,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 setBackgroundDrawableResource(android.R.color.transparent)
                 setDimAmount(0f) // بدون تعتيم
                 clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-
-                // منع التفاعل والتركيز
                 addFlags(
                     WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
@@ -696,14 +611,11 @@ class FASELHD(private val context: Context) : MainAPI() {
                 dialog.setContentView(webView, ViewGroup.LayoutParams(1, 1))
                 dialog.show()
             } catch (e: Exception) {
-                // حالة احتياطية إذا فشل الـ Dialog
                 try {
                     val decor = activity.window?.decorView as? ViewGroup
                     decor?.addView(webView, FrameLayout.LayoutParams(1, 1, Gravity.START or Gravity.TOP))
                 } catch (_: Exception) {}
             }
-
-            // === 2. إعدادات الويبفيو (الكود الأصلي الخاص بك) ===
             webView.settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
@@ -722,7 +634,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                 cacheMode = WebSettings.LOAD_DEFAULT
                 userAgentString = lastValidUserAgent
-                // 🔴 منع تحميل الصور لزيادة السرعة بما أنها نافذة مخفية
                 blockNetworkImage = true
             }
 
@@ -801,8 +712,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                     }
                 }
             }
-
-            // 🔴 دالة بدء المحاولة وإعادة التحميل
             fun startNextAttempt() {
                 synchronized(finishLock) { if (finished) return }
 
@@ -813,8 +722,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 }
 
                 Log.d("FASEL_FAST", "🔄 Loading Attempt ${currentAttempt + 1}/$maxAttempts")
-
-                // إعداد مؤقت لهذه المحاولة
                 attemptTimeoutRunnable?.let { handler.removeCallbacks(it) }
                 attemptTimeoutRunnable = Runnable {
                     synchronized(foundM3u8) {
@@ -828,23 +735,15 @@ class FASELHD(private val context: Context) : MainAPI() {
                     }
                 }
                 handler.postDelayed(attemptTimeoutRunnable!!, attemptTimeoutMs)
-
-                // إعادة تحميل الصفحة
                 activity.runOnUiThread {
                     try { webView.loadUrl(finalUrl, mapOf("Referer" to referer)) } catch (_: Exception) {}
                 }
             }
-
-            // ✅ توليد كود JS للاستراتيجية الحالية (يتم حقنها باستمرار خلال المحاولة)
             fun getStrategyJs(attempt: Int): String {
                 return """
                 (function() {
                     const strategy = $attempt;
-                    
-                    // كسر قيود التفاعل
                     Object.defineProperty(navigator, 'userActivation', { get: () => ({ hasBeenActive: true, isActive: true }) });
-
-                    // -- خوارزمية فك التشفير (الضربة القاضية) --
                     const Decryptor = {
                         key1: "V2@%YSU2B]G~", key2: "bv0fim4qf17",
                         ie: function(c) {
@@ -866,8 +765,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                             try { return this.dec(this.dec(url.substring(4), this.key2), this.key1); } catch(e){return url;}
                         }
                     };
-
-                    // الخطاف الآمن (يُنفذ مرة واحدة إذا لم يُنفذ من قبل)
                     if ((strategy === 0 || strategy === 4) && !window.__isDecryptionHooked) {
                         window.__isDecryptionHooked = true;
                         let chk = setInterval(function() {
@@ -896,15 +793,12 @@ class FASELHD(private val context: Context) : MainAPI() {
                             }
                         }, 10);
                     }
-
-                    // -- تنفيذ الاستراتيجيات --
                     try {
                         let p = typeof window.jwplayer === 'function' ? window.jwplayer("player") : null;
                         let isPlaying = p && (p.getState() === 'playing' || p.getState() === 'buffering');
                         if (isPlaying) return;
 
                         if (strategy === 0 || strategy === 1 || strategy === 7) {
-                            // النقر على الواجهة
                             var els = document.querySelectorAll('button, a, [onclick], video, [role="button"], .jw-icon, .vjs-control, .po-play-btn, .plyr__control');
                             els.forEach(el => {
                                 if (el.href && (el.href.includes('google.com') || el.href.includes('recaptcha'))) return;
@@ -912,7 +806,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                             });
                         }
                         if (strategy === 2 || strategy === 7) {
-                            // تشغيل مباشر عبر API
                             if (p && typeof p.play === 'function') { p.setMute(true); p.play(); }
                         }
            
@@ -920,7 +813,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 })();
             """.trimIndent()
             }
-            // ✅ كود مراقبة الشبكة (من كودك الأصلي مع تحسين بسيط)
             val fastSnifferJs = """
             (function() {
                 try {
@@ -983,8 +875,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     view?.evaluateJavascript(fastSnifferJs, null)
-
-                    // 🔴 حقن متكرر للاستراتيجية الحالية (يعادل autoTouchRunnable في كودك الأصلي)
                     autoTouchRunnable?.let { handler.removeCallbacks(it) }
                     autoTouchRunnable = object : Runnable {
                         override fun run() {
@@ -995,8 +885,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                     }
                     handler.postDelayed(autoTouchRunnable!!, 500)
                 }
-
-                // === 🔴 دالة shouldInterceptRequest من كودك الأصلي تماماً ===
                 override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                     val url = request.url.toString()
                     val method = request.method
@@ -1088,8 +976,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                     } catch (e: Exception) { return false }
                 }
             }
-
-            // 🚀 بدء حلقة المحاولات (تبدأ بالمحاولة رقم 0)
             startNextAttempt()
 
             cont.invokeOnCancellation { handler.post { safeFinish(null) } }
@@ -1102,11 +988,7 @@ class FASELHD(private val context: Context) : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-
-        // نجلب صفحة الحلقة للحصول على الكوكيز والبيانات
         val doc = smartGet(data)
-
-        // نستخرج روابط الـ iframe باستخدام دالتك الممتازة
         val iframeUrls = extractIframeSources(doc)
 
         if (iframeUrls.isEmpty()) {
@@ -1115,15 +997,10 @@ class FASELHD(private val context: Context) : MainAPI() {
         }
 
         var foundLink = false
-
-        // نجرب الروابط المستخرجة (نستخدم distinct لمنع التكرار)
         iframeUrls.distinct().forEach { iframeUrl ->
             if (foundLink) return@forEach // إذا وجدنا رابط وتوقفنا
 
             Log.d("FASELHD", "Testing iframe: $iframeUrl")
-
-            // نمرر الـ data (رابط صفحة الحلقة) كـ Referer
-            // هذا التعديل مهم لأن دالتك السابقة كانت لا تمرر Referer للـ WebView
             val m3u8 = resolveWithWebView(iframeUrl, data)
 
             if (!m3u8.isNullOrBlank()) {
@@ -1144,62 +1021,3 @@ class FASELHD(private val context: Context) : MainAPI() {
         return foundLink
     }
 }
-
-
-//override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-//    val url = if (page > 1 && request.data != mainUrl) {
-//        if (request.data.contains("all_movies"))
-//            "${request.data.removeSuffix("/")}/page/$page"
-//        else
-//            "${request.data}/page/$page"
-//    } else {
-//        request.data
-//    }
-//
-//    val document = smartGet(url)
-//    val headers = getProtectedHeaders()
-//
-//    if (request.data == mainUrl) {
-//        val lists = mutableListOf<HomePageList>()
-//        val sliderItems = document.select("#homeSlide .swiper-slide").mapNotNull {
-//            val slideHref = it.selectFirst("a")?.attr("href") ?: return@mapNotNull null
-//            val slideTitle = it.selectFirst(".h1 a")?.text()?.trim() ?: return@mapNotNull null
-//            val slidePoster = it.selectFirst(".poster img")?.attr("src")
-//            newMovieSearchResponse(slideTitle, slideHref, TvType.Movie) {
-//                this.posterUrl = slidePoster
-//                this.posterHeaders = headers
-//            }
-//        }
-//        if (sliderItems.isNotEmpty()) {
-//            lists.add(HomePageList("أحدث الإضافات", sliderItems, isHorizontalImages = true))
-//        }
-//
-//        document.select("div.slider")
-//            .firstOrNull { it.selectFirst(".h4")?.text()?.contains("مشاهدة") == true }
-//            ?.let { mostWatchedBlock ->
-//                val title =
-//                    mostWatchedBlock.selectFirst(".h4")?.text() ?: "الأفلام الأكثر مشاهدة"
-//                val items = mostWatchedBlock.select(".itemviews .postDiv")
-//                    .mapNotNull { it.toSearchResult() }
-//                if (items.isNotEmpty()) {
-//                    lists.add(HomePageList(title, items, isHorizontalImages = true))
-//                }
-//            }
-//
-//        document.select("section#blockList").forEach { block ->
-//            val title = block.selectFirst(".blockHead .h3")?.text() ?: return@forEach
-//            if (!title.contains("آخر الأفلام المضافة")) {
-//                val items = block.select(".blockMovie, .postDiv, .epDivHome")
-//                    .mapNotNull { it.toSearchResult() }
-//                if (items.isNotEmpty()) {
-//                    lists.add(HomePageList(title, items))
-//                }
-//            }
-//        }
-//        return newHomePageResponse(lists.filter { it.list.isNotEmpty() }, hasNext = false)
-//    } else {
-//        val items = document.select(".postDiv, .blockMovie").mapNotNull { it.toSearchResult() }
-//        val hasNext = document.select("ul.pagination a[href*='/page/${page + 1}']").isNotEmpty()
-//        return newHomePageResponse(request.name, items, hasNext)
-//    }
-//}

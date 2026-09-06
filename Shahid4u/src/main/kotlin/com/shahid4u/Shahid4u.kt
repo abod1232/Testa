@@ -20,8 +20,6 @@ class Shahid4u : MainAPI() {
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
 
     private val logTag = "Shahid4uProvider"
-
-    // متغير لحفظ الرابط النهائي بعد التحقق من إعادة التوجيه لتجنب السبام
     private var resolvedReferer: String? = null
 
     private data class Server(
@@ -32,20 +30,14 @@ class Shahid4u : MainAPI() {
     private data class PlayerResponse(
         @JsonProperty("player_url") val playerUrl: String?
     )
-
-    // شفافة كصورة بديلة إن لم توجد صورة فعلية
     private val TRANSPARENT_PNG_DATA_URI =
         "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg=="
-
-    // -------------------- CloudflareKiller integration --------------------
     override var sequentialMainPage = true
     override var sequentialMainPageDelay = 50L
     override var sequentialMainPageScrollDelay = 50L
 
     private val cloudflareKiller by lazy { CloudflareKiller() }
     private val cfInterceptor: Interceptor get() = cloudflareKiller
-
-    // ---------------------------------------------------------------------
     private fun encodeUri(url: String): String {
         return try {
             url.toCharArray().joinToString("") { char ->
@@ -130,8 +122,6 @@ class Shahid4u : MainAPI() {
             headers = headers,
             interceptor = cfInterceptor
         )
-
-        // التقاط الرابط النهائي مرة واحدة وتخزينه في الذاكرة
         if (resolvedReferer == null) {
             val finalUrl = response.url
             val match = Regex("^(https?://[^/]+/)").find(finalUrl)
@@ -256,7 +246,6 @@ class Shahid4u : MainAPI() {
 
 
     override suspend fun load(url: String): LoadResponse {
-        // تم مسح .document الزائدة
         val document = httpGet(url)
 
         val title = document.selectFirst("span.title")?.text()?.trim() ?: "غير متوفر"
@@ -271,7 +260,6 @@ class Shahid4u : MainAPI() {
         if (seasons.isNotEmpty()) {
             seasons.amap { seasonElement ->
                 val seasonUrl = seasonElement.attr("href")
-                // تم مسح .document الزائدة
                 val seasonDoc = httpGet(seasonUrl, referer = url)
 
                 seasonDoc.select("div.w-100.bg-main.rounded.my-4 a.epss:not([href*='/season/'])")
@@ -334,12 +322,8 @@ class Shahid4u : MainAPI() {
     ): Boolean {
         val watchUrl = data.replace("/film/", "/watch/").replace("/episode/", "/watch/")
         val safeReferer = encodeUri(watchUrl) // الرابط الآمن لمنع انهيار التطبيق
-
-        // --- الهيدرات الثابتة (Fixed Headers) المطابقة للبايثون ---
         val fixedUserAgent = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Mobile Safari/537.36"
         val fixedAcceptLanguage = "en-US,en;q=0.9"
-
-        // 1. الاتصال المبدئي لفتح الجلسة واستقبال الكوكيز والتوكنات
         val watchResponse = app.get(
             watchUrl,
             headers = mapOf(
@@ -353,9 +337,6 @@ class Shahid4u : MainAPI() {
 
         val htmlContent = watchResponse.text
         val watchDocument = watchResponse.document
-
-        // --- استخراج المتغيرات: الكوكيز (Variable Cookies) ---
-        // نقوم بصيد الكوكيز القادمة من السيرفر يدوياً لضمان عدم ضياعها
         val cookieMap = mutableMapOf<String, String>()
         watchResponse.headers.filter { it.first.equals("set-cookie", ignoreCase = true) }.forEach { header ->
             val cookiePart = header.second.substringBefore(";")
@@ -364,10 +345,7 @@ class Shahid4u : MainAPI() {
                 cookieMap[parts[0].trim()] = parts[1].trim()
             }
         }
-        // دمج الكوكيز بصيغة: XSRF-TOKEN=...; shahie4u_session=...
         val dynamicCookie = cookieMap.map { "${it.key}=${it.value}" }.joinToString("; ")
-
-        // --- استخراج المتغيرات: التوكنات (Variable Tokens) ---
         val pageToken = Regex("""const pageToken\s*=\s*"([^"]+)"""").find(htmlContent)?.groupValues?.get(1) ?: ""
         val csrfToken = Regex("""const csrfToken\s*=\s*"([^"]+)"""").find(htmlContent)?.groupValues?.get(1) ?: ""
         val issueUrlEscaped = Regex("""const issueUrl\s*=\s*"([^"]+)"""").find(htmlContent)?.groupValues?.get(1) ?: ""
@@ -375,14 +353,11 @@ class Shahid4u : MainAPI() {
 
         if (pageToken.isNotEmpty() && csrfToken.isNotEmpty() && issueUrl.isNotEmpty()) {
             val serverButtons = watchDocument.select("button.btn-server")
-
-            // 2. إرسال الطلبات للسيرفرات لاستخراج المشغلات
             serverButtons.amap { button ->
                 val serverKey = button.attr("data-server-key")
 
                 if (serverKey.isNotBlank()) {
                     try {
-                        // بناء الترويسات المطابقة للبايثون حرفياً (الثوابت + المتغيرات)
                         val postHeaders = mapOf(
                             "User-Agent" to fixedUserAgent,
                             "Accept" to "application/json",
@@ -391,10 +366,7 @@ class Shahid4u : MainAPI() {
                             "X-Requested-With" to "XMLHttpRequest",
                             "Referer" to safeReferer,
                             "Cookie" to dynamicCookie // الكوكيز المتغيرة التي تم تجميعها
-                            // ملاحظة: Content-Type و Content-Length تضاف تلقائياً بواسطة التطبيق
                         )
-
-                        // 3. إرسال طلب الـ POST الأمني
                         val apiResponse = app.post(
                             issueUrl,
                             headers = postHeaders,
@@ -409,7 +381,6 @@ class Shahid4u : MainAPI() {
                             val playerUrl = parseJson<PlayerResponse>(apiResponse.text).playerUrl
 
                             if (!playerUrl.isNullOrBlank()) {
-                                // 4. الاتصال برابط المشغل النهائي المشفّر
                                 val playerRes = app.get(
                                     playerUrl,
                                     headers = mapOf(
@@ -424,8 +395,6 @@ class Shahid4u : MainAPI() {
                                 )
 
                                 var finalIframeSrc = playerRes.url
-
-                                // إذا ظلت الصفحة داخل الموقع، نستخرج المشغل الخارجي من داخل كود الصفحة
                                 if (finalIframeSrc.contains(URI(mainUrl).host ?: "shahie4u")) {
                                     val iframe =
                                         playerRes.document.selectFirst("iframe")?.attr("src")

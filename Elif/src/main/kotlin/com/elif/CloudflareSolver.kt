@@ -20,8 +20,6 @@ import kotlin.coroutines.suspendCoroutine
 
 object CloudflareSolver {
     private const val TAG = "CF_Solver_Hidden"
-
-    // توحيد الهوية لضمان عدم كشف التخطي
     const val EXACT_USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36"
 
     suspend fun solve(activity: Activity?, url: String): Document? {
@@ -42,16 +40,11 @@ object CloudflareSolver {
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
-
-                // ================== الإخفاء التام ==================
                 webView.alpha = 0f
                 webView.translationX = 10000f
                 webView.isFocusable = false
                 webView.isFocusableInTouchMode = false
                 webView.isClickable = false
-                // ===================================================
-
-                // تسريع الرندرة وتقليل الضغط على المعالج
                 webView.setLayerType(WebView.LAYER_TYPE_HARDWARE, null)
 
                 webView.settings.apply {
@@ -96,8 +89,6 @@ object CloudflareSolver {
                         continuation.resume(Jsoup.parse(cleanHtml))
                     }
                 }
-
-                // مهلة 60 ثانية كحد أقصى للعملية في الخلفية
                 pollingHandler.postDelayed({ finishSuccess(null) }, 60000)
 
                 fun simulateRealTouch(view: WebView, cssX: Float, cssY: Float) {
@@ -157,14 +148,12 @@ object CloudflareSolver {
                                             simulateRealTouch(webView, rx, ry)
                                             pollingHandler.postDelayed({
                                                 simulateRealTouch(webView, lx, ly)
-                                                // انتظار 3 ثواني بعد الضغط لكي لا يضغط بشكل مجنون
                                                 pollingHandler.postDelayed({ isProcessingClick = false }, 3000)
                                             }, 250)
                                         } else { isProcessingClick = false }
                                     }
                                 } catch (e: Exception) { isProcessingClick = false }
                             }
-                            // الفحص كل ثانيتين للبحث عن المربع (توازن ممتاز بين السرعة والأداء)
                             pollingHandler.postDelayed(this, 2000)
                         }
                     }
@@ -206,8 +195,6 @@ object CloudflareSolver {
                             stableSince = now
                         }
                         val stableTime = now - stableSince
-
-                        // التخطي ناجح إذا اختفت الصفحة المؤقتة واستقرت الصفحة
                         if (stillCloudflare == "false" && ready == "complete" && stableTime > 1500 && !fetched) {
                             fetched = true
                             pollingHandler.postDelayed({
@@ -217,7 +204,6 @@ object CloudflareSolver {
                             }, 500)
                             return@evaluateJavascript
                         }
-                        // الفحص كل ثانية (خفيف جداً على المعالج)
                         pollingHandler.postDelayed({ waitUntilReady() }, 1000)
                     }
                 }

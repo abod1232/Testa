@@ -79,10 +79,6 @@ class YoutubeSettingsBottomSheet(private val sharedPref: SharedPreferences) : Bo
             YoutubeSettingsBottomSheet(sp).show(fm, "yt_settings")
         }
     }
-
-    // ===============================================================
-    // شاشة التفضيلات (تستخدم نظام اللغات الجديد)
-    // ===============================================================
     class PrefsFragment(private val sharedPref: SharedPreferences) : PreferenceFragmentCompat() {
 
         private val KEY_VISITOR = "VISITOR_INFO1_LIVE"
@@ -109,8 +105,6 @@ class YoutubeSettingsBottomSheet(private val sharedPref: SharedPreferences) : Bo
             val ctx = requireContext()
             preferenceManager.preferenceDataStore = null
             preferenceScreen = preferenceManager.createPreferenceScreen(ctx)
-
-            // 1. إعدادات الصفحة الرئيسية
             homeCategory = PreferenceCategory(ctx)
             preferenceScreen.addPreference(homeCategory)
 
@@ -131,8 +125,6 @@ class YoutubeSettingsBottomSheet(private val sharedPref: SharedPreferences) : Bo
                 }
             }
             homeCategory.addPreference(manageChannelsPref)
-
-            // 2. إعدادات اللغة
             languagePref = ListPreference(ctx).apply {
                 key = KEY_LANGUAGE
                 entryValues = Loc.availableLanguages.map { it.first }.toTypedArray()
@@ -140,15 +132,12 @@ class YoutubeSettingsBottomSheet(private val sharedPref: SharedPreferences) : Bo
                 if (value == null) setValue("ar")
                 summaryProvider = ListPreference.SimpleSummaryProvider.getInstance()
                 setOnPreferenceChangeListener { _, newValue ->
-                    // عند تغيير اللغة، نقوم بحفظها فوراً وتحديث النصوص في الواجهة
                     sharedPref.edit().putString(KEY_LANGUAGE, newValue as String).apply()
                     view?.post { updateTexts() }
                     true
                 }
             }
             preferenceScreen.addPreference(languagePref)
-
-            // 3. إعدادات الحساب والكوكيز
             authCategory = PreferenceCategory(ctx)
             preferenceScreen.addPreference(authCategory)
 
@@ -185,7 +174,6 @@ class YoutubeSettingsBottomSheet(private val sharedPref: SharedPreferences) : Bo
 
             clearPref = Preference(ctx).apply {
                 setOnPreferenceClickListener {
-                    // استخدام MaterialAlertDialogBuilder مع أزرار نظام أندرويد
                     MaterialAlertDialogBuilder(ctx)
                         .setTitle(Loc.getString(sharedPref, "logout_confirm_title"))
                         .setMessage(Loc.getString(sharedPref, "logout_confirm_msg"))
@@ -204,8 +192,6 @@ class YoutubeSettingsBottomSheet(private val sharedPref: SharedPreferences) : Bo
                 }
             }
             authCategory.addPreference(clearPref)
-
-            // 4. إعدادات المشغل والتخصيص
             customCategory = PreferenceCategory(ctx)
             preferenceScreen.addPreference(customCategory)
 
@@ -293,10 +279,6 @@ class YoutubeSettingsBottomSheet(private val sharedPref: SharedPreferences) : Bo
             playlistTagPref.setNegativeButtonText(Loc.getString(sharedPref, "cancel"))
         }
     }
-
-    // ===============================================================
-    // واجهة إدارة القنوات المخصصة
-    // ===============================================================
     class CustomSectionsDialog(private val sharedPref: SharedPreferences) : DialogFragment() {
 
         private val mapper = jacksonObjectMapper()
@@ -326,15 +308,10 @@ class YoutubeSettingsBottomSheet(private val sharedPref: SharedPreferences) : Bo
             }
 
             val backBtn = ImageView(ctx).apply {
-                // رسم أيقونة سهم الرجوع (Arrow Back) باللون الأبيض
                 setImageDrawable(createSvgIcon("M20,11H7.83l5.59,-5.59L12,4l-8,8 8,8 1.41,-1.41L7.83,13H20v-2z", "#FFFFFF"))
-
-                // إضافة تأثير التموج (Ripple) عند الضغط لجعله يبدو كزر احترافي
                 val outValue = android.util.TypedValue()
                 ctx.theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, outValue, true)
                 setBackgroundResource(outValue.resourceId)
-
-                // ضبط الحواف والحجم
                 setPadding(15, 15, 15, 15)
                 layoutParams = LinearLayout.LayoutParams(90, 90).apply {
                     setMargins(0, 0, 30, 0)
@@ -438,14 +415,11 @@ class YoutubeSettingsBottomSheet(private val sharedPref: SharedPreferences) : Bo
                     }
                 }
             }
-
-            // --- إعداد حقل الاسم مع علامة التحميل ---
             val nameWrapper = FrameLayout(ctx)
             val inputName = createInput(Loc.getString(sharedPref, "section_name"), existingItem?.name ?: "")
 
             val loadingIndicator = ProgressBar(ctx, null, android.R.attr.progressBarStyleSmall).apply {
                 visibility = View.GONE
-                // وضع علامة التحميل في أقصى يمين الحقل
                 layoutParams = FrameLayout.LayoutParams(80, 80).apply {
                     gravity = Gravity.CENTER_VERTICAL or Gravity.END
                     marginEnd = 20
@@ -455,8 +429,6 @@ class YoutubeSettingsBottomSheet(private val sharedPref: SharedPreferences) : Bo
             nameWrapper.addView(loadingIndicator)
 
             val inputUrl = createInput(Loc.getString(sharedPref, "url_hint"), existingItem?.url ?: "")
-
-            // --- منطق جلب الاسم تلقائياً ---
             var fetchJob: kotlinx.coroutines.Job? = null
             inputUrl.addTextChangedListener(object : android.text.TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -464,14 +436,11 @@ class YoutubeSettingsBottomSheet(private val sharedPref: SharedPreferences) : Bo
                 override fun afterTextChanged(s: android.text.Editable?) {
                     val url = s.toString().trim()
                     fetchJob?.cancel() // إلغاء أي عملية سابقة
-
-                    // إذا كان الاسم فارغاً والرابط يبدو صحيحاً
                     if (url.startsWith("http") && url.contains("youtube") && inputName.text.isBlank()) {
                         loadingIndicator.visibility = View.VISIBLE
 
                         fetchJob = kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
                             try {
-                                // جلب الصفحة واستخراج العنوان
                                 val response = com.lagradost.cloudstream3.app.get(url).text
                                 val doc = org.jsoup.Jsoup.parse(response)
                                 var title = doc.selectFirst("meta[property=og:title]")?.attr("content")
@@ -640,8 +609,6 @@ class YoutubeSettingsBottomSheet(private val sharedPref: SharedPreferences) : Bo
                 holder.editBtn.setOnClickListener {
                     showAddEditDialog(section, holder.adapterPosition)
                 }
-
-                // إضافة رسالة التأكيد عند الحذف باستخدام MaterialAlertDialogBuilder
                 holder.deleteBtn.setOnClickListener {
                     val pos = holder.adapterPosition
                     if (pos != RecyclerView.NO_POSITION) {
@@ -662,10 +629,6 @@ class YoutubeSettingsBottomSheet(private val sharedPref: SharedPreferences) : Bo
             override fun getItemCount(): Int = sectionsList.size
         }
     }
-
-    // ===============================================================
-    // متصفح التقاط الكوكيز
-    // ===============================================================
     class WebViewCaptureDialog(
         private val sharedPref: SharedPreferences,
         private val onFinish: (Boolean) -> Unit

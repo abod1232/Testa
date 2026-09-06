@@ -73,15 +73,10 @@ class Aflaam : MainAPI() {
     val year = yearText?.substringAfter(":")?.trim()?.toIntOrNull()
 
     val tags = document.select("a.movie-category").map { it.text() }
-    
-    // 1. استخراج التقييم كـ Double بدلاً من toRatingInt() المهملة
     val scoreValue = document.selectFirst("span.font-size-24")?.text()?.toDoubleOrNull()
-
-    // إصلاح خطأ ActorData
     val cast = document.select("div.entry-box-2 a").mapNotNull {
         val name = it.selectFirst("h3.entry-name")?.text() ?: return@mapNotNull null
         val image = it.selectFirst("img")?.attr("src")?.let { src -> fixUrl(src) }
-        // نستخدم كلاس Actor مباشرة
         Actor(name, image)
     }
 
@@ -107,7 +102,6 @@ class Aflaam : MainAPI() {
             this.year = year
             this.plot = plot
             this.tags = tags
-            // 2. استخدام التحديث الجديد للتقييم
             this.score = Score.from10(scoreValue)
             addActors(cast) // استخدام الدالة المساعدة
             addTrailer(trailerUrl)
@@ -118,7 +112,6 @@ class Aflaam : MainAPI() {
             this.year = year
             this.plot = plot
             this.tags = tags
-            // 3. استخدام التحديث الجديد للتقييم
             this.score = Score.from10(scoreValue)
             addActors(cast) // استخدام الدالة المساعدة
             addTrailer(trailerUrl)
@@ -138,7 +131,6 @@ class Aflaam : MainAPI() {
     }
 
     var linksLoaded = false
-    // تم استبدال apmap بـ amap الآمنة وغير الحاظرة للمسارات
     watchPageLinks.amap { watchUrl ->
         try {
             val watchPageDoc = app.get(watchUrl).document
@@ -146,8 +138,6 @@ class Aflaam : MainAPI() {
                 val src = source.attr("src")
                 if (src.isNotBlank()) {
                     val qualityName = source.attr("size").ifEmpty { "720" }
-
-                    // إصلاح خطأ ExtractorLink و tryParse
                     callback.invoke(
                         newExtractorLink(
                             source = this.name,
@@ -162,7 +152,6 @@ class Aflaam : MainAPI() {
                 }
             }
         } catch (e: Exception) {
-            // error logging
         }
     }
     return linksLoaded

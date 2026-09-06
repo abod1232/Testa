@@ -12,8 +12,6 @@ class Asia2tvProvider : MainAPI() {
     override val hasMainPage = true
     override var lang = "ar"
     override val supportedTypes = setOf(TvType.AsianDrama, TvType.TvSeries, TvType.Movie)
-
-    // دالة مساعدة لجلب الصور مع دعم التحميل الكسول
     private fun getPosterFromElement(element: Element?): String? {
         return element?.selectFirst("div.image img")?.let {
             it.attr("src").ifBlank { it.attr("data-src") }
@@ -56,7 +54,6 @@ class Asia2tvProvider : MainAPI() {
             if (title.isBlank()) return@mapNotNull null
             val href = a.attr("href")
             val posterUrl = getPosterFromElement(it)
-            // نحدد النوع بناءً على الرابط
             val type = if (href.contains("/category/asian-movies/")) TvType.Movie else TvType.TvSeries
             newMovieSearchResponse(title, href, type) {
                 this.posterUrl = posterUrl
@@ -64,25 +61,16 @@ class Asia2tvProvider : MainAPI() {
         }
     }
 
-
-    // ... (imports)
-
-// ... (داخل الكلاس)
-
     override suspend fun load(url: String): LoadResponse {
         val soup = app.get(url).document
 
         val title = soup.selectFirst("h1 span.title")?.text()?.trim() ?: "Unknown"
-        // طريقة موثوقة لجلب البوستر مع خطة بديلة
         val poster = soup.selectFirst("div.single-thumb-bg > img")?.attr("src")
             ?: soup.selectFirst("meta[property=og:image]")?.attr("content")
 
         val plot = soup.selectFirst("div.getcontent p")?.text()?.trim()
         val tags = soup.select("div.box-tags a, li:contains(البلد) a").map { it.text() }
-        // تصحيح بسيط: .text() قد تُرجع نصًا غير رقمي. الأفضل استخدام .last()?.text()
         val year = soup.select("div.post-date")?.last()?.text()?.toIntOrNull()
-
-        // التحقق إذا كانت الصفحة لفيلم (لا يوجد حلقات)
         val episodeElements = soup.select("div.loop-episode a")
         if (episodeElements.isEmpty()) {
             return newMovieLoadResponse(title, url, TvType.Movie, url) {
@@ -92,18 +80,10 @@ class Asia2tvProvider : MainAPI() {
                 this.year = year
             }
         }
-
-        // =======================================================
-        //            *** تصحيح منطق استخراج الحلقات ***
         val episodes = episodeElements.mapNotNull { element ->
             val href = element.attr("href")
-            // استخراج اسم الحلقة من العنصر المخصص له
             val episodeName = element.selectFirst("div.titlepisode")?.text()?.trim()
-
-            // إذا لم نجد اسمًا للحلقة، نتجاهلها
             if (episodeName.isNullOrBlank()) return@mapNotNull null
-
-            // استخراج رقم الحلقة من الاسم الذي حصلنا عليه
             val episodeNumber = episodeName.filter { it.isDigit() }.toIntOrNull()
 
             newEpisode(href) {
@@ -112,7 +92,6 @@ class Asia2tvProvider : MainAPI() {
                 this.posterUrl = poster // إضافة بوستر المسلسل لكل حلقة
             }
         }.reversed() // عكس الترتيب لأن المواقع غالبًا ما تعرض الحلقات من الأحدث للأقدم
-        // =======================================================
 
         return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
             this.posterUrl = poster
@@ -128,13 +107,10 @@ class Asia2tvProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // إذا كان الرابط هو رابط فيلم، فهو أيضاً data
-        // نحتاج أولاً للوصول إلى صفحة السيرفرات
         val serverPageUrl = if (data.contains("/watching/")) {
             data // هذا بالفعل رابط المشاهدة
         } else {
             val doc = app.get(data).document
-            // بالنسبة للأفلام، رابط المشاهدة قد يكون مختلفاً
             doc.selectFirst("div.loop-episode a.current")?.attr("href") // للمسلسلات
                 ?: doc.selectFirst("a.watch_player")?.attr("href") // للأفلام
                 ?: return false

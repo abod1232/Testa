@@ -24,19 +24,13 @@ class MailruExtractor : ExtractorApi() {
             Log.w(TAG, "video id not found in url: $url")
             return
         }
-
-        // جلب ميتا
         val videoReq = try {
             app.get("${mainUrl}/+/video/meta/${vidId}", referer = extRef)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to fetch meta: ${e.message}", )
             return
         }
-
-        // اقرأ video_key من الكوكيز إن وُجد (غالبًا يستخدمه CDN)
         val videoKey = videoReq.cookies["video_key"]?.toString().orEmpty()
-
-        // parse JSON آمن
         val videoData = AppUtils.tryParseJson<MailRuData>(videoReq.text)
         if (videoData == null) {
             Log.e(TAG, "MailRu: invalid json or no videos")
@@ -45,8 +39,6 @@ class MailruExtractor : ExtractorApi() {
 
         for (video in videoData.videos) {
             var videoUrl = if (video.url.startsWith("//")) "https:${video.url}" else video.url
-
-            // لو CDN يحتاج video_key كـ query param يمكنك إضافته هنا
             if (videoKey.isNotBlank()) {
                 videoUrl = if (videoUrl.contains("?")) {
                     "$videoUrl&video_key=$videoKey"
@@ -64,9 +56,7 @@ class MailruExtractor : ExtractorApi() {
                         type = if (videoUrl.contains(".m3u8", ignoreCase = true))
                             ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
                     ) {
-                        // نعطي referer لأن بعض السيرفرات تحتاجه
                         this.referer = extRef
-                        // لا نستخدم this.headers لأنها قد لا تكون مدعومة في نسختك من المكتبة
                         this.quality = getQualityFromName(video.key)
                     }
                 )

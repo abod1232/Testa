@@ -26,32 +26,24 @@ class FullMatchShowsProvider(private val context: Context) : MainAPI() {
     override val supportedTypes = setOf(TvType.Movie)
 
     private val categories = listOf(
-        // England
         MainCategory("England - Premier League", "$mainUrl/leagues/premier-league/", "show_eng_premier"),
         MainCategory("England - ChampionShip", "$mainUrl/leagues/championship/", "show_eng_championship"),
         MainCategory("England - FA Cup", "$mainUrl/leagues/fa-cup/", "show_eng_fa_cup"),
         MainCategory("England - Carabao Cup", "$mainUrl/leagues/carabao-cup/", "show_eng_carabao"),
-        // Spain
         MainCategory("Spain - La liga", "$mainUrl/leagues/la-liga/", "show_spa_liga"),
         MainCategory("Spain - Copa Del Rey", "$mainUrl/leagues/copa-del-rey/", "show_spa_copa"),
-        // Italy
         MainCategory("Italy - Serie A", "$mainUrl/leagues/serie-a/", "show_ita_serie_a"),
         MainCategory("Italy - Coppa Italia", "$mainUrl/leagues/coppa-italia/", "show_ita_coppa"),
-        // Germany
         MainCategory("Germany - DFB Pokal", "$mainUrl/leagues/dfb-pokal/", "show_ger_pokal"),
         MainCategory("Germany - BundesLiga", "$mainUrl/leagues/bundesliga/", "show_ger_bundesliga"),
-        // Netherland
         MainCategory("Netherland - Eredivisie", "$mainUrl/leagues/eredivisie/", "show_ned_eredivisie"),
-        // Europe
         MainCategory("Europe - Champions League", "$mainUrl/leagues/champions-league/", "show_eur_champions"),
         MainCategory("Europe - Europa League", "$mainUrl/leagues/europa-league/", "show_eur_europa"),
         MainCategory("Europe - Nations League", "$mainUrl/leagues/nations-league/", "show_eur_nations"),
         MainCategory("Europe - Super Cup", "$mainUrl/leagues/super-cup/", "show_eur_super_cup"),
-        // International
         MainCategory("International - Friendly Match", "$mainUrl/leagues/friendly-match/", "show_int_friendly"),
         MainCategory("International - Club Friendlies", "$mainUrl/leagues/club-friendlies/", "show_int_club_friendly"),
         MainCategory("International - World Cup Qualifiers", "$mainUrl/leagues/world-cup-qualifiers/", "show_int_wc_qualifiers"),
-        // Extras
         MainCategory("Extras - Africa Cup", "$mainUrl/leagues/africa-cup/", "show_ext_africa"),
         MainCategory("Extras - Liga Portugal", "$mainUrl/leagues/liga-portugal/", "show_ext_portugal"),
         MainCategory("Extras - Saudi Pro League", "$mainUrl/leagues/saudi-pro-league/", "show_ext_saudi"),
@@ -61,7 +53,6 @@ class FullMatchShowsProvider(private val context: Context) : MainAPI() {
 
     private fun isCategoryEnabled(category: MainCategory): Boolean {
         val prefs = PreferenceManager.getDefaultSharedPreferences(context)
-        // القيمة الافتراضية false تعني أن الفئات ستكون معطلة حتى يفعلها المستخدم
         return prefs.getBoolean(category.key, false)
     }
 
@@ -76,15 +67,12 @@ class FullMatchShowsProvider(private val context: Context) : MainAPI() {
         if (page == 1) {
             categories.forEach { category ->
                 try {
-                    // ✅ تم تصحيح استدعاء الدالة
                     if (!isCategoryEnabled(category)) {
                         println("Skipping category: ${category.name} (disabled in settings)")
                         return@forEach
                     }
-                    // ✅ تم تصحيح استخدام الرابط
                     val catDoc = app.get(category.url).document
                     val items = parsePostItems(catDoc.select("ul#posts-container li.post-item"))
-                    // استخدمنا category.name لعرض العنوان الصحيح في الصفحة الرئيسية
                     lists.add(HomePageList(category.name, items.take(10)))
                 } catch (e: Exception) {
                     logError(e)
@@ -189,30 +177,23 @@ class FullMatchShowsProvider(private val context: Context) : MainAPI() {
     ): Boolean {
         val document = app.get(data).document
         var foundLinks = false
-
-        // 1. فحص جميع الـ Iframes الموجودة في الصفحة الأساسية
         document.select("iframe").forEach { iframe ->
             val src = fixUrl(iframe.attr("src"))
             if (src.isNotEmpty() && !src.contains("facebook.com") && !src.contains("google")) {
                 if (processUrlForM3u8(src, data, callback)) foundLinks = true
             }
         }
-
-        // 2. فحص الأزرار (myButton) والدخول لروابطها
         document.select("a.myButton").forEach { button ->
             val btnUrl = fixUrl(button.attr("href"))
             val btnText = button.text().trim()
 
             if (btnUrl.isNotEmpty() && btnUrl != data) {
-                // محاولة استخراج الرابط من صفحة الزر
                 if (processUrlForM3u8(btnUrl, data, callback, btnText)) foundLinks = true
             }
         }
 
         return foundLinks
     }
-
-    // دالة مساعدة لفحص محتوى الصفحة واستخراج رابط pl.init أو أي M3U8 مخفي
     private suspend fun processUrlForM3u8(
         url: String,
         referer: String,
@@ -223,16 +204,11 @@ class FullMatchShowsProvider(private val context: Context) : MainAPI() {
             val response = app.get(url, referer = referer)
             val html = response.text
             var found = false
-
-            // البحث عن نمط pl.init('...') باستخدام Regex
-            // النمط يبحث عن أي رابط داخل pl.init ينتهي بـ .m3u8
             val plInitRegex = Regex("""pl\.init\(['"](.*?)['"]\)""")
             val match = plInitRegex.find(html)
 
             if (match != null) {
                 var m3u8Url = match.groupValues[1]
-
-                // إضافة https: إذا كان الرابط يبدأ بـ // كما في المثال الخاص بك
                 if (m3u8Url.startsWith("//")) {
                     m3u8Url = "https:$m3u8Url"
                 }
@@ -251,8 +227,6 @@ class FullMatchShowsProvider(private val context: Context) : MainAPI() {
                     found = true
                 }
             }
-
-            // إذا لم يجد pl.init، نحاول استخدام الـ loadExtractor الافتراضي كحل بديل
             if (!found) {
                 found = loadExtractor(url, referer, { }, callback)
             }

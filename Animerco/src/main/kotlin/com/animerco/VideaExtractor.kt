@@ -116,8 +116,6 @@ class VideaExtractor : ExtractorApi() {
                 Log.w(TAG, "No video_source elements found")
                 return
             }
-
-            // === جمع المصادر مع حساب الجودة ثم ترتيبها تنازلياً حسب الجودة ===
             val collected = mutableListOf<Triple<Int, String, String>>() // Triple(qualityValue, name, finalUrl)
 
             for (src in videoSources) {
@@ -133,10 +131,7 @@ class VideaExtractor : ExtractorApi() {
                     } else {
                         "https:$videoUrlPart?md5=$md5&expires=$exp"
                     }
-
-                    // استخدم المساعدة المتاحة لتحويل الاسم إلى قيمة جودة
                     val q = try {
-                        // getQualityFromName موجود في utils — يعيد int قيمة الجودة أو 0
                         val qv = getQualityFromName(name)
                         if (qv <= 0) Qualities.Unknown.value else qv
                     } catch (e: Exception) {
@@ -149,15 +144,10 @@ class VideaExtractor : ExtractorApi() {
                     Log.e(TAG, "Error processing a video_source element", e)
                 }
             }
-
-            // رتب تنازلياً حسب القيمة (أعلى جودة أولاً)
             val sorted = collected.sortedWith(compareByDescending<Triple<Int, String, String>> { it.first }
                 .thenByDescending { // tie-breaker: حاول ترتيب حسب اسم إن أردت (1080 قبل 720)
-                    // حاول استخراج عدد من الاسم إن أمكن (مثل "1080" -> 1080)
                     Regex("(\\d{3,4})").find(it.second)?.groupValues?.get(1)?.toIntOrNull() ?: 0
                 })
-
-            // أنشئ روابط الـ Extractor على Main thread
             withContext(Dispatchers.Main) {
                 for ((qualityVal, name, finalUrl) in sorted) {
                     try {

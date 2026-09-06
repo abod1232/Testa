@@ -27,7 +27,6 @@ class ExternalEarnVidsExtractor : ExtractorApi() {
         Log.i(name, "Original input URL: $url")
 
         try {
-            // ===== إعداد الـ Headers =====
             val headers = mutableMapOf(
                 "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
                         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
@@ -35,8 +34,6 @@ class ExternalEarnVidsExtractor : ExtractorApi() {
                 "Accept-Language" to "en-US,en;q=0.5",
                 "Connection" to "keep-alive"
             )
-
-            // تحديد الـ Referer وتشفيره إن احتوى على حروف عربية
             val resolvedReferer = if (url.contains("fdewsdc.sbs", true)) {
                 "https://shhahid4u.cam"
             } else {
@@ -46,14 +43,10 @@ class ExternalEarnVidsExtractor : ExtractorApi() {
             val safeReferer = safeEncodeUrl(resolvedReferer)
             headers["Referer"] = safeReferer
             Log.d(name, "🌐 Encoded Referer used: $safeReferer")
-
-            // ===== جلب الصفحة =====
             val response = app.get(url, headers = headers)
             val html = response.text ?: ""
             val finalResolvedUrl = response.url
             Log.d(name, "Fetched page length=${html.length} for $url")
-
-            // ===== فحص سريع عن m3u8 (الخطة البديلة السريعة والمباشرة) =====
             try {
                 val m3u8Regex = Regex("""https?://[^'"\s>]+?\.m3u8[^'"\s>]*""", RegexOption.IGNORE_CASE)
                 val m3u8Match = m3u8Regex.find(html)
@@ -79,14 +72,10 @@ class ExternalEarnVidsExtractor : ExtractorApi() {
             } catch (e: Exception) {
                 Log.w(name, "m3u8 quick search failed: ${e.message}")
             }
-
-            // ===== التحقق من وجود كود التعبئة Packer =====
             if (!html.contains("eval(function")) {
                 Log.w(name, "❌ لا يوجد eval(function) في الصفحة - لن نحاول فكّ packer.")
                 return
             }
-
-            // ===== فكّ تشفير الـ Packer =====
             var working = html
             var unpacked: String? = null
             val maxIterations = 4
@@ -112,8 +101,6 @@ class ExternalEarnVidsExtractor : ExtractorApi() {
             }
 
             val cleaned = unpacked.replace("\\/", "/")
-
-            // ===== البحث عن كائن روابط البث =====
             val linksRegex = Regex("""var\s+links\s*=\s*(\{.*?\})\s*;""", RegexOption.DOT_MATCHES_ALL)
             val match = linksRegex.find(cleaned)
             var extractedM3u8: String? = null
@@ -150,8 +137,6 @@ class ExternalEarnVidsExtractor : ExtractorApi() {
 
                 extractedM3u8 = map["hls4"] ?: map["hls"]
             }
-
-            // ===== تجميع وإرسال الرابط النهائي =====
             if (!extractedM3u8.isNullOrBlank()) {
                 var finalLink = extractedM3u8.replace("\\/", "/")
                 if (finalLink.startsWith("/")) {

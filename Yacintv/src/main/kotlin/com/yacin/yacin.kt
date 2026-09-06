@@ -62,7 +62,6 @@ class YacineTVProvider : MainAPI() {
             if (channels.isEmpty()) return@mapNotNull null
 
             val channelItems = channels.map { chan ->
-                // تعديل هنا: استدعاء toJson() بشكل صحيح كـ Extension function
                 val data = LinkData(chan.id.toString(), chan.name ?: "", chan.logo).toJson()
                 newLiveSearchResponse(chan.name ?: "Unknown", data, TvType.Live) {
                     this.posterUrl = chan.logo
@@ -80,7 +79,6 @@ class YacineTVProvider : MainAPI() {
             val channels = fetchYacine("categories/${cat.id}/channels")?.data ?: emptyList()
             channels.forEach { chan ->
                 if (chan.name?.contains(query, ignoreCase = true) == true) {
-                    // تعديل هنا: استدعاء toJson() بشكل صحيح
                     val data = LinkData(chan.id.toString(), chan.name ?: "", chan.logo).toJson()
                     results.add(
                         newLiveSearchResponse(chan.name, data, TvType.Live) {

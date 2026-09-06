@@ -34,8 +34,6 @@ class GameHubExtractor : ExtractorApi() {
 
             Log.i(name, "Step 1 Completed. Final Resolved URL: $finalResolvedUrl")
             Log.d(name, "GET page snippet (first 500 chars):\n${html.take(500)}")
-
-            // استخراج النطاق الصحيح من الرابط النهائي (rightLink)
             var finalDomain = mainUrl
             try {
                 val urlObj = java.net.URL(finalResolvedUrl)
@@ -81,8 +79,6 @@ class GameHubExtractor : ExtractorApi() {
             } else {
                 Log.d(name, "Extracted POST ID (objId): $objId")
             }
-
-            // استخدام النطاق النهائي الذي جلبناه بدلاً من mainUrl الثابت
             val ajaxUrl = "${finalDomain}/get__watch__server/"
             Log.i(name, "Step 3: Preparing POST AJAX request to -> $ajaxUrl")
 
@@ -159,8 +155,6 @@ class GameHubExtractor1 : ExtractorApi() {
 
         try {
             val qualityStr = url.substringAfter("#quality=", "").substringBefore("#")
-
-            // 🔥 التعديل المطلوب: تنظيف الرابط واستبدال النطاق القديم بالنطاق الجديد فوراً
             var cleanUrl = url.substringBefore("#quality=")
             cleanUrl = cleanUrl.replace("m.arabseed.me", "m.reviewrate.net")
 

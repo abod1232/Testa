@@ -322,18 +322,12 @@ class CimaTn : MainAPI() {
             .replace(Regex("/w\\d+/"), "/w600/")
             .replace(Regex("/s\\d+/"), "/s1600/")
     }
-
-    // =========================================================================
-    //  دالة البحث العميق عن المشغلات لكسر الـ Loops نهائياً
-    // =========================================================================
     private suspend fun deepSearchLinks(url: String, depth: Int = 0, visited: MutableSet<String> = mutableSetOf()): List<String> {
         if (depth > 3 || !visited.add(url)) return emptyList()
         val foundLinks = mutableListOf<String>()
 
         try {
             val html = app.get(url, referer = mainUrl).text
-
-            // 1. البحث في المتغيرات البرمجية (مثل const servers)
             val serversRegex = Regex("""url:\s*['"](https?://[^'"]+)['"]""")
             serversRegex.findAll(html).forEach {
                 val src = it.groupValues[1].replace("\\", "")
@@ -343,8 +337,6 @@ class CimaTn : MainAPI() {
                     foundLinks.add(src)
                 }
             }
-
-            // 2. البحث في أوسمة الـ iframe
             val doc = org.jsoup.Jsoup.parse(html)
             doc.select("iframe").forEach { iframe ->
                 val src = iframe.attr("src").takeIf { it.isNotBlank() } ?: iframe.attr("data-src")
@@ -367,10 +359,6 @@ class CimaTn : MainAPI() {
     private fun isInternalEmbed(url: String): Boolean {
         return url.contains(mainUrl) || url.contains("cimatn") || url.contains("cimatunisa") || url.contains("trembed") || url.contains("trid") || url.startsWith("/")
     }
-
-    // =========================================================================
-    //  دالة loadLinks المحمية من الـ Loop مع التوجيه الذكي
-    // =========================================================================
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -378,26 +366,18 @@ class CimaTn : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         if (data.isBlank()) return false
-
-        // حالة يوتيوب المباشرة
         if (data.contains("youtube.com") || data.contains("youtu.be")) {
             loadExtractor(data, "$mainUrl/", subtitleCallback, callback)
             return true
         }
-
-        // جلب كل الروابط الخارجية عبر البحث العميق (تجاوز الروابط الداخلية)
         val allExternalLinks = deepSearchLinks(data)
         var foundAnyLink = false
 
         allExternalLinks.forEach { playerUrl ->
-            // 1. محاولة استخدام الطريقة الذكية الجديدة (SmartPlayer)
             val isSmartDecrypted = SmartPlayer.extract(playerUrl, callback)
-
-            // 2. إذا فشلت الطريقة الذكية، نقوم بإرسالها للمستخرج العادي (loadExtractor)
             if (isSmartDecrypted) {
                 foundAnyLink = true
             } else {
-                // نضمن عدم إرسال روابط داخلية لـ loadExtractor لتجنب الـ Loop
                 if (!isInternalEmbed(playerUrl)) {
                     loadExtractor(playerUrl, "$mainUrl/", subtitleCallback, callback)
                     foundAnyLink = true
@@ -407,10 +387,6 @@ class CimaTn : MainAPI() {
 
         return foundAnyLink
     }
-
-    // =========================================================================
-    //  كلاس فك التشفير الذكي (Smart Decryptor - Domain Agnostic)
-    // =========================================================================
     object SmartPlayer {
         private const val KEY_STRING = "kiemtienmua911ca"
 
@@ -451,8 +427,6 @@ class CimaTn : MainAPI() {
         private fun smartDecrypt(encryptedHex: String, domain: String, videoId: String): String? {
             val encryptedBytes = try { encryptedHex.decodeHex() } catch (e: Exception) { return null }
             val secretKey = SecretKeySpec(KEY_STRING.toByteArray(Charsets.UTF_8), "AES")
-
-            // 1. المحاولة بـ IVs ذكية ومحتملة
             val ivCandidates = generateIvCandidates(domain, videoId)
             for (iv in ivCandidates) {
                 try {
@@ -466,8 +440,6 @@ class CimaTn : MainAPI() {
                     }
                 } catch (e: Exception) { continue }
             }
-
-            // 2. المحاولة الأخيرة (Garbage Stripping)
             try {
                 val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
                 cipher.init(Cipher.DECRYPT_MODE, secretKey, IvParameterSpec(ByteArray(16)))
@@ -488,7 +460,6 @@ class CimaTn : MainAPI() {
         }
 
         suspend fun extract(playerUrl: String, callback: (ExtractorLink) -> Unit): Boolean {
-            // كشف أولي: إذا لم يحتوي على # أو id= ، فهو ليس مشفراً، نعيده كفشل ليذهب للمستخرج العادي
             if (!playerUrl.contains("#") && !playerUrl.contains("id=")) return false
 
             val MAX_RETRIES = 3

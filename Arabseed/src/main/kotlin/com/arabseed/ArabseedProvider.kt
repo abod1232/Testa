@@ -7,7 +7,6 @@ import com.lagradost.cloudstream3.plugins.Plugin
 @CloudstreamPlugin
 class ArabseedProvider : Plugin() {
     override fun load(context: Context) {
-        // تسجيل مزود ArabSeed
         registerMainAPI(Arabseed())
         registerExtractorAPI(GameHubExtractor())
         registerExtractorAPI(GameHubExtractor1())

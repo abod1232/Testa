@@ -98,13 +98,11 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
         val fragmentContainer = FragmentContainerView(requireContext())
 
         fragmentContainer.id = View.generateViewId()
-        // الخطوة 3: أرجع هذه الحاوية
         return fragmentContainer
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        // الخطوة 4: ضع الـ PrefsFragment داخل الحاوية التي أنشأناها باستخدام الـ ID الخاص بها
         childFragmentManager.beginTransaction()
             .replace(view.id, PrefsFragment())
             .commit()

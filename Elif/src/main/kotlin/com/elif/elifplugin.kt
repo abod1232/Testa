@@ -7,7 +7,6 @@ import android.content.Context
 @CloudstreamPlugin
 class ElifNewsPlugin: Plugin() {
     override fun load(context: Context) {
-        // تسجيل الـ Provider برمجياً في النظام الجديد
         registerMainAPI(ElifNewsProvider())
     }
 }

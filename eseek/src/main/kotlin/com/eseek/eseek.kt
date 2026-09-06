@@ -93,40 +93,25 @@ class GessehProvider : MainAPI() {
         }
         return newHomePageResponse(request.name, home)
     }
-
-    // ================== دالة مساعدة لتنفيذ طلب البحث ==================
     private suspend fun performSearch(query: String): List<SearchResponse> {
         val document = app.get("$mainUrl/?s=$query", headers = defaultHeaders).document
         return document.select("article.post").mapNotNull {
             it.toSearchResponse()
         }
     }
-
-    // ================== دالة البحث الأساسية (مع نظام Fallback) ==================
     override suspend fun search(query: String): List<SearchResponse> {
-        // 1. تنفيذ البحث بالكلمة الأصلية
         val initialResults = performSearch(query)
-
-        // 2. التحقق: إذا كانت النتائج فارغة، والكلمة هي "over" (سواء بحروف كبيرة أو صغيرة)
         if (initialResults.isEmpty() && query.trim().equals("over", ignoreCase = true)) {
-            // إرجاع نتائج البحث عن كلمة "مسلسل"
             return performSearch("مسلسل")
         }
-
-        // 3. إذا وجدت نتائج، أو كانت الكلمة مختلفة، أرجع النتائج الأصلية
         return initialResults
     }
-
-    // دالة مساعدة لفك تشفير الروابط واستخراج الرابط الأصلي
     private fun resolveRealUrl(url: String): String {
         var currentUrl = url
-
-        // 1. فحص مستوى التشفير الأول: ?url= (سواء كان Base64 أو URL Encoded)
         val urlMatch = Regex("[?&]url=([^&]+)").find(currentUrl)
         if (urlMatch != null) {
             try {
                 var extractedUrl = URLDecoder.decode(urlMatch.groupValues[1], "UTF-8")
-                // إذا لم يكن رابط مباشر، فهو غالباً Base64 (مثل sayyarh)
                 if (!extractedUrl.startsWith("http")) {
                     val decodedBytes = Base64.decode(extractedUrl, Base64.DEFAULT)
                     extractedUrl = String(decodedBytes, Charsets.UTF_8).trim()
@@ -136,14 +121,11 @@ class GessehProvider : MainAPI() {
                 }
             } catch (e: Exception) {}
         }
-
-        // 2. فحص مستوى التشفير الثاني: ?post= (يحتوي على JSON مشفر داخله backUrl)
         val postMatch = Regex("[?&]post=([^&]+)").find(currentUrl)
         if (postMatch != null) {
             try {
                 val encodedPost = URLDecoder.decode(postMatch.groupValues[1], "UTF-8")
                 val jsonStr = String(Base64.decode(encodedPost, Base64.DEFAULT), Charsets.UTF_8)
-                // استخراج backUrl باستخدام Regex ليبقى الكود بسيطاً بدون مكاتب JSON
                 val backUrlMatch = Regex("\"backUrl\"\\s*:\\s*\"([^\"]+)\"").find(jsonStr)
                 if (backUrlMatch != null) {
                     val backUrl = backUrlMatch.groupValues[1].replace("\\/", "/")
@@ -158,7 +140,6 @@ class GessehProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-        // استخراج الرابط الحقيقي إذا كان مشفراً
         val realUrl = resolveRealUrl(url)
 
         val document = app.get(realUrl, headers = defaultHeaders).document
@@ -227,8 +208,6 @@ class GessehProvider : MainAPI() {
             logCallback("Custom Extractor ERROR: Failed to fetch page $url. Exception: ${e.message}")
             return null
         }
-
-        // حاول البحث عن نمط eval(...) المشهور لفك التغليف
         val evalRegex =
             Regex("eval\\s*\\(\\s*function\\s*\\(.*?\\)\\s*\\{.*?\\}\\s*\\((.*)\\)\\s*\\)")
         val evalMatch = evalRegex.find(pageText)
@@ -238,8 +217,6 @@ class GessehProvider : MainAPI() {
         }
 
         val paramsString = evalMatch.groupValues.getOrNull(1) ?: return null
-
-        // params: 'packed',base,count,'kw'.split('|')
         val paramsRegex =
             Regex("['\"](.*?)['\"]\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)\\s*,\\s*['\"](.*?)['\"]\\.split\\s*\\(['\"]\\|['\"]\\)")
         val paramMatch = paramsRegex.find(paramsString)
@@ -333,8 +310,6 @@ class GessehProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val pageUrl = resolveRealUrl(data)
-
-        // 1. جلب صفحة الحلقة الأساسية
         val mainPage = try {
             app.get(pageUrl, headers = defaultHeaders).document
         } catch (e: Exception) {
@@ -350,8 +325,6 @@ class GessehProvider : MainAPI() {
 
         var targetUrl = rawExtractorHref
         var playerReferer = "https://fashny.net/"
-
-        // 2. فصل الرابط الداخلي
         val urlMatch = Regex("[?&]url=([^&]+)").find(rawExtractorHref)
         if (urlMatch != null) {
             try {
@@ -375,8 +348,6 @@ class GessehProvider : MainAPI() {
 
         data class ServerData(val name: String, val embedUrl: String)
         val serversToProcess = mutableSetOf<ServerData>()
-
-        // 3. استخراج من JSON (هنا يتم جلب الـ ID الطويل الصحيح)
         val postMatch = Regex("[?&]post=([^&]+)").find(targetUrl)
         if (postMatch != null) {
             try {
@@ -401,8 +372,6 @@ class GessehProvider : MainAPI() {
                 println("[GessehProvider] Failed to parse JSON: ${e.message}")
             }
         }
-
-        // 4. استخراج من HTML (في حال عدم وجود JSON أو للسيرفرات المتبقية)
         try {
             val htmlPage = app.get(targetUrl, headers = customHeaders).document
 
@@ -425,7 +394,6 @@ class GessehProvider : MainAPI() {
                 }
 
                 embedUrl = normalizeUrl(embedUrl)?.trim()
-                // نمنع إضافة سيرفرات مكررة تم جلبها بالفعل من الـ JSON
                 if (!embedUrl.isNullOrBlank() && serversToProcess.none { it.embedUrl == embedUrl }) {
                     serversToProcess.add(ServerData(serverName, embedUrl))
                 }
@@ -434,8 +402,6 @@ class GessehProvider : MainAPI() {
         } catch (e: Exception) {
             println("[GessehProvider] HTML fetching failed: ${e.message}")
         }
-
-        // 5. معالجة الروابط بتزامن
         coroutineScope {
             serversToProcess.map { server ->
                 async {
@@ -483,8 +449,6 @@ class GessehProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ) {
         val low = embedUrl.lowercase()
-
-        // 1. استخدام المستخرج المخصص لـ Dailymotion
         if (low.contains("dailymotion.com")) {
             try {
                 println("[GessehProvider] Sending to Custom Dailymotion Extractor: $embedUrl")
@@ -494,8 +458,6 @@ class GessehProvider : MainAPI() {
             }
             return
         }
-
-        // 2. باقي السيرفرات تعمل كالسابق
         when {
             low.contains(".m3u8") || low.endsWith(".mp4") || low.contains(".mp4") -> {
                 callback(newExtractorLink(this.name, serverName, embedUrl) {
@@ -565,8 +527,6 @@ class GessehProvider : MainAPI() {
             val metaDataUrl = "$baseUrl/player/metadata/video/$id"
 
             val response = app.get(metaDataUrl, referer = "https://qeseh.net/").text
-
-            // تم استبدال Gson بـ parseJson المعتمدة رسمياً في Jackson
             val meta = parseJson<MetaData>(response)
 
             meta.qualities?.get("auto")?.forEach { quality ->

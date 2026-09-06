@@ -38,8 +38,6 @@ object CloudflareSolver {
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
-
-                // خدعة الإخفاء التام
                 webView.alpha = 0f
                 webView.translationX = 10000f
                 webView.isFocusable = false

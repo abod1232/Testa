@@ -29,7 +29,6 @@ class Akwam : MainAPI() {
         TvType.AsianDrama
     )
     private fun parseMainPageElements(doc: org.jsoup.nodes.Element): List<SearchResponse> {
-        // نستخدم نفس السيلكتور (Selector) الذي كان موجوداً في كودك الأصلي
         return doc.select("div.col-lg-auto.col-md-4.col-6").mapNotNull { el ->
             val a = el.selectFirst("h3.entry-title a") ?: return@mapNotNull null
             val title = a.text().trim().takeIf { it.isNotEmpty() } ?: return@mapNotNull null
@@ -48,9 +47,6 @@ class Akwam : MainAPI() {
             it.attr("data-src").ifBlank { it.attr("src") }
         }
     }
-
-
-    // دالة مساعدة لتحديث النطاق الرئيسي تلقائياً عند حدوث إعادة توجيه
     private fun updateMainUrl(finalUrl: String) {
         try {
             val uri = java.net.URI(finalUrl)
@@ -64,8 +60,6 @@ class Akwam : MainAPI() {
             }
         } catch (_: Exception) {}
     }
-
-    // دالة مساعدة لبناء الرابط الكامل مع رقم الصفحة
     private fun buildUrl(path: String, page: Int): String {
         val base = "${mainUrl.trimEnd('/')}/${path.trimStart('/')}"
         return if (page > 1) {
@@ -74,7 +68,6 @@ class Akwam : MainAPI() {
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        // في حال تم طلب صفحة تصنيف محددة مباشرة
         if (!request.data.isNullOrBlank()) {
             val base = request.data.trim()
             val pageUrl = if (page > 1) {
@@ -92,16 +85,12 @@ class Akwam : MainAPI() {
                     null
                 }
             } ?: throw ErrorLoadingException("failed to load category page")
-
-            // تحديث النطاق الرئيسي في حال تغير أثناء طلب التصنيف المباشر
             updateMainUrl(response.url)
 
             val list = parseMainPageElements(response.document)
             if (list.isEmpty()) throw ErrorLoadingException()
             return newHomePageResponse(listOf(HomePageList(request.name ?: "قائمة", list)))
         }
-
-        // قائمة المسارات النسبية للأقسام
         val paths = listOf(
             "/movies" to "أحدث الأفلام",
             "/series" to "أحدث المسلسلات",
@@ -119,8 +108,6 @@ class Akwam : MainAPI() {
         )
 
         val items = ArrayList<HomePageList>()
-
-        // 1. جلب أول قسم بشكل تتابعي للكشف عن نطاق التوجيه الجديد وتحديث mainUrl
         val (firstPath, firstTitle) = paths.first()
         val firstFullUrl = buildUrl(firstPath, page)
         try {
@@ -131,10 +118,7 @@ class Akwam : MainAPI() {
                 items.add(HomePageList(firstTitle, list))
             }
         } catch (_: Exception) {
-            // الاستمرار في المحاولة للأقسام الأخرى حتى لو فشل القسم الأول
         }
-
-        // 2. جلب بقية الأقسام بشكل متوازٍ (Concurrently) باستخدام النطاق الجديد المحدث
         val remainingPaths = paths.drop(1)
         val parallelResults = kotlinx.coroutines.coroutineScope {
             remainingPaths.map { (path, titleName) ->
@@ -165,7 +149,6 @@ class Akwam : MainAPI() {
             val title = it.selectFirst("h3.entry-title a")?.text() ?: return@mapNotNull null
             val href = it.selectFirst("a")?.attr("href") ?: return@mapNotNull null
             val poster = getPoster(it)
-            // التعديل: نمرر البوستر في الرابط نفسه
             val urlWithPoster = "$href#${poster ?: ""}"
             newMovieSearchResponse(name = title, url = urlWithPoster, type = TvType.Movie) {
                 this.posterUrl = poster
@@ -188,8 +171,6 @@ class Akwam : MainAPI() {
     val title = mainDoc.selectFirst("h1.entry-title")?.text()?.trim() ?: "Unknown"
     val plot = mainDoc.selectFirst("h2:contains(قصة المسلسل) + div > p")?.text()?.trim()
         ?: mainDoc.selectFirst("meta[name=description]")?.attr("content")?.trim()
-
-    // استخراج قيمة التقييم الرقمية كـ Double
     val scoreValue = mainDoc.selectFirst("span.mx-2:contains(/)")
         ?.text()?.substringAfter("/")?.trim()?.toDoubleOrNull()
 
@@ -242,7 +223,6 @@ class Akwam : MainAPI() {
             this.plot = plot
             this.year = year
             this.tags = tags
-            // التعديل النهائي المعتمد بناء على كود التفكيك
             this.score = Score.from10(scoreValue)
             this.recommendations = recommendations
         }
@@ -288,7 +268,6 @@ class Akwam : MainAPI() {
             this.plot = plot
             this.year = year
             this.tags = tags
-            // التعديل النهائي المعتمد بناء على كود التفكيك
             this.score = Score.from10(scoreValue)
             this.recommendations = recommendations
         }
@@ -305,7 +284,6 @@ class Akwam : MainAPI() {
         this.plot = plot
         this.year = year
         this.tags = tags
-        // التعديل النهائي المعتمد بناء على كود التفكيك
         this.score = Score.from10(scoreValue)
         this.recommendations = recommendations
     }
@@ -378,8 +356,6 @@ class Akwam : MainAPI() {
             if (rawWatchUrl.isBlank()) {
                 return false
             }
-
-            // تعديل: استخراج المسار الكامل وإعادة تشكيله بالنطاق الحالي لتجنب تكرار الـ ID
             val watchUrl = if (rawWatchUrl.startsWith("http")) {
                 try {
                     val uri = java.net.URI(rawWatchUrl)
@@ -410,8 +386,6 @@ class Akwam : MainAPI() {
             val seen = mutableSetOf<String>()
             for (srcEl in sourceElements) {
                 val rawVideoUrl = srcEl.attr("abs:src").ifBlank { srcEl.attr("src") }.trim()
-
-                // تحويل الرابط إلى HTTP لتجاوز مشاكل الشهادات إن وجدت
                 val videoUrl = rawVideoUrl.replace(" ", "%20")
                     .replace("https://", "http://")
 

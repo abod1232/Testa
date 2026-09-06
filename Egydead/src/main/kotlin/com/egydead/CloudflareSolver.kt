@@ -13,8 +13,6 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
-
-// الكلاس يرجع الرابط النهائي والكوكيز فقط
 data class SolverResult(val finalUrl: String, val cookies: String?)
 
 object CloudflareSolver {
@@ -41,8 +39,6 @@ object CloudflareSolver {
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
-
-                // 🚨 خدعة الإخفاء التام 🚨
                 webView.alpha = 0.01f // شفافية شبه كاملة لتجنب كشف الروبوتات
                 webView.translationX = 10000f // إزاحة النافذة خارج الشاشة تماماً
                 webView.translationY = 10000f
@@ -73,11 +69,7 @@ object CloudflareSolver {
                         Log.i(TAG, "إغلاق المخفي | السبب: $reason | الرابط النهائي: $finalUrl")
 
                         cookieManager.flush()
-
-                        // سحب الكوكيز للرابط النهائي
                         val finalCookies = cookieManager.getCookie(finalUrl)
-
-                        // طباعة الكوكيز الذي تم صيده
                         if (!finalCookies.isNullOrEmpty()) {
                             Log.w(TAG, "🍪 تم صيد الكوكيز بنجاح في الخلفية: $finalCookies")
                         } else {
@@ -89,18 +81,12 @@ object CloudflareSolver {
                             rootView.removeView(webView)
                             webView.destroy()
                         } catch (e: Exception) {}
-
-                        // إرجاع الرابط الجديد والكوكيز
                         continuation.resume(SolverResult(finalUrl, finalCookies))
                     }
                 }
-
-                // مهلة 60 ثانية في حال فشل الحل في الخلفية
                 pollingHandler.postDelayed({
                     finishSuccess(webView.url ?: initialUrl, "Timeout - 60s")
                 }, 60000)
-
-                // النقر الوهمي الذكي داخل المتصفح المخفي
                 fun simulateRealTouch(view: WebView, cssX: Float, cssY: Float) {
                     val density = activity.resources.displayMetrics.density
                     val realX = cssX * density
@@ -168,8 +154,6 @@ object CloudflareSolver {
                     }
                     pollingHandler.post(runnable)
                 }
-
-                // الفحص السريع والمستمر للكوكيز
                 fun checkBypassSuccess() {
                     if (isSolved) return
 
@@ -177,7 +161,6 @@ object CloudflareSolver {
                     val currentCookies = cookieManager.getCookie(currentLiveUrl)
 
                     if (currentCookies != null && currentCookies.contains("cf_clearance")) {
-                        // بمجرد اصطياد الكوكي، نغلق فوراً
                         finishSuccess(currentLiveUrl, "تم صيد الكوكيز بنجاح")
                         return
                     }
@@ -200,8 +183,6 @@ object CloudflareSolver {
                         checkBypassSuccess() // بدء مراقبة الكوكيز
                     }
                 }
-
-                // إضافة المتصفح للشاشة (ولكنه مزاح للخارج ومخفي)
                 rootView.addView(webView)
                 webView.loadUrl(initialUrl)
             }

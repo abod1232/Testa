@@ -694,8 +694,6 @@ class CeeProvider : MainAPI() {
             actorsInfo = actorsParsed
         )
     }
-
-    // ================== التصحيح النهائي والصحيح هنا ==================
     private fun CinemanaItem.toSearchResponse(): SearchResponse? {
         val validNb = nb ?: run {
             Log.e(name, "🚫 CinemanaItem.nb is null for title: $enTitle")

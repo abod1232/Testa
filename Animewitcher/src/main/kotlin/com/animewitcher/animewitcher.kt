@@ -20,16 +20,12 @@ class AnimeWitcherProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie)
     override var lang = "ar"
     override val hasMainPage = true
-
-    // القيم الاحتياطية الافتراضية المستقرة
     @Volatile
     private var algoliaAppId = "D8LH9I7ZL7"
     @Volatile
     private var algoliaApiKey = "b56c01ef52540ef334bcdbaa00ded9e4"
     @Volatile
     private var buAuthKey = "6f1ec205-bbe8-45ce-97eb-1bc25a94bedf"
-
-    // مفتاح واجهة تطبيقات Firebase الموثق الخاص بالتطبيق لتجاوز أي حظر
     private val firebaseApiKey = "AIzaSyAcbWRwfFNnCpoydDXlEALWnM_TYVcJOMU"
 
     private fun getAlgoliaHeaders(): Map<String, String> {
@@ -62,8 +58,6 @@ class AnimeWitcherProvider : MainAPI() {
     private fun getQualityAsInt(quality: String?): Int {
         return quality?.filter { it.isDigit() }?.toIntOrNull() ?: 0
     }
-
-    // دالة تنفيذ استعلامات البحث (POST) سريعة ومحمية
     private suspend fun postAlgoliaQuery(index: String, body: okhttp3.RequestBody): String {
         val startTime = System.currentTimeMillis()
         return try {
@@ -84,8 +78,6 @@ class AnimeWitcherProvider : MainAPI() {
             response.text
         }
     }
-
-    // جلب كائن الأنمي التفصيلي عبر الـ POST وهو الخيار ذو الأولوية القصوى الآن
     private suspend fun getAlgoliaObjectByPost(index: String, objectId: String): JSONObject? {
         val startTime = System.currentTimeMillis()
         logd("⏱️ [Algolia Object] Starting POST query for ObjectID: '$objectId'")
@@ -111,8 +103,6 @@ class AnimeWitcherProvider : MainAPI() {
             null
         }
     }
-
-    // تجديد المفاتيح من Firestore عند حدوث خطأ مع تمرير مفتاح المصادقة
     private suspend fun refreshAlgoliaKeys() {
         try {
             val url = firestoreDocUrl("Settings/constants")
@@ -155,8 +145,6 @@ class AnimeWitcherProvider : MainAPI() {
             logd("❌ [Firestore Keys] Failed to refresh keys. Error: ${e.message}")
         }
     }
-
-    // ---------------- Home & Search ----------------
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse = withContext(Dispatchers.IO) {
         val indexName = "recent"
         val pageParam = (page - 1).coerceAtLeast(0)
@@ -224,8 +212,6 @@ class AnimeWitcherProvider : MainAPI() {
         logd("====== [LOAD] PROCESS STARTED ======")
         val animeId = URLDecoder.decode(url.substringAfterLast('/').substringBefore('?'), "utf-8")
         logd("[LOAD] Extracted animeId: '$animeId'")
-
-        // الأولوية القصوى: جلب تفاصيل الأنمي الكاملة والغنية من Algolia مباشرة لتفادي البيانات الممررة الناقصة
         val animeJson = getAlgoliaObjectByPost("series", animeId) ?: try {
             logd("⚠️ Algolia query failed or returned empty. Falling back to URL data parameter...")
             val encodedData = url.substringAfter("?data=", "")
@@ -243,11 +229,7 @@ class AnimeWitcherProvider : MainAPI() {
         }
 
         val docRef = animeJson.optString("doc_ref", animeJson.optString("path", "anime_list/$animeId"))
-
-        // تعديل ذكي: استخدام substringAfter لتخطي تكرار مجلد anime_list/ وحل مشكلة الـ 404 بشكل جذري وآمن
         val cleanPath = docRef.substringAfter("anime_list/").removePrefix("/")
-
-        // جلب الحلقات وقياس الزمن المستغرق لها
         val episodes = fetchEpisodes(cleanPath)
 
         val poster = animeJson.optString("poster_uri", animeJson.optJSONObject("poster")?.optString("medium"))
@@ -282,8 +264,6 @@ class AnimeWitcherProvider : MainAPI() {
             this.tags = tags
         }
     }
-
-    // جلب الحلقات مع تصحيح ترميز مسار جوجل لـ %20 لمنع الـ 403/404 تماماً
     private suspend fun fetchEpisodes(animeId: String): List<EpisodeInfo> = withContext(Dispatchers.IO) {
         val startTime = System.currentTimeMillis()
         val encodedAnimeId = URLEncoder.encode(animeId, "utf-8").replace("+", "%20")
@@ -306,8 +286,6 @@ class AnimeWitcherProvider : MainAPI() {
                 val epFields = mapValue.optJSONObject("fields") ?: continue
 
                 val docId = epFields.optJSONObject("doc_id")?.optString("stringValue") ?: continue
-
-                // استخراج الاسم المترجم إن وجد كخيار أول
                 val titleTranslated = epFields.optJSONObject("title_translated")
                     ?.optJSONObject("mapValue")
                     ?.optJSONObject("fields")
@@ -338,8 +316,6 @@ class AnimeWitcherProvider : MainAPI() {
 
     private fun firestoreDocUrl(path: String): String =
         "https://firestore.googleapis.com/v1/projects/$FIREBASE_PROJECT_ID/databases/(default)/documents/$path?key=$firebaseApiKey"
-
-    // ---------------- Servers + Words ----------------
     private suspend fun fetchServersForEpisode(animeId: String, episodeId: String): List<ServerModel> = withContext(Dispatchers.IO) {
         val encodedAnimeId = URLEncoder.encode(animeId, "utf-8").replace("+", "%20")
         val encodedEpisodeId = URLEncoder.encode(episodeId, "utf-8").replace("+", "%20")

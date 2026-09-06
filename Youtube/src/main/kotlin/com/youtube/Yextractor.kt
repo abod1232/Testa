@@ -80,9 +80,6 @@ open class YoutubeExtractor : ExtractorApi() {
                 val durationSeconds = if (s.length > 0) s.length else 3600L
                 val builtLinks = mutableListOf<ExtractorLink>()
                 val seenUrls = mutableSetOf<String>()
-
-                // 1. استخراج الفيديو (مع منع تكرار نفس الجودة)
-                // نستخدم distinctBy { it.height } لضمان نسخة واحدة لكل دقة
                 val videoOnlyList = (s.videoOnlyStreams ?: emptyList()).mapNotNull { vs ->
                     try {
                         val streamUrl = vs.content ?: return@mapNotNull null
@@ -99,8 +96,6 @@ open class YoutubeExtractor : ExtractorApi() {
                         StreamInfo(streamUrl, mime, height, label, initR, indexR)
                     } catch (e: Exception) { null }
                 }.distinctBy { it.height } // هذا السطر يمنع تكرار الجودات المتشابهة
-
-                // 2. استخراج الصوت وتحديد اللغة
                 val audioInfoList = (s.audioStreams ?: emptyList()).mapNotNull { asr ->
                     try {
                         val aUrl = asr.content ?: return@mapNotNull null
@@ -110,35 +105,21 @@ open class YoutubeExtractor : ExtractorApi() {
 
                         val initR = if (asr.initStart != null && asr.initEnd != null) "${asr.initStart}-${asr.initEnd}" else null
                         val indexR = if (asr.indexStart != null && asr.indexEnd != null) "${asr.indexStart}-${asr.indexEnd}" else null
-
-                        // استخراج كود اللغة النظيف
                         var rawLang = asr.audioTrackId ?: "Default"
                         if (rawLang.contains(".")) rawLang = rawLang.substringBefore(".") // يحول fr.3 إلى fr
 
                         AudioInfo(aUrl, mime, bitrate, initR, indexR, rawLang.uppercase())
                     } catch (e: Exception) { null }
                 }.distinctBy { it.url }
-
-                // 3. تجميع الأصوات حسب اللغة
                 val audiosByLanguage = audioInfoList.groupBy { it.language }
-
-                // 4. تخزين الترجمات
                 try {
                     ytVideosSubtitles[videoId] = s.subtitlesDefault?.filterNotNull() ?: emptyList()
                 } catch (e: Exception) { }
-
-                // 5. تشغيل السيرفر
                 startServerIfNeeded()
-
-                // -------------------------------------------------------------
-                // 6. بناء الروابط: فيديو + صوت لكل لغة
-                // -------------------------------------------------------------
 
                 for (video in videoOnlyList) {
                     if (audiosByLanguage.isNotEmpty()) {
                         for ((lang, audios) in audiosByLanguage) {
-
-                            // اختيار أفضل صوت لهذه اللغة متوافق مع الفيديو
                             val bestAudioForLang = if (video.mimeType.contains("webm")) {
                                 audios.sortedWith(compareByDescending<AudioInfo> { it.mimeType.contains("webm") }.thenByDescending { it.bitrate }).firstOrNull()
                             } else {
@@ -151,9 +132,6 @@ open class YoutubeExtractor : ExtractorApi() {
                                 val localLink = registerManifestAndGetUrl(dashXml)
 
                                 if (localLink != null) {
-                                    // تسمية الرابط: "1080p (AR) 1080p"
-                                    // video.label = "1080p"
-                                    // lang = "AR"
                                     val finalName = "${video.label} ($lang) ${video.label}"
 
                                     builtLinks.add(
@@ -172,8 +150,6 @@ open class YoutubeExtractor : ExtractorApi() {
                         }
                     }
                 }
-
-                // إضافة Legacy
                 val muxedList = (s.videoStreams ?: emptyList()).mapNotNull { vs ->
                     try {
                         val mUrl = vs.content ?: return@mapNotNull null
@@ -207,10 +183,6 @@ open class YoutubeExtractor : ExtractorApi() {
             } catch (e: Exception) { null }
         }?.forEach { subtitleCallback(it) }
     }
-
-    // =========================================================================
-    // السيرفر المحلي
-    // =========================================================================
     @Synchronized
     private fun startServerIfNeeded() {
         if (activeServer != null && !activeServer!!.isClosed) return
@@ -263,10 +235,6 @@ open class YoutubeExtractor : ExtractorApi() {
             }
         } catch (e: Exception) {}
     }
-
-    // =========================================================================
-    // بناء ملف XML
-    // =========================================================================
     private fun buildDashManifestXml(
         video: StreamInfo,
         audioList: List<AudioInfo>,

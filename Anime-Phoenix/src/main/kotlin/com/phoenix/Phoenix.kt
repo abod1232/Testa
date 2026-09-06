@@ -27,20 +27,15 @@ class AnimePhoenixProvider : MainAPI() {
         request: MainPageRequest
     ): HomePageResponse? {
         val url = if (page == 1) mainUrl else "$mainUrl/page/$page/"
-        // جلب كود الصفحة البرمجية بالرؤوس المخصصة لتجنب الحظر
         val document = app.get(url, headers = customHeaders).document
 
         val homePageRows = mutableListOf<HomePageList>()
-
-        // 1. استخراج قسم: آخر الحلقات المضافة (FJ-Phoenix-Anastasia-Latest)
         val latestSection = document.selectFirst("main.FJ-Phoenix-Anastasia-Latest")
         if (latestSection != null) {
             val sectionTitle = latestSection.selectFirst("h2.FJ-Phoenix-Anastasia-Title")?.text() ?: "آخر الحلقات المضافة"
             val latestItems = latestSection.select("a.FJ-Phoenix-Anastasia-EpCard").mapNotNull { card ->
                 val cardName = card.selectFirst(".FJ-Phoenix-Anastasia-EpCard-Name")?.text() ?: return@mapNotNull null
                 val epMeta = card.selectFirst(".FJ-Phoenix-Anastasia-EpCard-MetaModern")?.text() ?: ""
-
-                // دمج اسم الأنمي مع رقم الحلقة كالعنوان الظاهر
                 val cleanTitle = if (epMeta.isNotEmpty()) "$cardName - $epMeta" else cardName
                 val href = card.attr("href") ?: return@mapNotNull null
                 val cleanHref = if (href.startsWith("http")) href else "$mainUrl$href"
@@ -54,8 +49,6 @@ class AnimePhoenixProvider : MainAPI() {
                 homePageRows.add(HomePageList(sectionTitle, latestItems.map { it as SearchResponse }))
             }
         }
-
-        // 2. استخراج الأقسام من الأعمدة الجانبية (الأكثر شعبية، أنميشن، أكشن، موسم الصيف)
         val columns = document.select("section.home-cols div.home-cols-col")
         columns.forEach { col ->
             val colTitle = col.selectFirst("h2.home-cols-title")?.text() ?: ""
@@ -74,8 +67,6 @@ class AnimePhoenixProvider : MainAPI() {
                 homePageRows.add(HomePageList(colTitle, colItems.map { it as SearchResponse }))
             }
         }
-
-        // 3. استخراج أقسام شبكة الأفلام والأنميات المكتملة (FJ-Phoenix-Anastasia-Movies)
         val movieSections = document.select("section.FJ-Phoenix-Anastasia-Movies")
         movieSections.forEach { section ->
             val sectionTitle = section.selectFirst(".FJ-Phoenix-Anastasia-Title")?.text() ?: ""
@@ -94,12 +85,8 @@ class AnimePhoenixProvider : MainAPI() {
                 homePageRows.add(HomePageList(sectionTitle, items.map { it as SearchResponse }))
             }
         }
-
-        // إرجاع كافة القوائم المهيكلة والمكتشفة دفعة واحدة
         return newHomePageResponse(homePageRows, hasNext = true)
     }
-
-    // ============================== نظام البحث (AJAX) ==============================
     private suspend fun getNonce(query: String): String {
         return try {
             val searchLandingUrl = "$mainUrl/search/?q=${URLEncoder.encode(query, "UTF-8")}"
@@ -164,7 +151,6 @@ class AnimePhoenixProvider : MainAPI() {
                 }
             }
         } catch (e: Exception) {
-            // معالجة الأخطاء والعودة لطلب صفحة البحث كـ Fallback
             try {
                 val searchUrl = "$mainUrl/search/?q=${URLEncoder.encode(query, "UTF-8")}"
                 val response = app.get(searchUrl).text
@@ -181,13 +167,10 @@ class AnimePhoenixProvider : MainAPI() {
                     }
                 }
             } catch (inner: Exception) {
-                // تجاهل أخطاء البحث الاحتياطي
             }
         }
         return searchResults
     }
-
-    // إعداد الرؤوس المخصصة لتفادي حظر الطلبات البرمجية
     private val customHeaders = mapOf(
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
@@ -220,8 +203,6 @@ class AnimePhoenixProvider : MainAPI() {
         val title = document.selectFirst("h1.FJ-Phoenix-Hero-Title")?.text()
             ?: document.selectFirst("h1.FJ-CC-Title")?.text()
             ?: ""
-
-        // استخراج بوستر المسلسل الأساسي
         val poster = document.selectFirst(".FJ-Phoenix-Hero-Poster img")?.attr("src")
         val description = document.selectFirst(".FJ-Phoenix-Desc-Full")?.text()
         val isMovie = finalUrl.contains("/movies/")
@@ -244,19 +225,14 @@ class AnimePhoenixProvider : MainAPI() {
             val episodesPageUrl = "${finalUrl.removeSuffix("/")}/episodes/"
 
             try {
-                // 1. طلب الصفحة الأولى من الفهرس (GET) لاستخراج الحلقات ومفاتيح الأمان
                 val epResponse = app.get(episodesPageUrl, headers = customHeaders)
                 val epDocument = epResponse.document
                 val epHtml = epResponse.text
-
-                // استخراج حلقات المجموعة الأولى المتاحة بالصفحة 1
                 val firstGroup = epDocument.select("div#episodesGrid a.FJ-episode-wrap").mapNotNull { item ->
                     val titleEl = item.selectFirst(".FJ-Phoenix-Anastasia-EpCard-Name")
                     val epTitle = titleEl?.text() ?: return@mapNotNull null
                     val epUrl = item.attr("href") ?: return@mapNotNull null
                     val cleanTitle = epTitle.replace("\\s+".toRegex(), " ").trim()
-
-                    // استخراج رقم الحلقة من نهاية العنوان
                     val epNum = """(\d+)$""".toRegex().find(cleanTitle)?.groupValues?.get(1)?.toIntOrNull()
 
                     newEpisode(epUrl) {
@@ -269,20 +245,15 @@ class AnimePhoenixProvider : MainAPI() {
 
                 if (firstGroup.isNotEmpty()) {
                     episodes.addAll(firstGroup)
-
-                    // استخراج الـ nonce والـ signature والـ token لإرسال طلب الأجاكس للصفحة الأخيرة
                     val tokenRegex = """"token"\s*:\s*"([^"]+)"""".toRegex()
                     val sigRegex = """"sig"\s*:\s*"([^"]+)"""".toRegex()
 
                     val token = tokenRegex.find(epHtml)?.groupValues?.get(1)
                     val sig = sigRegex.find(epHtml)?.groupValues?.get(1)
-
-                    // تحديد عدد الصفحات الإجمالي من وسم الـ Pagination
                     val paginationEl = epDocument.selectFirst("#pagination") ?: epDocument.selectFirst(".FJ-Phoenix-Anastasia-Pagination-Wrap")
                     val totalPages = paginationEl?.attr("data-total")?.toIntOrNull() ?: 1
 
                     if (totalPages > 1 && token != null && sig != null) {
-                        // 2. طلب المجموعة الأخيرة مباشرة عبر الـ AJAX دون المرور بالصفحات المتوسطة
                         val ajaxUrl = "$mainUrl/wp-admin/admin-ajax.php?action=fj_get_episodes&token=${URLEncoder.encode(token, "UTF-8")}&sig=$sig&page=$totalPages&sort=oldest&search="
                         val ajaxResponse = app.get(ajaxUrl, headers = customHeaders).text
                         val json = JSONObject(ajaxResponse)
@@ -308,7 +279,6 @@ class AnimePhoenixProvider : MainAPI() {
                                 }
 
                                 if (lastGroup.isNotEmpty()) {
-                                    // 3. التوليد البرمجي الفوري للحلقات المتوسطة في الذاكرة لتجنب استهلاك الشبكة
                                     val sampleEp = firstGroup.first()
                                     val sampleTitle = sampleEp.name ?: ""
                                     val sampleUrl = sampleEp.data
@@ -337,7 +307,6 @@ class AnimePhoenixProvider : MainAPI() {
                     }
                 }
             } catch (e: Exception) {
-                // خطة تراجع أمنية في حال تعثر الاتصال بالفهرس: سحب الحلقات المتوفرة بصفحة الأنمي الرئيسية
                 val epPills = document.select("div.FJ-EpsGrid a")
                 epPills.reversed().forEachIndexed { index, pill ->
                     val epTitle = pill.attr("title").ifEmpty { "الحلقة" }
@@ -355,8 +324,6 @@ class AnimePhoenixProvider : MainAPI() {
             }
 
             println("AnimePhoenix_DEBUG: Total successfully extracted episodes count = ${episodes.size}")
-
-            // الاستدعاء المباشر والمستقر لبناء قائمة الحلقات داخل واجهة المسلسلات التلفزيونية
             return newTvSeriesLoadResponse(title, finalUrl, TvType.Anime, episodes).apply {
                 this.posterUrl = poster
                 this.plot = description
@@ -377,7 +344,6 @@ class AnimePhoenixProvider : MainAPI() {
             val rawData = sLink.attr("data-server")
             if (rawData.isNotEmpty()) {
                 try {
-                    // 1. فك ترميز الـ Base64 والـ URL
                     val decodedBytes = Base64.decode(rawData, Base64.DEFAULT)
                     val decodedStr = String(decodedBytes, Charsets.UTF_8)
                     val unquotedJson = URLDecoder.decode(decodedStr, "UTF-8")
@@ -388,7 +354,6 @@ class AnimePhoenixProvider : MainAPI() {
                     val videoUrl = serverInfo.optString("link")
 
                     if (videoUrl.isNotEmpty()) {
-                        // تصفية روابط الـ iframe إن وجدت
                         val finalUrl = if (linkType == "iframe" && videoUrl.contains("<iframe")) {
                             Jsoup.parse(videoUrl).selectFirst("iframe")?.attr("src") ?: ""
                         } else {
@@ -396,18 +361,12 @@ class AnimePhoenixProvider : MainAPI() {
                         }
 
                         if (finalUrl.isNotEmpty()) {
-                            // -----------------------------------------------------------------
-                            // معالجة روابط Google Drive وتمريرها مباشرة كـ ExtractorLink
-                            // -----------------------------------------------------------------
                             if (finalUrl.contains("drive.google.com", ignoreCase = true)) {
-                                // استخراج معرّف الملف من الرابط
                                 val fileId = """/file/d/([0-9A-Za-z_-]{10,})""".toRegex().find(finalUrl)?.groupValues?.get(1)
                                     ?: """[?&]id=([0-9A-Za-z_-]{10,})""".toRegex().find(finalUrl)?.groupValues?.get(1)
 
                                 if (!fileId.isNullOrBlank()) {
                                     val directDriveUrl = "https://drive.usercontent.google.com/download?id=$fileId&export=download&confirm=t"
-
-                                    // إرسال الرابط المباشر للمشغل فوراً دون الحاجة لـ loadExtractor
                                     callback.invoke(
                                         newExtractorLink(
                                             source = this.name,
@@ -419,11 +378,9 @@ class AnimePhoenixProvider : MainAPI() {
                                         }
                                     )
                                 } else {
-                                    // تراجع آمن في حال تعثر استخراج المعرف
                                     loadExtractor(finalUrl, subtitleCallback, callback)
                                 }
                             }
-                            // معالجة الروابط المباشرة الأخرى المحددة بالنوع direct
                             else if (linkType == "direct") {
                                 callback.invoke(
                                     newExtractorLink(
@@ -436,14 +393,12 @@ class AnimePhoenixProvider : MainAPI() {
                                     }
                                 )
                             }
-                            // إرسال بقية السيرفرات إلى المستخرجات العامة للتطبيق (Dood, StreamTape...)
                             else {
                                 loadExtractor(finalUrl, subtitleCallback, callback)
                             }
                         }
                     }
                 } catch (e: Exception) {
-                    // الاستمرار في الفحص لتفادي توقف الاستخراج عند تعثر سيرفر واحد
                 }
             }
         }

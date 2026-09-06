@@ -43,8 +43,6 @@ internal object CloudflareSolver {
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
-
-                // 🚨 خدعة الإخفاء التام 🚨
                 webView.alpha = 0.01f // شفافية شبه كاملة لتجنب كشف الروبوتات
                 webView.translationX = 10000f // إزاحة النافذة خارج الشاشة تماماً
                 webView.translationY = 10000f
@@ -75,8 +73,6 @@ internal object CloudflareSolver {
                         Log.i(TAG, "إغلاق المخفي | السبب: $reason | الرابط النهائي: $finalUrl")
 
                         cookieManager.flush()
-
-                        // سحب الكوكيز للرابط النهائي
                         val finalCookies = cookieManager.getCookie(finalUrl)
 
                         if (!finalCookies.isNullOrEmpty()) {
@@ -87,17 +83,12 @@ internal object CloudflareSolver {
 
                         try {
                             pollingHandler.removeCallbacksAndMessages(null)
-                            // إزالة الـ WebView مباشرة من الـ rootView
                             rootView.removeView(webView)
                             webView.destroy()
                         } catch (e: Exception) {}
-
-                        // إرجاع الرابط الجديد والكوكيز
                         continuation.resume(SolverResult(finalUrl, finalCookies))
                     }
                 }
-
-                // مهلة 60 ثانية للإغلاق في حال فشل الحل
                 pollingHandler.postDelayed({
                     finishSuccess(webView.url ?: initialUrl, "Timeout - 60s")
                 }, 60000)
@@ -199,11 +190,7 @@ internal object CloudflareSolver {
                         checkBypassSuccess()
                     }
                 }
-
-                // إضافة المتصفح للشاشة (سيكون مخفياً بفضل الإعدادات في الأعلى)
                 rootView.addView(webView)
-
-                // 🚨🚨 الهيدرز الاحترافية المطلوبة 🚨🚨
                 val customHeaders = mapOf(
                     "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
                     "Accept-Encoding" to "gzip, deflate, br",
@@ -218,8 +205,6 @@ internal object CloudflareSolver {
                     "Upgrade-Insecure-Requests" to "1",
                     "User-Agent" to USER_AGENT
                 )
-
-                // تمرير الرابط مع الهيدرز إلى المتصفح المخفي
                 webView.loadUrl(initialUrl, customHeaders)
             }
         }

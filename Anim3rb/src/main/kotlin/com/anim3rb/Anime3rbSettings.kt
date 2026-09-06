@@ -34,7 +34,6 @@ import androidx.preference.PreferenceCategory
 import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.EditTextPreference
 import com.lagradost.cloudstream3.syncproviders.providers.OpenSubtitlesApi.Companion.userAgent
-// نستخدم مفاتيح ثابتة للوصول إليها من كل مكان
 const val COOKIE_KEY = "anime3rb_cookie_v2"
 const val USER_AGENT_KEY = "anime3rb_ua_v2"
 
@@ -68,10 +67,6 @@ class Anime3rbSettingsDialog : DialogFragment() {
 
     class PrefsFragment : PreferenceFragmentCompat() {
         override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
-            // نربط الإعدادات بنظام حفظ CloudStream
-            // ملاحظة: في الـ Plugins عادة نستخدم غلاف (Wrapper) لكن هنا سنستخدم DataStore بسيط
-            // أو نعتمد على setKey/getKey من الـ Provider، لكن هنا سنستخدم SharedPreferences الافتراضية للتطبيق
-            // لتسهيل الأمر. (CloudStream يستخدم DefaultSharedPreferences بشكل عام للإضافات)
 
             val ctx = requireContext()
             val screen = preferenceManager.createPreferenceScreen(ctx)
@@ -80,8 +75,6 @@ class Anime3rbSettingsDialog : DialogFragment() {
             val category = PreferenceCategory(ctx)
             category.title = "Cloudflare & Cookies"
             screen.addPreference(category)
-
-            // 1. زر فتح الويب فيو
             val solvePref = Preference(ctx).apply {
                 title = "حل  الكابتشا (WebView)"
                 summary = "اضغط لفتح الموقع وتسجيل الدخول يدوياً."
@@ -96,18 +89,13 @@ class Anime3rbSettingsDialog : DialogFragment() {
                 }
             }
             category.addPreference(solvePref)
-
-            // 2. مربع عرض/تعديل الكوكيز (الجديد)
             val cookieEditPref = EditTextPreference(ctx).apply {
                 key = COOKIE_KEY // يربط تلقائياً بالـ SharedPrefs
                 title = "تعديل الكوكيز يدوياً"
                 summary = "اضغط لرؤية الكوكيز المحفوظة أو تعديلها."
                 dialogTitle = "Cookies"
-                // جعلنا الحقل يظهر القيمة الحالية تلقائياً
             }
             category.addPreference(cookieEditPref)
-
-            // 3. الحالة
             val statusPref = Preference(ctx).apply {
                 title = "حالة الكوكيز"
                 val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(ctx)
@@ -128,9 +116,6 @@ class Anime3rbSettingsDialog : DialogFragment() {
             screen.addPreference(closePref)
         }
     }
-
-
-    // مفاتيح الحفظ
 
 
 
@@ -169,8 +154,6 @@ class Anime3rbSettingsDialog : DialogFragment() {
                 userAgentString = cleanUserAgent
                 cacheMode = WebSettings.LOAD_DEFAULT
             }
-
-            // ربط الجافاسكريبت بالأندرويد
             webView.addJavascriptInterface(WebAppInterface(webView), "AndroidTouch")
 
             val cookieManager = CookieManager.getInstance()
@@ -184,7 +167,6 @@ class Anime3rbSettingsDialog : DialogFragment() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     val jsTouchLogic = """
                     (function() {
-                        // دالة لرسم النقطة للتأكد
                         function drawRedDot(x, y) {
                             var dot = document.createElement('div');
                             dot.style = "position:fixed; left:" + x + "px; top:" + y + "px; width:20px; height:20px; background:red; border:2px solid white; border-radius:50%; z-index:99999999; pointer-events:none; opacity:0.8;";
@@ -193,28 +175,16 @@ class Anime3rbSettingsDialog : DialogFragment() {
                         }
 
                         setInterval(function() {
-                            // البحث عن النص
                             var xpath = "//*[contains(text(), 'Verify') or contains(text(), 'تحقق')]";
                             var textEl = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
 
                             if (textEl) {
                                 var rect = textEl.getBoundingClientRect();
                                 var targetY = rect.top + (rect.height / 2); // نفس سطر النص
-
-                                // 1. الإنجليزية (يسار)
                                 var xLeft = rect.left - 40; // إزاحة لليسار أكثر
-                                
-                                // 2. العربية (يمين) - كما في صورتك، المربع يمين النص
                                 var xRight = rect.right + 40; 
-
-                                // إرسال الأمر للأندرويد للنقر الحقيقي!
-                                // نرسل الأمرين (يمين ويسار) لضمان الإصابة
-                                
-                                // محاولة الإنجليزية
                                 drawRedDot(xLeft, targetY);
                                 if(window.AndroidTouch) window.AndroidTouch.performClick(xLeft, targetY);
-
-                                // محاولة العربية (بعد جزء من الثانية)
                                 setTimeout(function() {
                                     drawRedDot(xRight, targetY);
                                     if(window.AndroidTouch) window.AndroidTouch.performClick(xRight, targetY);
@@ -255,22 +225,16 @@ class Anime3rbSettingsDialog : DialogFragment() {
                 }
             } catch (e: Exception) {}
         }
-
-        // هذا الكلاس هو الجسر الذي يحول أوامر JS إلى لمسات حقيقية
         class WebAppInterface(private val view: WebView) {
             @JavascriptInterface
             fun performClick(x: Float, y: Float) {
-                // تشغيل اللمس في الـ Main Thread
                 Handler(Looper.getMainLooper()).post {
                     val density = view.resources.displayMetrics.density
-                    // تحويل إحداثيات الويب إلى إحداثيات الشاشة الحقيقية
                     val realX = x * density
                     val realY = y * density
 
                     val downTime = SystemClock.uptimeMillis()
                     val eventTime = SystemClock.uptimeMillis() + 100
-
-                    // محاكاة وضع الإصبع (Down)
                     val motionEventDown = MotionEvent.obtain(
                         downTime,
                         eventTime,
@@ -279,8 +243,6 @@ class Anime3rbSettingsDialog : DialogFragment() {
                         realY,
                         0
                     )
-
-                    // محاكاة رفع الإصبع (Up)
                     val motionEventUp = MotionEvent.obtain(
                         downTime,
                         eventTime + 100,
@@ -289,12 +251,8 @@ class Anime3rbSettingsDialog : DialogFragment() {
                         realY,
                         0
                     )
-
-                    // تنفيذ اللمسة على الـ WebView
                     view.dispatchTouchEvent(motionEventDown)
                     view.dispatchTouchEvent(motionEventUp)
-
-                    // تنظيف الذاكرة
                     motionEventDown.recycle()
                     motionEventUp.recycle()
                 }

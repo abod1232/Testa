@@ -24,21 +24,13 @@ class TopCinemaProvider : MainAPI() {
         TvType.Movie,
         TvType.TvSeries
     )
-
-    // Cloudflare Interceptor
     private val cloudflareKiller by lazy { CloudflareKiller() }
     private val cfInterceptor: Interceptor get() = cloudflareKiller
-
-    // Consistent headers
     private val standardHeaders = mapOf(
         "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Mobile Safari/537.36",
         "Accept-Language" to "ar-EG,ar;q=0.9,en-US;q=0.8,en;q=0.7",
         "Referer" to "$mainUrl/"
     )
-
-
-
-    // Helper functions for requests
     private suspend fun httpGet(url: String, referer: String? = null): org.jsoup.nodes.Document {
         return app.get(
             url,
@@ -90,8 +82,6 @@ class TopCinemaProvider : MainAPI() {
         }
         return newHomePageResponse(homePageList)
     }
-
-    // FIX IS HERE: addPoster with headers is now used for SearchResponse
     private fun toSearchResponse(element: Element): SearchResponse? {
         val link = element.selectFirst("a") ?: return null
         val href = link.attr("href")
@@ -112,7 +102,6 @@ class TopCinemaProvider : MainAPI() {
             isSeries -> newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
                 this.addPoster(posterUrl, headers = standardHeaders)
             }
-            // Fallback for items like slider or mixed content
             else -> {
                 if (element.selectFirst(".number, .epnum") != null || href.contains("/series/")) {
                     newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
@@ -153,8 +142,6 @@ class TopCinemaProvider : MainAPI() {
 
         return if (isTvSeries) {
             var episodes = emptyList<Episode>()
-
-            // 1. Try to get episodes from all seasons page first
             val seasonsElements = document.select("section.allseasonss .Small--Box.Season a")
             if (seasonsElements.isNotEmpty()) {
                 episodes = seasonsElements.amap { seasonLink ->
@@ -172,8 +159,6 @@ class TopCinemaProvider : MainAPI() {
                         val episodeNumber =
                             ep.selectFirst(".epnum")?.text()?.replace("الحلقة", "")?.trim()
                                 ?.toIntOrNull()
-
-                        // FIX IS HERE: Create episode first, then add poster with headers
                         val episode = newEpisode(
                             data = data
                         ) {
@@ -186,8 +171,6 @@ class TopCinemaProvider : MainAPI() {
                     }.reversed()
                 }.flatten()
             }
-
-            // 2. Fallback: If no seasons were found, get episodes from the current page
             if (episodes.isEmpty()) {
                 val seasonNumFromTitle = title.let {
                     Regex("""الموسم (\d+)""").find(it)?.groupValues?.get(1)?.toIntOrNull()
@@ -285,8 +268,6 @@ class TopCinemaProvider : MainAPI() {
             mainUrl // في حال حدوث خطأ، نعود للرابط الأساسي
         }
     }
-
-    // جعلنا الهيدرز ديناميكية لتأخذ الرابط النهائي كـ Referer بدلاً من الثابت
     private fun getDynamicHeaders(referer: String): Map<String, String> {
         return mapOf(
             "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Mobile Safari/537.36",
@@ -308,10 +289,7 @@ class TopCinemaProvider : MainAPI() {
     private suspend fun extractVidtube(url: String, currentBaseUrl: String, callback: (ExtractorLink) -> Unit) {
         try {
             Log.d("TopCinema", "[Vidtube] Loading: $url")
-            // تم استخدام الهيدرز والدومين الديناميكي هنا
             val response = app.get(url, headers = getDynamicHeaders(currentBaseUrl), referer = currentBaseUrl).text
-
-            // 1) محاولة آمنة لاستخراج الوسائط باستخدام Regex متوافق مع JVM
             val packerRegex = Regex(
                 """eval\(function\(p,a,c,k,e,d\)\{.*?\}\(\s*(['"])(.*?)\1\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])(.*?)\5\.split""",
                 setOf(RegexOption.DOT_MATCHES_ALL)
@@ -334,8 +312,6 @@ class TopCinemaProvider : MainAPI() {
                     Log.w("TopCinema", "[Vidtube] Regex parse partial failure: ${e.message}")
                 }
             }
-
-            // 2) fallback: طريقة أقرب لطريقة بايثون — البحث عن آخر ".split('|')" وقراءة القيم من الأطراف
             if (pRaw == null) {
                 try {
                     val evalStart = response.indexOf("eval(function(p,a,c,k,e,d)")
@@ -374,11 +350,7 @@ class TopCinemaProvider : MainAPI() {
                 Log.d("TopCinema", "[Vidtube] Could not extract p/a/c/k from page")
                 return
             }
-
-            // تنظيف p من escapes المحتملة
             val p = pRaw.replace("\\'", "'")
-
-            // امنع a من أن يتجاوز حدود الـ digits المستخدمة
             val safeA = if (a <= 0) 62 else minOf(a, 62)
             val safeC = if (c <= 0) kList.size.coerceAtLeast(0) else c
 
@@ -388,8 +360,6 @@ class TopCinemaProvider : MainAPI() {
                 Log.e("TopCinema", "[Vidtube] unpackJs failed: ${e.message}")
                 ""
             }
-
-            // استخراج روابط الفيديو والتسميات
             val fileRegex = Regex("""file\s*:\s*"(https?://[^"]+)"""")
             val labelRegex = Regex("""label\s*:\s*"([^"]+)"""")
 
@@ -421,10 +391,6 @@ class TopCinemaProvider : MainAPI() {
             logError(e)
         }
     }
-
-
-
-    // دوال جلب الروابط تعمل بالتوازي للسرعة القصوى
     override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
         val extractedLinks = ConcurrentHashMap<String, String>()
 

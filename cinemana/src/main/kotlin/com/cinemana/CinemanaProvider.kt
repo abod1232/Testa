@@ -43,8 +43,6 @@ class Cinemana(val context: Context) : MainAPI() {
             "cine_newly_added",
             false
         ),
-
-        // --- الفئات الـ 12 للأفلام ---
         Section(
             "أفلام - تاريخ الرفع - الأحدث",
             "$mainUrl/api/android/video/V/2?videoKind=1&langNb=&itemsPerPage=30&pageNumber=&level=0&sortParam=desc",
@@ -113,8 +111,6 @@ class Cinemana(val context: Context) : MainAPI() {
             "cine_mov_en_desc",
             false
         ),
-
-        // --- الفئات الـ 12 للمسلسلات ---
         Section(
             "مسلسلات - تاريخ الرفع - الأحدث",
             "$mainUrl/api/android/video/V/2?videoKind=2&langNb=&itemsPerPage=30&pageNumber=&level=0&sortParam=desc",
@@ -197,7 +193,6 @@ class Cinemana(val context: Context) : MainAPI() {
 
     init {
         try {
-            // هذا المستمع يضمن تحديث الأقسام فوراً بمجرد تغيير أي إعداد من الواجهة
             PreferenceManager.getDefaultSharedPreferences(context)
                 .registerOnSharedPreferenceChangeListener { _, _ ->
                     Log.d(
@@ -247,13 +242,9 @@ class Cinemana(val context: Context) : MainAPI() {
 
             val prefs = PreferenceManager.getDefaultSharedPreferences(context)
             val generatedPages = mutableListOf<MainPageData>()
-
-            // 1. البانر العلوي
             if (prefs.getBoolean("cine_banner", true)) {
                 generatedPages.add(mainPageOf("$apiV2/banner/level/0" to "المميز").first())
             }
-
-            // 2. الأقسام الديناميكية (من الكاش المحلي، ثم تتحدث بالخلفية)
             if (prefs.getBoolean("cine_dynamic_home", true)) {
                 val savedGroups = getSavedGroups()
                 if (savedGroups.isNotEmpty()) {
@@ -302,15 +293,11 @@ class Cinemana(val context: Context) : MainAPI() {
                     }
                 }
             }
-
-            // 3. الأقسام الثابتة
             staticCategories.forEach { section ->
                 if (prefs.getBoolean(section.prefKey, section.defaultEnabled)) {
                     generatedPages.add(mainPageOf(section.url to section.title).first())
                 }
             }
-
-            // حفظ نسخة من الـ mainPage المحدثة إذا لم يكن الطلب من محرك البحث
             if (!isCalledFromSearch()) {
                 cachedMainPage = generatedPages
             }
@@ -327,8 +314,6 @@ class Cinemana(val context: Context) : MainAPI() {
             if (requestData.isBlank() || requestData == "SEARCH_DUMMY") {
                 return@coroutineScope newHomePageResponse(emptyList(), hasNext = false)
             }
-
-            // أ) جلب البانر العلوي بصور عريضة مميزة
             if (requestData == "$apiV2/banner/level/0") {
                 if (page == 1) {
                     try {
@@ -354,8 +339,6 @@ class Cinemana(val context: Context) : MainAPI() {
                     return@coroutineScope newHomePageResponse(emptyList(), hasNext = false)
                 }
             }
-
-            // ب) جلب المجموعات الديناميكية الأولية (في حال عدم وجود كاش محلي)
             if (requestData == "CINE_DYNAMIC_HOME" && page == 1) {
                 try {
                     val responseMap =
@@ -393,8 +376,6 @@ class Cinemana(val context: Context) : MainAPI() {
 
                 return@coroutineScope newHomePageResponse(items, hasNext = false)
             }
-
-            // ج) التمرير (السحب لليسار) لجميع الأقسام الديناميكية والثابتة
             var actualRequestUrl = requestData
 
             if (requestData == "CINE_DYNAMIC_HOME" && page > 1) {
@@ -497,8 +478,6 @@ class Cinemana(val context: Context) : MainAPI() {
                 runCatching {
                     val rawResp = app.get(url).parsedSafe<List<Map<String, Any>>>()
                     val rawSize = rawResp?.size ?: 0
-
-                    // 🟢 التعديل هنا: نحتفظ بكائن CinemanaItem بجانب SearchResponse لكي نفحص كلا العنوانين لاحقاً
                     val parsedItems = rawResp?.mapNotNull { itemMap ->
                         val cinemanaItem = itemMap.toCinemanaItem()
                         val searchResponse = cinemanaItem.toSearchResponse()
@@ -521,8 +500,6 @@ class Cinemana(val context: Context) : MainAPI() {
             if (i < movies.size) interleaved.add(movies[i])
             if (i < series.size) interleaved.add(series[i])
         }
-
-        // 🟢 تحديث دالة التقييم لتفحص نصاً واحداً
         fun getScore(t: String?, ql: String): Int {
             if (t.isNullOrBlank()) return 0
             val tl = t.lowercase().trim()
@@ -539,8 +516,6 @@ class Cinemana(val context: Context) : MainAPI() {
         val sorted = interleaved
             .mapIndexed { idx, pair ->
                 val (response, cinemanaItem) = pair
-
-                // 🟢 إعطاء التقييم بناءً على العنوان العربي والإنجليزي وأخذ التقييم الأعلى
                 val arScore = getScore(cinemanaItem.arTitle, ql)
                 val enScore = getScore(cinemanaItem.enTitle, ql)
                 val maxScore = maxOf(arScore, enScore)
@@ -556,8 +531,6 @@ class Cinemana(val context: Context) : MainAPI() {
         val finalResults = sorted.distinctBy { "${it.url ?: ""}-${it.name ?: ""}" }
 
         var hasMore = interleaved.isNotEmpty()
-
-        // --- البحث الاحتياطي (Fallback) في حال عدم وجود نتائج ---
         if (finalResults.isEmpty() && page == 1) {
             val fallbackYearRange = "1900,2024"
 
@@ -664,8 +637,6 @@ class Cinemana(val context: Context) : MainAPI() {
                 ), roleString = null
             )
         } ?: emptyList()
-
-        // 🟢 جلب الكتاب وتحويلهم بدور "الكاتب"
         val writersList = detailsMap["writersInfo"] as? List<*>
         val writersMapped = writersList?.mapNotNull { item ->
             val map = item as? Map<*, *> ?: return@mapNotNull null
@@ -676,8 +647,6 @@ class Cinemana(val context: Context) : MainAPI() {
                 ?: "defaultImages/not_available.jpg"
             ActorData(Actor(name = name, image = image), roleString = "الكاتب")
         } ?: emptyList()
-
-        // 🟢 جلب المخرجين وتحويلهم بدور "المخرج"
         val directorsList = detailsMap["directorsInfo"] as? List<*>
         val directorsMapped = directorsList?.mapNotNull { item ->
             val map = item as? Map<*, *> ?: return@mapNotNull null
@@ -688,26 +657,16 @@ class Cinemana(val context: Context) : MainAPI() {
                 ?: "defaultImages/not_available.jpg"
             ActorData(Actor(name = name, image = image), roleString = "المخرج")
         } ?: emptyList()
-
-        // دمج الممثلين مع الكتاب والمخرجين في قائمة واحدة للظهور في الواجهة
         val combinedActors = actorsList + writersMapped + directorsMapped
-
-        // 🟢 جلب الإعجابات والديسلايكات
         val likes = detailsMap["videoLikesNumber"]?.toString()
             ?: detailsMap["Likes"]?.toString()
             ?: "0"
         val dislikes = detailsMap["videoDisLikesNumber"]?.toString()
             ?: detailsMap["DisLikes"]?.toString()
             ?: "0"
-
-        // 🟢 إدراج الإعجابات والديسلايكات في التاقات (Tags)
         val combinedTags = listOf("👍 $likes", "👎 $dislikes") + genresList
-
-        // ⏱️ جلب المدة الزمنية للفيلم الرئيسي بالدقائق
         val durationSec = detailsMap["duration"]?.toString()?.toDoubleOrNull()?.toInt()
         val durationInMinutes = durationSec?.let { it / 60 }
-
-        // 🟢 جلب الاقتراحات (Recommendations)
         val recsUrl = "https://recommend.shabakaty.com/api/recommendation/recommend/"
         val recsList = try {
             val recsResponse = app.post(
@@ -744,8 +703,6 @@ class Cinemana(val context: Context) : MainAPI() {
                 if (epDetails.nb != null && (epDetails.enTitle != null || epDetails.arTitle != null)) {
                     val epNum = (epDetails.episodeNummer as? String)?.toIntOrNull() ?: 1
                     val sNum = (epDetails.season as? String)?.toIntOrNull() ?: 1
-
-                    // ⏱️ جلب مدة كل حلقة بالدقائق
                     val epDurationSec =
                         episodeMap["duration"]?.toString()?.toDoubleOrNull()?.toInt()
                     val epDurationInMinutes = epDurationSec?.let { it / 60 }

@@ -7,15 +7,12 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 
 class AlooyTvProvider : MainAPI() {
-    // الرابط الثابت الذي يحتوي على الروابط المتغيرة
     override var mainUrl = "https://fitnur.com/alooytv"
     override var name = "AlooyTv"
     override val hasMainPage = true
     override var lang = "ar"
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.TvSeries, TvType.Movie, TvType.Anime)
-
-    // هذا المتغير سيخزن النطاق الحقيقي (مثل n.alooytv14.xyz) بعد استخراجه
     private var actualDomain: String? = null
 
     private val homepageSections = listOf(
@@ -25,15 +22,11 @@ class AlooyTvProvider : MainAPI() {
         "/genre/turki.html" to "مسلسلات تركية",
         "/genre/farisi.html" to "مسلسلات فارسية"
     )
-
-    // دالة سحرية لاستخراج النطاق الجديد من صفحة fitnur
     private suspend fun getActualDomain(): String {
-        // إذا كان لدينا النطاق بالفعل، لا داعي لجلب الصفحة مرة أخرى
         actualDomain?.let { return it }
 
         return try {
             val doc = app.get(mainUrl).document
-            // نبحث عن أي رابط يحتوي على "alooytv" وينتهي بـ ".xyz"
             val link = doc.select("a[href*='alooytv'][href*='.xyz']").firstOrNull()?.attr("href")
 
             if (link != null) {
@@ -42,7 +35,6 @@ class AlooyTvProvider : MainAPI() {
                 actualDomain = domain
                 domain
             } else {
-                // إذا فشل الاستخراج، نستخدم نطاق احتياطي أو نعود للنطاق الحالي
                 "https://n.alooytv14.xyz"
             }
         } catch (e: Exception) {
@@ -53,7 +45,6 @@ class AlooyTvProvider : MainAPI() {
     private fun Element.toSearchResult(domain: String): SearchResponse? {
         val a = this.selectFirst(".movie-title h3 a") ?: return null
         val title = a.text().trim()
-        // نضمن أن الرابط يستخدم النطاق الصحيح
         val href = a.attr("href")
         val url = if (href.startsWith("http")) href else "$domain/${href.trimStart('/')}"
 
@@ -68,12 +59,8 @@ class AlooyTvProvider : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         if (page > 1) throw ErrorLoadingException("لا يوجد صفحات إضافية")
-
-        // 1. استخراج النطاق الحقيقي أولاً
         val domain = getActualDomain()
         val items = ArrayList<HomePageList>()
-
-        // 2. جلب الأقسام بالتوازي باستخدام النطاق المستخرج
         val parallelResults = kotlinx.coroutines.coroutineScope {
             homepageSections.map { (path, title) ->
                 async {

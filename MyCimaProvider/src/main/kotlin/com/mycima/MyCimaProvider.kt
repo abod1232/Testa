@@ -477,29 +477,17 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
 
         return try {
             val document = smartGet(url)
-
-            // ------------------------------------------------------------------
-            // 2. إصلاح استخراج العنوان (Fallback) لضمان عدم التوقف
-            // ------------------------------------------------------------------
             var title =
                 document.selectFirst("div.Title--Content--Single-begin > h1")?.ownText()?.trim()
-
-            // إذا فشل المحدد الأول، نستخدم Meta Tags
             if (title.isNullOrBlank()) {
                 title = document.selectFirst("meta[property='og:title']")?.attr("content")?.trim()
-                // تنظيف العنوان من اسم الموقع ليكون نظيفاً
                 title = title?.replace(" - وي سيما WECIMA ماي سيما MYCIMA", "")
                     ?.replace(" - ماي سيما", "")
             }
-
-            // محاولة أخيرة من عنوان الصفحة
             if (title.isNullOrBlank()) {
                 title = document.title()
             }
-
-            // إذا بقي العنوان فارغاً بعد كل المحاولات، نتوقف
             if (title.isNullOrBlank()) return null
-            // ------------------------------------------------------------------
 
             val poster = getPosterFromStyle(document.selectFirst("wecima.separated--top"))
             val year =
@@ -515,8 +503,6 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
             val seriesUrlFromEpisode =
                 document.selectFirst("ul.Terms--Content--Single-begin li:contains(المسلسل) a")
                     ?.attr("href")
-
-            // --- دوال مساعدة داخلية ---
             fun extractPostId(doc: org.jsoup.nodes.Document): String? {
                 doc.selectFirst("input[name=post_id]")?.attr("value")?.takeIf { it.isNotBlank() }
                     ?.let { return it }
@@ -730,8 +716,6 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
                         }
                     }
                 }
-
-                // ترتيب الحلقات لضمان عدم التداخل
                 val distinctEpisodes = episodes.distinctBy { it.data }
                     .sortedWith(compareBy({ it.season }, { it.episode }))
 
@@ -754,22 +738,14 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
                 }
             }
         } catch (e: Exception) {
-            // هنا يطبع الخطأ في Logcat في حال حدوثه بدلاً من توقف التطبيق
             Log.e(TAG, "Error loading page: $url", e)
             e.printStackTrace()
             return null
         }
     }
-
-    // هيدرز قوية لمحاكاة متصفح حقيقي
-
-
-    // هيدرز المتصفح الأساسية (بأحرف صغيرة لتجنب تكرار OkHttp)
     private val browserHeaders = mapOf(
         "user-agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
     )
-
-    // 1. إصلاح حشو Base64 (مطابق لـ fix_base64_padding)
     private fun fixBase64Padding(text: String): String {
         val cleanText = text.trim().replace(" ", "").replace("\n", "")
         val missingPadding = cleanText.length % 4
@@ -779,110 +755,79 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
             cleanText
         }
     }
-
-    // 2. فك التشفير الذكي (مطابق لـ smart_decode)
     private fun smartDecode(payload: String): String? {
         try {
-            // محاولة الفك العادي
             val decoded =
                 String(Base64.decode(fixBase64Padding(payload), Base64.DEFAULT), Charsets.UTF_8)
             if (decoded.contains("http")) return decoded
-
-            // محاولة فك النص المعكوس
             val reversed = payload.reversed()
             val decodedRev =
                 String(Base64.decode(fixBase64Padding(reversed), Base64.DEFAULT), Charsets.UTF_8)
             if (decodedRev.contains("http")) return decodedRev
         } catch (e: Exception) {
-            // فشل الفك
         }
         return null
     }
-
-    // 3. المستخرج العميق (مطابق لـ deep_extract_govid)
     private suspend fun deepExtractGovid(url: String, referer: String): String {
         try {
-            // دمج الهيدرز مع referer صفحة المشاهدة
             val reqHeaders = browserHeaders + mapOf("referer" to referer)
             val res = app.get(url, headers = reqHeaders, timeout = 10L)
 
             if (!res.isSuccessful) return url
 
             val html = res.text
-
-            // أ- البحث عن الروابط في atob
             val atobRegex = Regex("""atob\s*\(\s*["']([^"']+)["']\s*\)""")
             val atobMatches = atobRegex.findAll(html)
             for (match in atobMatches) {
                 val decoded = smartDecode(match.groupValues[1])
                 if (decoded != null) return decoded
             }
-
-            // ب- البحث عن iframe داخلي
             val iframeSrc = res.document.selectFirst("iframe")?.attr("src")
             if (!iframeSrc.isNullOrBlank()) {
                 return if (iframeSrc.startsWith("//")) "https:$iframeSrc" else iframeSrc
             }
-
-            // ج- البحث عن الروابط المباشرة m3u8/mp4
             val directRegex = Regex("""["'](https?://[^"']+\.(?:m3u8|mp4|php)[^"']*)["']""")
             val directMatch = directRegex.find(html)
             if (directMatch != null) {
                 return directMatch.groupValues[1].replace("\\/", "/")
             }
         } catch (e: Exception) {
-            // تجاهل الخطأ
         }
         return url
     }
-
-    // 4. الدالة الرئيسية لجلب ومعالجة الروابط (مطابقة لـ extract_mycima_links)
     override suspend fun loadLinks(
         data: String, // data هو رابط الفيلم (target_url) الذي سنستخدمه كـ referer
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-
-        // جلب الصفحة الرئيسية للفيلم
         val initialHeaders = browserHeaders + mapOf("referer" to mainUrl)
         val document = app.get(data, headers = initialHeaders, timeout = 15L).document
 
         val linksToProcess = mutableListOf<Pair<String, String>>()
-
-        // استخراج عناصر السيرفرات
         document.select("ul#watch li[data-watch]").forEach {
             val url = it.attr("data-watch")
             val name = extractServerName(it)
             if (url.isNotBlank()) linksToProcess.add(url to name)
         }
-
-        // استخراج سيرفرات التحميل
         document.select("ul.List--Download--Wecima--Single li a[href]").forEach {
             val url = it.attr("href")
             val name = it.selectFirst("quality")?.text()?.trim() ?: "تحميل"
             if (url.isNotBlank()) linksToProcess.add(url to name)
         }
-
-        // المعالجة المتوازية (مطابقة لـ ThreadPoolExecutor)
         coroutineScope {
             linksToProcess.distinctBy { it.first }.map { (link, serverName) ->
                 async {
                     var finalUrl = link.trim()
-
-                    // الحالة 1: روابط govid
                     if (finalUrl.contains("govid")) {
                         if (finalUrl.contains("=") && !finalUrl.contains("pic=")) {
                             val encodedPart = finalUrl.substringAfterLast("=")
                             val decoded = smartDecode(encodedPart)
-                            // إذا نجح الفك العادي نستخدمه، وإلا ندخل للعمق باستخدام `data` كـ referer
                             finalUrl = decoded ?: deepExtractGovid(finalUrl, data)
                         } else {
-                            // ندخل للعمق باستخدام `data` كـ referer
                             finalUrl = deepExtractGovid(finalUrl, data)
                         }
                     }
-                    // الحالة 2: روابط التحميل /go/
                     else if (finalUrl.contains("/go/")) {
                         val encodedPart = finalUrl.substringAfterLast("/go/").trimEnd('/')
                         val decoded = smartDecode(encodedPart)
@@ -890,11 +835,7 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
                             finalUrl = decoded
                         }
                     }
-
-                    // إرسال النتيجة النهائية إلى loadExtractor
                     if (finalUrl.isNotBlank() && finalUrl.startsWith("http")) {
-
-                        // إرسال الرابط مع `data` كـ referer لـ CloudStream
                         loadExtractor(finalUrl, data, subtitleCallback, callback)
                     }
                 }

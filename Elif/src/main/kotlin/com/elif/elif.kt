@@ -40,8 +40,6 @@ class ElifNewsProvider : MainAPI() {
         "$mainUrl/category.php?cat=english-series3" to "مسلسلات أجنبية مترجمة"
     )
 
-    // ================== نظام تخطي كلاودفلير المدمج ==================
-
     @SuppressLint("DiscouragedPrivateApi", "PrivateApi")
     private fun getCurrentActivity(): Activity? {
         try {
@@ -90,8 +88,6 @@ class ElifNewsProvider : MainAPI() {
         newHeaders.putAll(browserHeaders)
         newHeaders.putAll(originalHeaders)
         newHeaders["User-Agent"] = appUserAgent
-
-        // التحقق لمنع تمرير كوكيز موقع elif الحساسة إلى السيرفرات الخارجية غير المرتبطة بها
         val isMainDomain = url.contains("elif.news") || url.contains(mainUrl)
         if (isMainDomain) {
             val allCookies = CookieManager.getInstance().getCookie(url)
@@ -128,8 +124,6 @@ class ElifNewsProvider : MainAPI() {
         }
         return response
     }
-
-    // =========================================================================
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = safeGet(request.data).document
@@ -177,8 +171,6 @@ class ElifNewsProvider : MainAPI() {
         if (isSeries) {
             val episodes = mutableListOf<Episode>()
             val rawEpisodeElements = document.select("#Season0 a, .tabcontent a")
-
-            // عكس العناصر أولاً لتظهر بالترتيب الصحيح
             val reversedElements = rawEpisodeElements.reversed()
 
             reversedElements.forEachIndexed { index, element ->
@@ -242,8 +234,6 @@ class ElifNewsProvider : MainAPI() {
             return ""
         }
     }
-
-    // دالة معالجة كود فك التشفير وإرجاع الصفحة العادية في حال عدم وجود تشفير
     private fun extractLogic(htmlText: String): String {
         try {
             val startMarker = "eval(function(p,a,c,k,e,d)"
@@ -260,12 +250,9 @@ class ElifNewsProvider : MainAPI() {
                 }
             }
         } catch (e: Exception) {
-            // تجاهل الخطأ والعودة بالصفحة العادية
         }
         return htmlText
     }
-
-    // دالة استخراج روابط البث بصيغها المختلفة المباشرة والمرنة
     private fun findM3u8(text: String): String? {
         val fileRegex = """file\s*:\s*["']([^"']+)["']""".toRegex()
         val fileMatch = fileRegex.find(text)
@@ -283,14 +270,10 @@ class ElifNewsProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val document = app.get(data).document
-
-        // 1. تشغيل المحلل المدمج الافتراضي على مشغل الميتا الأول
         val embedUrl = document.selectFirst("link[itemprop=embedUrl]")?.attr("href")
         if (!embedUrl.isNullOrEmpty()) {
             loadExtractor(embedUrl, data, subtitleCallback, callback)
         }
-
-        // 2. تتبع ومعالجة السيرفرات المتعددة بالتوازي
         val xtgoLink = document.selectFirst("#BiBplayer a.xtgo")?.attr("href")
         if (!xtgoLink.isNullOrEmpty()) {
             val resolvedXtgoUrl = fixUrl(xtgoLink)
@@ -310,15 +293,11 @@ class ElifNewsProvider : MainAPI() {
 
                         try {
                             val serverUrl = fixUrl(embedSource)
-
-                            // أ) إرسال الرابط أولاً إلى الـ loadExtractor الافتراضي للتطبيق
                             loadExtractor(serverUrl, resolvedXtgoUrl, subtitleCallback, callback)
 
                             val uri = URL(serverUrl)
                             val domain = "${uri.protocol}://${uri.host}/"
                             val serverName = uri.host.replace("www.", "").lowercase()
-
-                            // ب) إرسال نفس الرابط ثانياً إلى دالة فك التشفير المخصصة بالتوازي
                             val serverResponse = app.get(serverUrl, headers = mapOf("Referer" to resolvedXtgoUrl))
                             if (serverResponse.code == 200) {
                                 val content = extractLogic(serverResponse.text)
@@ -327,8 +306,6 @@ class ElifNewsProvider : MainAPI() {
                                 if (!videoLink.isNullOrEmpty()) {
                                     val finalVideoUrl = fixUrl(videoLink)
                                     val isVidspeed = serverName.contains("vidspeed")
-
-                                    // إعداد الرأسيات المخصصة لعملية الفحص الأولي للرابط
                                     val verifyHeaders = if (isVidspeed) {
                                         mapOf(
                                             "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Mobile Safari/537.36",
@@ -359,7 +336,6 @@ class ElifNewsProvider : MainAPI() {
                                             ) {
                                                 referer = domain
                                                 quality = Qualities.Unknown.value
-                                                // تطبيق رأسيات مخصصة للرابط النهائي المستخرج لسيرفر Vidspeed
                                                 if (isVidspeed) {
                                                     headers = mapOf(
                                                         "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Mobile Safari/537.36",
@@ -375,7 +351,6 @@ class ElifNewsProvider : MainAPI() {
                                 }
                             }
                         } catch (e: Exception) {
-                            // الاستمرار في بقية السيرفرات المتوازية
                         }
                     }
                 }.awaitAll()

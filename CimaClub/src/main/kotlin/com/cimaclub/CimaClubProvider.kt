@@ -12,10 +12,6 @@ class CimaClub : MainAPI() {
     override val hasMainPage = true
     override var lang = "ar"
     override val supportedTypes = setOf(TvType.TvSeries, TvType.Movie)
-
-    // =========================================================================
-    // === تم إضافة قائمة الفئات هنا ===
-    // =========================================================================
     override val mainPage = mainPageOf(
         "$mainUrl/category/افلام-اجنبي/" to "أفلام أجنبي",
         "$mainUrl/category/افلام-عربي/" to "أفلام عربي",
@@ -52,22 +48,14 @@ class CimaClub : MainAPI() {
         }
     }
     override suspend fun search(query: String): List<SearchResponse> {
-        // بناء رابط البحث
         val url = "$mainUrl/?s=${query.replace(" ", "+")}"
-
-        // جلب صفحة نتائج البحث
         val document = app.get(url).document
-
-        // استخراج العناصر من نتائج البحث
-        // الموقع يستخدم نفس الكلاسات (.Small--Box) في صفحة النتائج
         return document.select("div.BlocksHolder > div.Small--Box").mapNotNull { element ->
             val title = element.selectFirst("inner--title > h2")?.text()?.trim() ?: return@mapNotNull null
             val href = element.selectFirst("a")?.attr("href") ?: return@mapNotNull null
             val posterUrl = element.selectFirst("img")?.let {
                 it.attr("data-src").ifBlank { it.attr("src") }
             }?.ifBlank { null }
-
-            // تحديد نوع المحتوى (فيلم أو مسلسل) بناءً على الرابط أو وجود أيقونة الحلقة
             val isTv = href.contains("/series/") || href.contains("/مسلسل-") || element.selectFirst(".number") != null
 
             if (isTv) {
@@ -81,11 +69,7 @@ class CimaClub : MainAPI() {
             }
         }
     }
-    // =========================================================================
-    // === تم تعديل هذا الجزء لدعم الفئات والصفحات ===
-    // =========================================================================
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        // بناء الرابط ليدعم الصفحات التالية (page 2, 3, etc.)
         val url = if (page > 1) {
             "${request.data}page/$page/"
         } else {
@@ -94,8 +78,6 @@ class CimaClub : MainAPI() {
 
         val document = app.get(url).document
         val items = document.select("div.BlocksHolder > div.Small--Box").mapNotNull { it.toSearchResponse() }
-
-        // استخدام اسم الفئة من الطلب مباشرة
         return newHomePageResponse(request.name, items)
     }
 
@@ -185,17 +167,12 @@ class CimaClub : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val tag = "CimaClub"
-
-        // القفزة السحرية: إرسال POST لإظهار السيرفرات
-        // الموقع يتوقع watch=1 ليقوم بعرض محتوى ul#watch
         val response = app.post(
             data,
             data = mapOf("watch" to "1"),
             headers = mapOf("Referer" to data)
         )
         val document = response.document
-
-        // 1. استخراج سيرفرات المشاهدة (Embeds)
         document.select("ul#watch li").forEach {
             val embedUrl = it.attr("data-watch")
             if (embedUrl.isNotBlank()) {
@@ -203,8 +180,6 @@ class CimaClub : MainAPI() {
                 loadExtractor(embedUrl, data, subtitleCallback, callback)
             }
         }
-
-        // 2. استخراج سيرفرات التحميل (غالباً تكون مباشرة)
         document.select(".ServersList.Download a").forEach {
             val downloadUrl = it.attr("href")
             if (downloadUrl.isNotBlank()) {

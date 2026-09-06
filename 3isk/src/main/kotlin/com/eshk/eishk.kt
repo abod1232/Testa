@@ -487,8 +487,6 @@ class eishk : MainAPI() {
                 if (btnName.isNotBlank()) firstFormData[btnName] = watchBtn.attr("value")
             }
             Log.d(TAG, "STEP: POST 1 -> $firstPostUrl (fields=${firstFormData.size})")
-
-            // STEP 3: POST first
             headers.toMutableMap()["Referer"] = data
             val r1 = try {
                 app.post(firstPostUrl, data = firstFormData, referer = data, headers = headers)
@@ -498,8 +496,6 @@ class eishk : MainAPI() {
             Log.d(TAG, "POST1 response length=${r1.text.length}")
             r1.text.chunked(3000)
                 .forEachIndexed { i, ch -> Log.d(TAG, "post1 chunk ${i + 1}: $ch") }
-
-            // STEP 4: extract next POST details (myUrl and news input)
             val mMyurl = Regex("""var\s+myUrl\s*=\s*["']([^"']+)["']""").find(r1.text)
             val mNews = Regex("""myInput\.value\s*=\s*["']([^"']+)["']""").find(r1.text)
             if (mMyurl == null || mNews == null) {
@@ -511,8 +507,6 @@ class eishk : MainAPI() {
             val nextPost = mMyurl.groupValues[1]
             val newsVal = mNews.groupValues[1]
             Log.d(TAG, "STEP: nextPost=$nextPost , newsVal length=${newsVal.length}")
-
-            // STEP 5: POST second
             val post2Data = mapOf("news" to newsVal, "u" to "", "submit" to "submit")
             val r2 = try {
                 app.post(nextPost, data = post2Data, referer = r1.url, headers = headers)
@@ -522,8 +516,6 @@ class eishk : MainAPI() {
             Log.d(TAG, "POST2 response length=${r2.text.length}")
             r2.text.chunked(3000)
                 .forEachIndexed { i, ch -> Log.d(TAG, "post2 chunk ${i + 1}: $ch") }
-
-            // STEP 6: find iframes in r2
             val soup2 = r2.document
             val iframeSrcsOnR2 = getAllIframeSrcs(soup2)
             Log.d(TAG, "STEP: found ${iframeSrcsOnR2.size} iframe(s) on r2")
@@ -535,8 +527,6 @@ class eishk : MainAPI() {
             Log.d(TAG, "Base iframe src: $baseIframeSrc")
 
             val foundAllMediaLinks = mutableMapOf<String, MutableSet<String>>()
-
-            // if embed pattern matches https://3esk.onl/embed/{num}/{trailing}
             val embedMatch = Regex("""(https://3esk\.onl/embed/)(\d+)/(.*)""").find(baseIframeSrc)
             if (embedMatch != null) {
                 val baseUrlPrefix = embedMatch.groupValues[1]
@@ -572,19 +562,14 @@ class eishk : MainAPI() {
                     }
                 }
             }
-
-            // إذا لم نجد أي روابط عطّلنا العملية
             if (foundAllMediaLinks.isEmpty()) {
                 Log.e(TAG, "No media links were extracted from any embed servers.")
                 return false
             }
-
-// إرسال كل الروابط مباشرة للمشغل بدون هيدرز إضافية
             for ((link, servers) in foundAllMediaLinks) {
                 Log.d(TAG, "EXTRACTED: $link (servers=${servers.joinToString(",")})")
 
                 try {
-                    // ✅ أرسل الرابط مباشرة إلى المشغل
                     callback.invoke(
                         newExtractorLink(
                             source = this.name,
@@ -599,9 +584,6 @@ class eishk : MainAPI() {
                     Log.e(TAG, "Error sending link to player: ${e.message}")
                 }
             }
-
-
-// ✅ نهاية المعالجة بنجاح
             return true
 
         } catch (e: Exception) {

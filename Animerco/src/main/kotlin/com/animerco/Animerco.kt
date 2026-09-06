@@ -52,8 +52,6 @@ class animerco : MainAPI() {
             interceptor = interceptor,
             allowRedirects = true
         )
-
-        // الرابط النهائي بعد التحويل
         val finalUrl = resp.url.trimEnd('/')
 
         resolvedMainUrl = finalUrl
@@ -125,8 +123,6 @@ class animerco : MainAPI() {
 
         return newHomePageResponse(homePageList)
     }
-
-    // ضع هذه التعريفات في أعلى class animerco (قبل استخدامهم)
     data class PlayerAjaxResponse(
         @JsonProperty("embed_url") val embedUrl: String?,
         @JsonProperty("type") val type: String?
@@ -134,9 +130,6 @@ class animerco : MainAPI() {
 
     data class Quad<A, B, C, D>(val a: A, val b: B, val c: C, val d: D)
     data class DownloadMeta(val server: String, val quality: String, val language: String)
-
-
-    // ------------------ SEARCH ------------------
     override suspend fun search(query: String): List<SearchResponse> {
         val results = mutableListOf<SearchResponse>()
         val seenHrefs = mutableSetOf<String>()
@@ -146,8 +139,6 @@ class animerco : MainAPI() {
         } catch (e: Exception) {
             query // fallback unlikely
         }
-
-        // نجلب أول 3 صفحات: page 1 => /?s=..., page 2 => /page/2/?s=..., page 3 => /page/3/?s=...
         for (page in 1..3) {
             val url = if (page == 1) "$mainUrl/?s=$encoded" else "$mainUrl/page/$page/?s=$encoded"
             try {
@@ -157,7 +148,6 @@ class animerco : MainAPI() {
 
                 val cards = doc.select("div.search-card")
                 if (cards.isEmpty()) {
-                    // لا نتائج في هذه الصفحة — ننهِ البحث مبكراً
                     Log.d("AnimercoSearch", "No search results on page $page, stopping.")
                     break
                 }
@@ -181,7 +171,6 @@ class animerco : MainAPI() {
                 }
             } catch (e: Exception) {
                 Log.e("AnimercoSearch", "Failed fetching search page $page: ${e.message}", e)
-                // في حالة فشل صفحة واحدة نتابع للصفحات التالية بدل إيقاف كل العملية
                 continue
             }
         }
@@ -233,15 +222,12 @@ class animerco : MainAPI() {
             val tags = doc.select("div.genres a").map { it.text() }
             val year = doc.select("ul.media-info li:contains(بداية العرض) a").text().toIntOrNull()
             val scoreValue = doc.selectFirst("div.votes span.score")?.text()?.toDoubleOrNull()
-
-            // أقوى كشف للفيلم: نص النوع أو URL يحتوي /movies/ أو /movie/
             val typeText = doc.select("div.media-info li:contains(النوع) span").text()
             val isMovieByText = typeText.contains("Movie", ignoreCase = true) || typeText.contains("film", ignoreCase = true)
             val isMovieByUrl = url.contains("/movies/", ignoreCase = true) || url.contains("/movie/", ignoreCase = true)
             val isMovie = isMovieByText || isMovieByUrl
 
             if (isMovie) {
-                // --- معاملة الفيلم: اعادة كـ Movie مع حلقة واحدة (نفس رابط الصفحة) لكي يظهر زر المشاهدة ---
                 val singleEpisode = newEpisode(url) {
                     name = title.ifBlank { "Movie" }
                     posterUrl = poster
@@ -256,11 +242,8 @@ class animerco : MainAPI() {
                     this.score = Score.from10(scoreValue)
                 }
             }
-
-            // هل الصفحة تحتوي على مواسم/قوائم حلقات؟ (صفحة الأنمي الرئيسية)
             val seasonNodes = doc.select("div.media-seasons ul.episodes-lists li")
             if (seasonNodes.isEmpty()) {
-                // من المحتمل أن تكون صفحة حلقة منفردة — حاول إيجاد صفحة الأنمي الأصلية (parent)
                 val candidateSelectors = listOf(
                     "a.btn.seasons",
                     "a.seasons",
@@ -289,11 +272,8 @@ class animerco : MainAPI() {
                 val parentUrl = normalizeUrl(parentHref)
                 if (!parentUrl.isNullOrBlank() && parentUrl != url) {
                     Log.d("AnimercoLoad", "Detected episode page — redirecting to parent anime page: $parentUrl")
-                    // حمّل صفحة الأنمي الأصلية كما يفعل بايثون
                     return load(parentUrl)
                 }
-
-                // إن لم نجد صفحة الأنمي: نبني LoadResponse لحلقة واحدة (نترك نفس رابط الحلقة كـ url للتشغيل)
                 val epTitle = doc.selectFirst("div.media-title h1")?.text()?.trim() ?: title
                 val epNumber = doc.selectFirst("meta[itemprop=episodeNumber]")?.attr("content")?.toIntOrNull()
                     ?: doc.selectFirst("span.episode-number")?.text()?.filter { it.isDigit() }?.toIntOrNull()
@@ -313,8 +293,6 @@ class animerco : MainAPI() {
                     this.score = Score.from10(scoreValue)
                 }
             }
-
-            // يوجد مواسم منفصلة: نجلب حلقات كل موسم (المنطق الذي يعمل لديك حالياً)
             val episodes = mutableListOf<Episode>()
             seasonNodes.forEach { season ->
                 val seasonUrlRaw = season.selectFirst("a.title")?.attr("href") ?: return@forEach
@@ -358,9 +336,6 @@ class animerco : MainAPI() {
             else -> "https://$s"
         }
     }
-
-    // محاكاة منطق Python لمعالجة Megabox/Inertia.js
-    // ضع هذا داخل class animerco
 
     data class MegaboxEntry(
         val type: String = "megabox",
@@ -418,8 +393,6 @@ class animerco : MainAPI() {
 
             try {
                 val targetUrl = url
-
-                // 2. الطلب الأول لجلب إصدار Inertia
                 val initialResponse = app.get(targetUrl, referer = referer)
                 val soup = initialResponse.document
                 val version = soup.selectFirst("script[data-page=app]")?.html()?.let {
@@ -427,8 +400,6 @@ class animerco : MainAPI() {
                 }
 
                 if (version == null) return emptyList()
-
-                // 3. الطلب الثاني لجلب البيانات
                 val inertiaHeaders = mapOf(
                     "X-Inertia" to "true",
                     "X-Inertia-Partial-Component" to "files/mirror/video",
@@ -439,8 +410,6 @@ class animerco : MainAPI() {
 
                 val streamResponse = app.get(targetUrl, headers = inertiaHeaders, referer = referer)
                 val streamJson = parseJson<Share4maxInertiaResponse>(streamResponse.text)
-
-                // 4. استخراج الروابط فقط
                 streamJson.props?.streams?.data?.forEach { qualityLevel ->
                     qualityLevel.mirrors?.forEach { mirror ->
                         mirror.link?.let { link ->
@@ -468,15 +437,11 @@ class animerco : MainAPI() {
         Log.d(TAG, "➡️ loadLinks start for: $data")
         val base = resolveMainUrl()
         val ajaxUrl = "$base/wp-admin/admin-ajax.php"
-
-        // BASE_HEADERS محلي (نسخة من هيدرز بايثون)
         val BASE_HEADERS = mapOf(
             "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Mobile Safari/537.36",
             "Accept" to "text/html, application/xhtml+xml",
             "Referer" to mainUrl
         )
-
-        // دوال مساعدة داخلية (مشتقة من بايثون)
         fun ensureHttpsRaw(link: String?, base: String? = null): String? {
             if (link.isNullOrBlank()) return link
             val s = link.trim()
@@ -502,7 +467,6 @@ class animerco : MainAPI() {
                 val headers = mapOf("Referer" to (sessionReferer ?: data), "User-Agent" to BASE_HEADERS["User-Agent"]!!)
                 val resp = runCatching { app.get(url, interceptor = interceptor, headers = headers) }.getOrNull()
                 val html = resp?.text ?: ""
-                // محاولة استخراج iframe أو رابط مباشر لم3u8/mp4
                 val iframe = extractIframeSrc(html)
                 if (!iframe.isNullOrBlank()) {
                     ensureHttpsRaw(iframe, url)
@@ -516,19 +480,14 @@ class animerco : MainAPI() {
         }
 
         try {
-            // جلب صفحة الحلقة (مثل البايثون)
             val pageResp = app.get(data, interceptor = interceptor)
             val doc = pageResp.document
             Log.d(TAG, "Fetched page title='${doc.selectFirst("title")?.text() ?: ""}'")
-
-            // استخراج nonce
             val scriptTag = doc.selectFirst("script#dt_main_ajax-js-extra")
             val scriptData = scriptTag?.data() ?: doc.html()
             val nonceMatch = Regex(""""nonce"\s*:\s*"([a-f0-9]+)"""", RegexOption.IGNORE_CASE).find(scriptData)
             val globalNonce = nonceMatch?.groupValues?.get(1) ?: ""
             Log.d(TAG, "Found nonce=$globalNonce")
-
-            // جمع أزرار السيرفرات
             val serverButtons = doc.select("ul.server-list li a.option")
             if (serverButtons.isEmpty()) {
                 Log.w(TAG, "No server buttons found.")
@@ -546,33 +505,24 @@ class animerco : MainAPI() {
                 if (postId.isBlank() || nume.isBlank() || dtype.isBlank()) continue
                 btns.add(Btn(sname, postId, nume, dtype, securityNonce))
             }
-
-            // قناة آمنة لإرسال النتائج إلى callback (مستهلك واحد)
             val linkChannel = kotlinx.coroutines.channels.Channel<ExtractorLink>(kotlinx.coroutines.channels.Channel.UNLIMITED)
             val consumer = kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.Default) {
                 for (link in linkChannel) {
                     try { callback.invoke(link) } catch (e: Exception) { Log.w(TAG, "Callback failed: ${e.message}") }
                 }
             }
-
-            // حد التوازي (مثل ThreadPoolExecutor)
             val maxConcurrent = kotlin.math.min(12, kotlin.math.max(4, btns.size))
             val sem = kotlinx.coroutines.sync.Semaphore(maxConcurrent)
-
-            // تنفيذ متوازي لكل زر (coroutines)
             val jobs = btns.map { btn ->
                 kotlinx.coroutines.GlobalScope.async(kotlinx.coroutines.Dispatchers.IO) {
                     sem.withPermit {
                         try {
-                            // هيدرز AJAX شبيهة بالمتصفح
                             val ajaxHeaders = mutableMapOf<String, String>(
                                 "User-Agent" to (BASE_HEADERS["User-Agent"] ?: ""),
                                 "Referer" to data,
                                 "Accept" to "application/json, text/javascript, */*; q=0.01",
                                 "X-Requested-With" to "XMLHttpRequest"
                             )
-                            // لو كان لديك Cookie مركزي ضعه هنا (يمكن تعديل)
-                            // ajaxHeaders["Cookie"] = "..."
 
                             val payload = mutableMapOf(
                                 "action" to "player_ajax",
@@ -582,13 +532,10 @@ class animerco : MainAPI() {
                             )
                             if (btn.security.isNotBlank()) payload["security"] = btn.security
                             if (globalNonce.isNotBlank()) payload["nonce"] = globalNonce
-
-                            // تنفيذ POST AJAX
                             val ajaxResp = runCatching {
                                 app.post(ajaxUrl, data = payload, referer = data, headers = ajaxHeaders)
                             }.getOrNull()
                             val txt = ajaxResp?.text ?: ""
-                            // حاول JSON أولاً
                             var embedRaw: String? = null
                             runCatching {
                                 val parsed = parseJson<PlayerAjaxResponse>(txt)
@@ -599,26 +546,18 @@ class animerco : MainAPI() {
                                 val iframeMatch = Regex("""<iframe[^>]+src=["']([^"']+)["']""", RegexOption.IGNORE_CASE).find(txt)
                                 embedRaw = iframeMatch?.groupValues?.get(1) ?: txt.trim()
                             }
-
-                            // تنظيف الرابط
                             val iframeSrc = Regex("""<iframe[^>]+src=["']([^"']+)["']""", RegexOption.IGNORE_CASE).find(embedRaw ?: "")?.groupValues?.get(1)
                             var cleanUrl = iframeSrc?.trim() ?: (embedRaw?.replace(Regex("""<iframe[^>]+src=["']|["'].*"""), "")?.trim().orEmpty())
                             var abs = ensureHttpsRaw(cleanUrl, data) ?: ""
 
                             Log.d(TAG, "Server[${btn.name}] -> $abs")
-
-                            // إذا احتوى abs على jwplayer أو player فاجلب صفحة المشغل وحاول استخراج الروابط الحقيقية
                             if (abs.isNotBlank() && (abs.contains("jwplayer", ignoreCase = true) || abs.contains("jw.", ignoreCase = true) || abs.contains(".php", ignoreCase = true) || abs.contains("player", ignoreCase = true))) {
                                 val extracted = fetchPlayerPageAndExtract(data, abs)
                                 if (!extracted.isNullOrBlank()) abs = ensureHttpsRaw(extracted, abs) ?: abs
                             }
-
-                            // دالة مساعدة لإرسال ExtractorLink إلى القناة
                             suspend fun sendLinkSafe(link: ExtractorLink) {
                                 try { linkChannel.send(link) } catch (e: Exception) { Log.w(TAG, "send channel failed: ${e.message}") }
                             }
-
-                            // معالجة السيرفرات المعروفة (مطابقة بايثون)
                             when {
                                 abs.contains("yonaplay.net", ignoreCase = true) -> {
                                     runCatching {
@@ -650,7 +589,6 @@ class animerco : MainAPI() {
                                     runCatching {
                                         val extracted = try { ExternalEarnVidsExtractor.extract(abs, data) } catch (_: Throwable) { null }
                                         if (extracted != null) {
-                                            // unwrap possible shapes (String / Pair / Map / custom)
                                             val pair = when (extracted) {
                                                 is String -> Pair(extracted, "EarnVids")
                                                 is Pair<*, *> -> Pair(extracted.first as? String ?: extracted.toString(), extracted.second as? String ?: "EarnVids")
@@ -680,14 +618,11 @@ class animerco : MainAPI() {
                                     runCatching { loadExtractor(abs, data, subtitleCallback) { l -> kotlinx.coroutines.runBlocking { sendLinkSafe(l) } } }
                                 }
                             }
-
-                            // معالجة megabox (مطابق بايثون)
                             val lowerServer = btn.name.lowercase()
                             if (lowerServer.contains("megabox") || lowerServer.contains("megamax") || abs.lowercase().contains("megabox") || abs.lowercase().contains("megamax")) {
                                 runCatching {
                                     val extras = processMegabox(abs, data) // processMegabox يجب أن يعيد قائمة مشابهة للبايثون
                                     for (mb in extras) {
-                                        // في حالة ال extras قد يرجع مدخلات مختلفة؛ افترض mb هو Pair<String label, String url> أو خريطة => حاول التعامل
                                         val mbUrl = when (mb) {
                                             is Pair<*, *> -> mb.second as? String
                                             is Map<*, *> -> (mb["url"] ?: mb["link"] ?: mb["href"]) as? String
@@ -738,11 +673,7 @@ class animerco : MainAPI() {
                     } // end withPermit
                 } // end async
             } // end map
-
-            // انتظار انتهاء كل المهام
             jobs.forEach { runCatching { it.await() } }
-
-            // اغلاق القناة والانتظار حتى يستهلك المستهلك كل الروابط
             linkChannel.close()
             consumer.join()
 
@@ -774,8 +705,6 @@ class animerco : MainAPI() {
 
             val html = resp.text
             Log.d(TAG, "📄 Page length = ${html.length}")
-
-            // tokens like go_to_player('...'):
             val tokenRegex = Regex("""go_to_player\('([A-Za-z0-9+/=]+)'\)""")
             val tokens = tokenRegex.findAll(html).map { it.groupValues[1] }.toList()
 
@@ -789,8 +718,6 @@ class animerco : MainAPI() {
                         val decoded =
                             String(android.util.Base64.decode(fixed, android.util.Base64.DEFAULT))
                         Log.d(TAG, "🔗 Decoded token -> $decoded")
-
-                        // 1) Google Drive preview => build direct download link
                         if (decoded.contains("drive.google.com/file/d/")) {
                             val match = Regex("""/file/d/([0-9A-Za-z_-]{10,})""").find(decoded)
                             val fileId = match?.groupValues?.get(1)
@@ -816,8 +743,6 @@ class animerco : MainAPI() {
                                 continue // انتقل للتوكين التالي
                             }
                         }
-
-                        // 2) إذا الناتج يحتوي iframe داخل النص — استخرجه ونادِ loadExtractor ثم تابع
                         val iframeMatch =
                             Regex("""<iframe[^>]+src=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
                                 .find(decoded)?.groupValues?.get(1)
@@ -831,8 +756,6 @@ class animerco : MainAPI() {
                             }
                             continue
                         }
-
-                        // 3) لو النص نفسه رابط مباشر، استعمله
                         if (decoded.startsWith("http")) {
                             try {
                                 loadExtractor(decoded, yonaplayUrl, subtitleCallback, callback)
@@ -844,8 +767,6 @@ class animerco : MainAPI() {
                             }
                             continue
                         }
-
-                        // 4) محاولة استخراج أي رابط كاحتياط
                         val candidate = Regex("""https?://[^\s"'<>]+""", RegexOption.IGNORE_CASE)
                             .find(decoded)?.value
                         if (!candidate.isNullOrBlank()) {
@@ -859,24 +780,16 @@ class animerco : MainAPI() {
                             }
                             continue
                         }
-
-                        // إن لم نجد أي شيء لهذا التوكين، نتابع للتوكين التالي
                     } catch (e: Exception) {
                         Log.e(TAG, "❌ Failed to decode token -> ${e.message}", e)
-                        // استمر للتوكين التالي
                     }
                 }
-                // انتهينا من التوكينات — نرجع لأننا عالجناها
                 return
             }
-
-            // إذا لم نجد tokens: حاول إيجاد iframe مباشرة في صفحة yonaplay
             val iframeSrc = Regex("""<iframe[^>]+src=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
                 .find(html)?.groupValues?.get(1)
             if (!iframeSrc.isNullOrBlank()) {
                 val final = if (iframeSrc.startsWith("//")) "https:$iframeSrc" else iframeSrc
-
-                // تعامل خاص إن كان Drive
                 if (final.contains("drive.google.com", ignoreCase = true)) {
                     val fileId =
                         Regex(""".*/file/d/([0-9A-Za-z_-]{10,})""").find(final)?.groupValues?.get(1)
@@ -909,8 +822,6 @@ class animerco : MainAPI() {
                 }
                 return
             }
-
-            // آخر محاولة: استخرج أي رابط عام من الصفحة وأرسلها للـ loadExtractor
             Regex("""https?://[^\s"'<>]+""", RegexOption.IGNORE_CASE).findAll(html).forEach { m ->
                 val candidate = m.value
                 if (candidate.contains(

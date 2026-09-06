@@ -44,22 +44,17 @@ class Anime3rb(val context: Context) : MainAPI() {
             .replace(Regex("\\s+"), " ")
             .trim()
     }
-
-    // 1. الدالة المحدثة للتحقق من كلاودفلير باستخدام طلب GET خفيف
     private suspend fun getDocumentSmart(url: String): Document? {
         return try {
             val response = app.get(url, headers = mapOf("User-Agent" to USER_AGENT))
             if (response.code in 200..399) {
-                // حفظ الكوكيز للمستقبل لتجنب الـ 419 في طلبات POST
                 val setCookie = response.headers["set-cookie"]
                 if (!setCookie.isNullOrBlank()) savedCookies = setCookie
                 response.document
             } else {
-                // إرجاع خطأ مباشرة إذا واجه أي كود حظر مثل 403 أو 409 أو غيره
                 null
             }
         } catch (e: Exception) {
-            // إرجاع خطأ مباشرة عند فشل الاتصال بدون فتح WebView
             null
         }
     }
@@ -111,8 +106,6 @@ class Anime3rb(val context: Context) : MainAPI() {
             return null
         }
     }
-
-    // 2. البحث الجديد بنظام Livewire
     override suspend fun search(query: String): List<SearchResponse> {
         val mainDoc = getDocumentSmart(mainUrl) ?: return emptyList()
 

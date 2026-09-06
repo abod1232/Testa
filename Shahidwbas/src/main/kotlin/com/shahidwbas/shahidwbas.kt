@@ -17,13 +17,9 @@ class ShahidWBasProvider : MainAPI() {
         if (url.startsWith("/")) return "$mainUrl$url"
         return url
     }
-
-    // --- تعديل: سحب الاسم الكامل بدلاً من الملصقات (HDCAM/الحلقة) ---
     private fun Element.toSearchResult(): SearchResponse? {
         val a = this.select("a").firstOrNull { it.attr("href").contains("watch.php") } ?: return null
         val href = fixUrl(a.attr("href"))
-
-        // الأولوية لخاصية title لأنها تحتوي على الاسم الكامل في كل الموقع
         val title = (a.attr("title").ifBlank { this.selectFirst(".caption h3 a")?.text() } ?: a.text()).trim()
 
         if (title.isEmpty()) return null

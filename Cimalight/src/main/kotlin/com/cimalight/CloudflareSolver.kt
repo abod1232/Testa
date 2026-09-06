@@ -27,7 +27,6 @@ object CloudflareSolver {
             }
 
             Handler(Looper.getMainLooper()).post {
-                // استخدام android.R.id.content يضمن الوصول لجذر واجهة المستخدم
                 val rootView = activity.findViewById<ViewGroup>(android.R.id.content) ?: run {
                     continuation.resume(null)
                     return@post
@@ -38,12 +37,6 @@ object CloudflareSolver {
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
-
-                // جعل الـ WebView مرئياً أثناء الاختبار (يمكنك إخفاؤه لاحقاً)
-                // webView.alpha = 1f
-                // webView.translationX = 0f
-
-                // للإخفاء في الإنتاج (Production):
                 webView.alpha = 0f
                 webView.translationX = 10000f
 
@@ -94,8 +87,6 @@ object CloudflareSolver {
                         continuation.resume(Jsoup.parse(cleanHtml))
                     }
                 }
-
-                // تقليل وقت الانتظار الأقصى إلى 20 ثانية (بدلاً من 60)
                 pollingHandler.postDelayed({
                     Log.e(TAG, "انتهى وقت Solver (Timeout).")
                     finishSuccess(null)
@@ -161,33 +152,23 @@ object CloudflareSolver {
                                     }
                                 } catch (e: Exception) { isProcessingClick = false }
                             }
-                            // إعادة الجدولة فقط إذا لم ننته
                             if(!isSolved) pollingHandler.postDelayed(this, 2000)
                         }
                     }
                     pollingHandler.post(runnable)
                 }
-
-                // ==========================================
-                // التعديل الرئيسي هنا: تسريع عملية التحقق
-                // ==========================================
                 fun checkSuccessFast() {
                     if (isSolved) return
-
-                    // 1. التحقق من وجود الكوكي الأهم (cf_clearance)
                     val currentCookies = cookieManager.getCookie(url) ?: ""
                     val hasClearanceCookie = currentCookies.contains("cf_clearance")
 
                     if (hasClearanceCookie) {
                         Log.d(TAG, "تم العثور على كوكي cf_clearance! إنهاء فوري.")
-                        // نطلب الـ HTML الحالي وننهي
                         webView.evaluateJavascript("document.documentElement.outerHTML") { html ->
                             finishSuccess(html)
                         }
                         return
                     }
-
-                    // 2. التحقق من اختفاء الكلمة الدلالية لكلاودفلير
                     val jsCheck = """
                         (function(){
                             try{
@@ -208,8 +189,6 @@ object CloudflareSolver {
                             }
                             return@evaluateJavascript
                         }
-
-                        // إعادة المحاولة بعد وقت قصير
                         if(!isSolved) pollingHandler.postDelayed({ checkSuccessFast() }, 500)
                     }
                 }
@@ -220,7 +199,6 @@ object CloudflareSolver {
                         Log.d(TAG, "onPageFinished: $url")
                         isProcessingClick = false
                         startPolling()
-                        // نستخدم الطريقة السريعة بدلاً من الطريقة القديمة البطيئة
                         checkSuccessFast()
                     }
                 }

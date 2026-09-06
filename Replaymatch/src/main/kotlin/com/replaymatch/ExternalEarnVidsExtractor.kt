@@ -94,8 +94,6 @@ object ExternalEarnVidsExtractor {
             }
 
             val jsonRaw = match.groupValues[1].replace("'", "\"")
-
-            // ===== تحويل JSON إلى خريطة (مع fallback) =====
             val map = mutableMapOf<String, String>()
             try {
                 val jo = JSONObject(jsonRaw)
@@ -105,7 +103,6 @@ object ExternalEarnVidsExtractor {
                     try {
                         map[k] = jo.getString(k)
                     } catch (_: Exception) {
-                        // تخطّي القيم غير النصية
                     }
                 }
             } catch (e: Exception) {
@@ -115,8 +112,6 @@ object ExternalEarnVidsExtractor {
                     map[m.groupValues[1]] = m.groupValues[2]
                 }
             }
-
-            // ===== اختيار الرابط الصحيح =====
             var link = map["hls4"] ?: map["hls"] ?: ""
             if (link.isBlank()) {
                 Log.w(TAG, "❌ لم يتم العثور على hls/hls4 في JSON المُفكّك.")
@@ -150,16 +145,12 @@ object ExternalEarnVidsExtractor {
             val (payloadRaw, radixStr, sympipe) = match.destructured
             val radix = radixStr.toIntOrNull() ?: 36
             val symtab = sympipe.split("|")
-
-            // استبدالات لتجنّب ReferenceError مثل location/document/window
             var payload = payloadRaw
                 .replace("location.href", "'$pageUrl'")
                 .replace("location", "'$pageUrl'")
                 .replace("document.cookie", "''")
                 .replace("window.location", "'$pageUrl'")
                 .replace("window", "this")
-
-            // token regex مطابق للبايثون
             val tokenRe = Regex("""\b[0-9a-zA-Z]+\b""")
 
             val replaced = tokenRe.replace(payload) { mo ->

@@ -14,13 +14,9 @@ class FamelackProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Live)
     override var lang = "en"
     override val hasMainPage = true
-
-    // الروابط
     private val allChannelsUrl = "https://raw.githubusercontent.com/famelack/famelack-data/refs/heads/main/tv/raw/categories/all.json"
     private val countriesMetadataUrl = "https://raw.githubusercontent.com/famelack/famelack-data/refs/heads/main/tv/raw/countries_metadata.json"
     private val defaultPoster = "https://famelack.com/assets/favicons/favicon-512.png"
-
-    // الذاكرة المؤقتة (Caching)
     private var cachedChannels: List<RawChannel>? = null
     private var cachedCountries: Map<String, CountryMeta>? = null
 
@@ -39,18 +35,14 @@ class FamelackProvider : MainAPI() {
         }
         return cachedCountries ?: emptyMap()
     }
-
-    // دالة البحث
     override suspend fun search(query: String): List<SearchResponse> {
         val channels = getChannels()
 
         return channels.filter { ch ->
-            // التعديل هنا: البحث بداخل sources.streams و sources.youtube
             val hasStream = ch.sources?.streams?.isNotEmpty() == true
             val hasYoutube = ch.sources?.youtube?.isNotEmpty() == true
             (hasStream || hasYoutube) && (ch.name?.contains(query, ignoreCase = true) == true)
         }.mapNotNull { ch ->
-            // التعديل هنا: جلب الرابط من sources
             val targetUrl = ch.sources?.streams?.firstOrNull() ?: ch.sources?.youtube?.firstOrNull()
             if (targetUrl.isNullOrEmpty()) return@mapNotNull null
 
@@ -62,8 +54,6 @@ class FamelackProvider : MainAPI() {
             }
         }
     }
-
-    // الصفحة الرئيسية
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val items = mutableListOf<HomePageList>()
 
@@ -71,8 +61,6 @@ class FamelackProvider : MainAPI() {
         val allChannels = getChannels()
 
         val validCountries = countriesMap.entries.filter { it.value.hasChannels }.toList()
-
-        // تحميل 10 دول فقط في كل تمريرة لمنع تشنج التطبيق
         val itemsPerPage = 10
         val pagedCountries = validCountries.drop((page - 1) * itemsPerPage).take(itemsPerPage)
         val hasNext = validCountries.size > page * itemsPerPage
@@ -86,7 +74,6 @@ class FamelackProvider : MainAPI() {
             val countryChannels = channelsByCountry[codeLower] ?: emptyList()
 
             val searchResponses = countryChannels.mapNotNull { ch ->
-                // التعديل هنا: جلب الرابط من sources
                 val targetUrl = ch.sources?.streams?.firstOrNull() ?: ch.sources?.youtube?.firstOrNull()
                 if (targetUrl.isNullOrEmpty()) return@mapNotNull null
 
@@ -142,9 +129,6 @@ class FamelackProvider : MainAPI() {
 
         return true
     }
-
-    // --- Data Models المحدثة --- //
-    // تم التعديل لتطابق ملف JSON الحقيقي الخاص بك
 
     data class RawChannel(
         @JsonProperty("nanoid") val nanoid: String? = null,

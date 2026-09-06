@@ -7,7 +7,6 @@ import android.content.Context
 @CloudstreamPlugin
 class TukTukHdPlugin: Plugin() {
     override fun load(context: Context) {
-        // تسجيل الكلاس
         registerMainAPI(TukTukHd())
         registerExtractorAPI(VideolandExtractor())
     }

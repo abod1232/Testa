@@ -3,8 +3,6 @@ import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 import android.content.Context
 
-//import com.cimatn.CimaTn
-
 @CloudstreamPlugin
 class cimatnPlugin: Plugin() {
     override fun load(context: Context) {

@@ -16,8 +16,6 @@ import javax.crypto.spec.SecretKeySpec
 import java.net.URLEncoder
 
 class CimaNowTest {
-
-    // فك تشفير آمن وسريع خالٍ من التحذيرات
     private fun decodeHtml(doc: Document): Document {
         val rawHtml = doc.outerHtml()
         val tag = "CimaKotlinDecoder"
@@ -25,22 +23,17 @@ class CimaNowTest {
         println("\n🔍 [$tag] ================= بدء تشخيص فك التشفير =================")
 
         try {
-            // [1] استخراج الرقم السري المخفي
             val secMatcher = Pattern.compile("""data-[a-zA-Z0-9]+="(\d+)"""").matcher(rawHtml)
             val secMath = if (secMatcher.find()) {
                 val secStr = secMatcher.group(1) ?: return doc
                 secStr.toInt().also { println("✅ [1/5] الرقم السري: $it") }
             } else return doc
-
-            // [2] استخراج المفتاح الرياضي
             val keyMathMatcher = Pattern.compile("""=\s*(?:[a-zA-Z0-9_]+\s*\+\s*(\d+)\s*\+\s*(\d+)|(\d+)\s*\+\s*(\d+)\s*\+\s*[a-zA-Z0-9_]+)\s*;""").matcher(rawHtml)
             val k = if (keyMathMatcher.find()) {
                 val p1 = keyMathMatcher.group(1) ?: keyMathMatcher.group(3) ?: return doc
                 val p2 = keyMathMatcher.group(2) ?: keyMathMatcher.group(4) ?: return doc
                 (p1.toInt() + p2.toInt() + secMath).also { println("✅ [2/5] المفتاح (K): $it") }
             } else return doc
-
-            // [3] استخراج رقم الطرح
             var subtraction = 0
             val subMatcher = Pattern.compile("""-\s*(\d+)\s*[;)]""").matcher(rawHtml)
             while (subMatcher.find()) {
@@ -52,8 +45,6 @@ class CimaNowTest {
             }
             if (subtraction == 0) return doc
             println("✅ [3/5] رقم الطرح: $subtraction")
-
-            // [4] استخراج الأساس العددي (Radix)
             var radix = 20
             val dynamicRadixMatcher = Pattern.compile("""var\s+[a-zA-Z0-9_]+\s*=\s*(\d+)\s*(/|\*|\+|-)\s*(\d+)\s*;""").matcher(rawHtml)
             if (dynamicRadixMatcher.find()) {
@@ -79,15 +70,11 @@ class CimaNowTest {
                     }
                 }
             }
-
-            // [5] استخراج الفاصل
             val splitMatcher = Pattern.compile("""\.split\(\s*['"]([^'"]+)['"]\s*\)""").matcher(rawHtml)
             val delimiter = if (splitMatcher.find()) {
                 val d = splitMatcher.group(1) ?: return doc
                 d.also { println("✅ [5/5] الفاصل: '$it'") }
             } else return doc
-
-            // [6] استخراج مصفوفة البيانات المشفرة وتنظيفها
             val arrayMatcher = Pattern.compile("""(?:var|let|const)\s+[a-zA-Z0-9_]+\s*=\s*(?:new Array\()?\[?(.*?)\]?\)?\s*;""", Pattern.DOTALL).matcher(rawHtml)
             var rawContent = ""
             while (arrayMatcher.find()) {
@@ -108,8 +95,6 @@ class CimaNowTest {
             }
             val rawPayload = sbClean.toString()
             println("📦 [$tag] طول البيانات المشفرة: ${rawPayload.length}")
-
-            // [7] حلقة الفك السريعة
             val outputStream = ByteArrayOutputStream(rawPayload.length / 4)
             var startIndex = 0
             val payloadLength = rawPayload.length
@@ -177,15 +162,11 @@ class CimaNowTest {
         } catch (ignored: Exception) {
         }
     }
-
-    // دالة استخراج آمنة مع طباعة تشخيصية في حال الفشل
     private fun extractGroup(regex: String, text: String, errorMsg: String): String {
         val matcher = Pattern.compile(regex).matcher(text)
         if (matcher.find()) {
             return matcher.group(1) ?: throw Exception(errorMsg)
         }
-
-        // طباعة تشخيصية تظهر محتوى الاستجابة لمساعدتك في فهم الحظر
         System.err.println("\n❌ [FAIL] فشل الاستخراج بالتعبير النمطي: $regex")
         System.err.println("📄 جزء من الاستجابة المستلمة (أول 1000 حرف):")
         System.err.println("--------------------------------------------------")
@@ -220,14 +201,11 @@ class CimaNowTest {
         }
 
         val client = OkHttpClient.Builder().cookieJar(cookieJar).build()
-
-        // ترويسات متصفح حقيقية متكاملة لتفادي حظر الـ JUnit
         val userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         val mainReferer = "https://rm.freex2line.online/"
         val startUrl = "https://rm.freex2line.online/loadon/?link=aHR0cHM6Ly9jaW1hbm93LmNjLyVkOSU4NSVkOCViMyVkOSU4NCVkOCViMyVkOSU4NC1hLXNob3AtZm9yLWtpbGxlcnMtJWQ4JWFjMi0lZDglYWQxLSVkOSU4NSVkOCVhYSVkOCViMSVkOCVhYyVkOSU4NSVkOCVhOS93YXRjaGluZy8="
 
         try {
-            // [1] إنشاء الجلسة وجلب الكوكيز المبدئية
             println("[1/7] 🌐 جاري إنشاء الجلسة...")
             val startRequest = Request.Builder()
                 .url(startUrl)
@@ -237,8 +215,6 @@ class CimaNowTest {
             client.newCall(startRequest).execute().use { response ->
                 println("   -> حالة طلب الجلسة الأول: ${response.code}")
             }
-
-            // [2] جلب صفحة المقال الأساسية
             println("[2/7] 📄 جاري جلب صفحة تخطي الرابط الأساسية...")
             val pageUrl = "https://rm.freex2line.online/2020/02/blog-post.html/"
             val pageRequest = Request.Builder()
@@ -252,8 +228,6 @@ class CimaNowTest {
                 println("   -> حالة طلب صفحة المقال: ${response.code}")
                 response.body?.string() ?: throw Exception("الاستجابة فارغة تماماً")
             }
-
-            // [3] استخراج الرموز الديناميكية لحساب توقيع الأمان
             println("[3/7] 🔍 تحليل نظام الحماية واستخراج المعطيات...")
             val ctxName = extractGroup("""window\.ptr_[a-zA-Z0-9_]+\s*=\s*'([^']+)'""", html, "Pointer (ptr_) not found")
             val mapData = extractGroup("""window\.map_[a-zA-Z0-9_]+\s*=\s*\{([^}]+)\}""", html, "Map (map_) not found")
@@ -268,8 +242,6 @@ class CimaNowTest {
             val requestId = extractGroup("""'$riK':\s*'([^']+)'""", ctxData, "Value for request_id not found")
             val encryptedKeyB64 = extractGroup("""'$keK':\s*'([^']+)'""", ctxData, "Value for encrypted key not found")
             val sXorKey = extractGroup("""'$seK':\s*'([^']+)'""", ctxData, "Value for XOR key not found")
-
-            // [4] فك تشفير المفتاح السري وحساب توقيع HMAC لطلب الـ API
             println("[4/7] 🔓 فك تشفير المفتاح السري وتوليد HMAC...")
             val encryptedBytes = Base64.getDecoder().decode(encryptedKeyB64.replace(Regex("[\\s\\r\\n]"), ""))
             val secretKey = encryptedBytes.mapIndexed { index, byte ->
@@ -281,12 +253,8 @@ class CimaNowTest {
             val fpBase64 = "TW96aWxsYS81Ll9f" // بصمة المتصفح الثابتة لـ Chrome
             val messageToSign = requestId + ch + fpBase64
             val hmacTokenEncoded = URLEncoder.encode(calculateHmacSha256(messageToSign, secretKey), "UTF-8")
-
-            // [5] الانتظار الإلزامي لتفادي صد الخادم للطلب العاجل
             println("\n⏳ جاري الانتظار 11 ثانية لتخطي العداد الزمني للسيرفر...")
             Thread.sleep(11000)
-
-            // [6] استدعاء الـ API النهائي لجلب رابط صفحة المشاهدة
             println("\n[5/7] 🚀 إرسال طلب جلب الرابط إلى الـ API...")
             val apiUrl = "https://rm.freex2line.online/2020/02/blog-post.html/get-link.php?request_id=$requestId&hmac_token=$hmacTokenEncoded&ch=$ch&fp=$fpBase64"
             val apiRequest = Request.Builder()
@@ -305,8 +273,6 @@ class CimaNowTest {
                 throw Exception("فشل الحصول على رابط المشاهدة، استجابة الخادم: $watchPageUrl")
             }
             println("   ✅ تم بنجاح! رابط صفحة المشاهدة هو: $watchPageUrl")
-
-            // [7] جلب وفك تشفير صفحة المشاهدة النهائية
             println("\n[6/7] 📄 جلب صفحة المشاهدة وفك التشفير عن محتواها...")
             val watchPageRequest = Request.Builder().url(watchPageUrl).header("User-Agent", userAgent).header("Referer", pageUrl).build()
             val encryptedHtmlData = client.newCall(watchPageRequest).execute().use { response ->
@@ -320,8 +286,6 @@ class CimaNowTest {
             println("\n================== [DECODED HTML CONTENT (SAMPLE)] ==================")
             println(finalHtml.take(2000) + "\n...[TRUNCATED]...")
             println("=====================================================================")
-
-            // التحقق النهائي من وجود الحاويات الرئيسية للسيرفرات لضمان نجاح فك التشفير
             assert(finalHtml.contains("watch") || finalHtml.contains("id=\"watch\"") || finalHtml.contains("class=\"btns\"")) {
                 "فشل فك التشفير: لم يتم استخراج حاويات السيرفرات بنجاح."
             }

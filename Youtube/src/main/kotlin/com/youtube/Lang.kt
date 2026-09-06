@@ -2,7 +2,6 @@ import android.content.SharedPreferences
 
 object Loc {
     val availableLanguages = listOf(
-        // Existing
         Triple("ar", "Arabic", "العربية"),
         Triple("en", "English", "English"),
         Triple("bn", "Bengali", "বাংলা"),
@@ -223,7 +222,6 @@ object Loc {
             "browse_youtube" to "Navega para que YouTube conozca tus preferencias",
             "url_hint" to "URL (https://...)"
         ),
-        // START OF NEW LANGUAGES
         "de" to mapOf(
             "lang_title" to "Sprache / Language",
             "home_section" to "Startseitenbereiche ändern",
@@ -600,8 +598,6 @@ object Loc {
             "browse_youtube" to "Przeglądaj, aby YouTube poznał Twoje preferencje",
             "url_hint" to "URL (https://...)"
         ),
-        // Add other languages in a similar fashion...
-        // For brevity, I will show a few more, you can follow the pattern for the rest.
         "fa" to mapOf(
             "lang_title" to "زبان / Language",
             "home_section" to "تغییر بخش‌های صفحه اصلی",
@@ -1402,9 +1398,6 @@ object Loc {
             "browse_youtube" to "بگەڕێ با یوتیوب ئارەزووەکانت بزانێت",
             "url_hint" to "ناونیشان (https://...)"
         )
-        // You can add the rest of the languages here following the same pattern.
-        // It's a lot of data, so I have provided the most requested ones as examples.
-        // The structure is clear and you can now easily add more.
     )
 
     fun getString(sharedPref: SharedPreferences, key: String): String {

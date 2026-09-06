@@ -120,8 +120,6 @@ class Tuniflix : MainAPI() {
             }
         }
     }
-
-    // === دالة البحث العميق عن المشغلات (Deep Recursive Search) ===
     private suspend fun deepSearchIframes(url: String, depth: Int = 0, visited: MutableSet<String> = mutableSetOf()): List<String> {
         if (depth > 3 || !visited.add(url)) return emptyList()
         val foundLinks = mutableListOf<String>()
@@ -131,8 +129,6 @@ class Tuniflix : MainAPI() {
             document.select("iframe").forEach { iframe ->
                 val src = fixUrl(iframe.attr("src") ?: iframe.attr("data-src"))
                 if (src.isBlank()) return@forEach
-
-                // إذا كان الرابط يتبع للموقع نفسه أو يحتوي على كلمات دلالية للتضمين، نغوص داخله
                 if (src.contains(mainUrl) || src.contains("trembed") || src.contains("trid")) {
                     foundLinks.addAll(deepSearchIframes(src, depth + 1, visited))
                 } else {
@@ -151,16 +147,12 @@ class Tuniflix : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-
-        // جلب كافة الروابط سواء كانت سطحية أو عميقة (Iframes داخل Iframes)
         val allIframes = deepSearchIframes(data)
 
         allIframes.forEach { playerUrl ->
-            // إذا كان الرابط يحتوي على هاش # أو id= فهو غالباً يتبع لنظام المشغلات المشفّرة (SmartPlayer)
             if (playerUrl.contains("#") || playerUrl.contains("id=")) {
                 SmartPlayer.extract(playerUrl, callback)
             } else {
-                // إذا لم يكن كذلك، نجرب استخراجه كسيرفر عادي مدعوم مسبقاً (Vidmoly, Uqload الخ)
                 loadExtractor(playerUrl, mainUrl, subtitleCallback, callback)
             }
         }
@@ -173,8 +165,6 @@ class Tuniflix : MainAPI() {
         if (url.startsWith("/")) return mainUrl + url
         return url
     }
-
-    // === كلاس فك التشفير الذكي (Smart Decryptor - Domain Agnostic) ===
     object SmartPlayer {
         private const val KEY_STRING = "kiemtienmua911ca"
 
@@ -215,8 +205,6 @@ class Tuniflix : MainAPI() {
         private fun smartDecrypt(encryptedHex: String, domain: String, videoId: String): String? {
             val encryptedBytes = try { encryptedHex.decodeHex() } catch (e: Exception) { return null }
             val secretKey = SecretKeySpec(KEY_STRING.toByteArray(Charsets.UTF_8), "AES")
-
-            // 1. المحاولة بـ IVs ذكية ومحتملة
             val ivCandidates = generateIvCandidates(domain, videoId)
             for (iv in ivCandidates) {
                 try {
@@ -230,10 +218,7 @@ class Tuniflix : MainAPI() {
                     }
                 } catch (e: Exception) { continue }
             }
-
-            // 2. المحاولة الأخيرة (Garbage Stripping) الأقوى: تجاهل الـ IV تماماً والبحث عن الرابط بالنص
             try {
-                // نستخدم IV أصفار، هذا سيشوه أول 16 بايت فقط ويترك باقي الجيسون سليماً!
                 val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
                 cipher.init(Cipher.DECRYPT_MODE, secretKey, IvParameterSpec(ByteArray(16)))
                 val decryptedPadded = cipher.doFinal(encryptedBytes)
@@ -256,7 +241,6 @@ class Tuniflix : MainAPI() {
             val MAX_RETRIES = 3
 
             try {
-                // استخراج الدومين والمعرف ديناميكياً مهما كان اسم الموقع
                 val uri = URI(if (playerUrl.startsWith("//")) "https:$playerUrl" else playerUrl)
                 val domain = uri.host ?: return
 
@@ -273,8 +257,6 @@ class Tuniflix : MainAPI() {
                     "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
                     "Accept" to "application/json, text/plain, */*"
                 )
-
-                // نظام إعادة المحاولة (Retry)
                 for (attempt in 1..MAX_RETRIES) {
                     val res = app.get(apiUrl, headers = headers)
 

@@ -12,7 +12,6 @@ object ExternalEarnVidsExtractor {
 
     suspend fun extract(pageUrl: String, mainReferer: String): String? {
         try {
-            // ===== إعداد الـ Headers =====
             val headers = mutableMapOf(
                 "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
                         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
@@ -20,21 +19,15 @@ object ExternalEarnVidsExtractor {
                 "Accept-Language" to "en-US,en;q=0.5",
                 "Connection" to "keep-alive"
             )
-
-            // Referer خاص لـ EarnVids (مثل البايثون)
             if (pageUrl.contains("fdewsdc.sbs", true)) {
                 headers["Referer"] = "https://shhahid4u.cam"
                 Log.d(TAG, "🌐 تم تعيين Referer: https://shhahid4u.cam")
             } else {
                 headers["Referer"] = mainReferer
             }
-
-            // ===== جلب الصفحة =====
             val response = app.get(pageUrl, headers = headers)
             val html = response.text ?: ""
             Log.d(TAG, "Fetched page length=${html.length} for $pageUrl")
-
-            // ===== فحص سريع عن m3u8 (fallback سريع وموثوق) =====
             try {
                 val m3u8Regex = Regex("""https?://[^'"\s>]+?\.m3u8[^'"\s>]*""", RegexOption.IGNORE_CASE)
                 val m3u8Match = m3u8Regex.find(html)
@@ -47,14 +40,10 @@ object ExternalEarnVidsExtractor {
             } catch (e: Exception) {
                 Log.w(TAG, "m3u8 quick search failed: ${e.message}")
             }
-
-            // ===== تأكد أن الصفحة تحتوي eval(function) وإلا لا نحاول فك packer =====
             if (!html.contains("eval(function")) {
                 Log.w(TAG, "❌ لا يوجد eval(function) في الصفحة - لن نحاول فكّ packer.")
                 return null
             }
-
-            // ===== فكّ (مع تكرار للطبقات المتداخلة) =====
             var working = html
             var unpacked: String? = null
             val maxIterations = 4
@@ -65,12 +54,10 @@ object ExternalEarnVidsExtractor {
                     break
                 }
                 Log.d(TAG, "unpack iteration $i => length=${unpacked.length}")
-                // لو لا تزال تحتوي eval(function) نعيد الكرة (طبقات متداخلة)
                 if (!unpacked.contains("eval(function")) {
                     working = unpacked
                     break
                 } else {
-                    // استمر في فكّ الطبقة التالية
                     working = unpacked
                 }
             }
@@ -79,16 +66,11 @@ object ExternalEarnVidsExtractor {
                 Log.w(TAG, "❌ فشل فكّ packer.")
                 return null
             }
-
-            // بعض packers يقدّمون نتائج مع \/ لذلك نزيل الهرب
             val cleaned = unpacked.replace("\\/", "/")
-
-            // ===== البحث عن كائن links =====
             val linksRegex = Regex("""var\s+links\s*=\s*(\{.*?\})\s*;""", RegexOption.DOT_MATCHES_ALL)
             val match = linksRegex.find(cleaned)
             if (match == null) {
                 Log.w(TAG, "❌ لم يُعثر على كائن links بعد فكّ packer.")
-                // كخيار إضافي، حاول العثور على "hls4" مباشرة في النص المفتوح
                 val hlsInline = Regex(""""hls4"\s*:\s*"([^"]+)"""").find(cleaned)?.groupValues?.get(1)
                     ?: Regex(""""hls"\s*:\s*"([^"]+)"""").find(cleaned)?.groupValues?.get(1)
                 if (!hlsInline.isNullOrBlank()) {
@@ -101,8 +83,6 @@ object ExternalEarnVidsExtractor {
             }
 
             val jsonRaw = match.groupValues[1].replace("'", "\"")
-
-            // ===== تحويل JSON إلى خريطة (مع fallback) =====
             val map = mutableMapOf<String, String>()
             try {
                 val jo = JSONObject(jsonRaw)
@@ -112,7 +92,6 @@ object ExternalEarnVidsExtractor {
                     try {
                         map[k] = jo.getString(k)
                     } catch (_: Exception) {
-                        // تخطّي القيم غير النصية
                     }
                 }
             } catch (e: Exception) {
@@ -122,8 +101,6 @@ object ExternalEarnVidsExtractor {
                     map[m.groupValues[1]] = m.groupValues[2]
                 }
             }
-
-            // ===== اختيار الرابط الصحيح =====
             var link = map["hls4"] ?: map["hls"] ?: ""
             if (link.isBlank()) {
                 Log.w(TAG, "❌ لم يتم العثور على hls/hls4 في JSON المُفكّك.")
@@ -157,16 +134,12 @@ object ExternalEarnVidsExtractor {
             val (payloadRaw, radixStr, sympipe) = match.destructured
             val radix = radixStr.toIntOrNull() ?: 36
             val symtab = sympipe.split("|")
-
-            // استبدالات لتجنّب ReferenceError مثل location/document/window
             var payload = payloadRaw
                 .replace("location.href", "'$pageUrl'")
                 .replace("location", "'$pageUrl'")
                 .replace("document.cookie", "''")
                 .replace("window.location", "'$pageUrl'")
                 .replace("window", "this")
-
-            // token regex مطابق للبايثون
             val tokenRe = Regex("""\b[0-9a-zA-Z]+\b""")
 
             val replaced = tokenRe.replace(payload) { mo ->

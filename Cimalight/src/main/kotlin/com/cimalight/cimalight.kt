@@ -29,8 +29,6 @@ class CimaLightProvider : MainAPI() {
         "$mainUrl/episodes.php" to "أحدث الحلقات",
         "$mainUrl/all-series.php" to "أحدث المسلسلات"
     )
-
-    // 🚨 تم حذف Accept-Encoding لتجنب مشكلة الرموز المشفرة (Brotli)
     private val customHeaders = mapOf(
         "Cache-Control" to "no-cache, no-store, must-revalidate",
         "Sec-Ch-Ua" to "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\"",
@@ -48,12 +46,8 @@ class CimaLightProvider : MainAPI() {
     )
 
     private var savedCookies: String? = null
-
-    // الدالة الذكية للتعامل مع الردود وحل Cloudflare
     private suspend fun getDocOrSolve(url: String): Document? {
         Log.d(TAG, "جاري طلب الرابط: $url")
-
-        // 🧠 أضف الكوكي إذا كان موجوداً
         val headersWithCookies = customHeaders.toMutableMap().apply {
             savedCookies?.let { put("Cookie", it) }
         }
@@ -62,13 +56,9 @@ class CimaLightProvider : MainAPI() {
         val statusCode = response.code
 
         Log.d(TAG, "Status Code: $statusCode")
-
-        // ✅ إذا كان الرد طبيعي (200 OK)
         if (statusCode in 200..299) {
             return response.document
         }
-
-        // ❌ إذا كان محجوب (403 Forbidden أو 503 Service Unavailable)
         if (statusCode == 403 || statusCode == 503 || statusCode == 429) {
             Log.e(TAG, "تم اكتشاف حماية Cloudflare (كود $statusCode) → جاري تشغيل Solver")
 
@@ -79,15 +69,11 @@ class CimaLightProvider : MainAPI() {
                 url,
                 userAgent
             )
-
-            // 🔥 نسحب الكوكي من WebView مباشرة
             val cookies = CookieManager.getInstance().getCookie(url)
 
             if (!cookies.isNullOrEmpty()) {
                 Log.d(TAG, "تم الحصول على cookies بنجاح: $cookies")
                 savedCookies = cookies
-
-                // 🚀 إعادة الطلب مباشرة باستخدام الكوكي الجديد
                 val retryHeaders = customHeaders.toMutableMap().apply {
                     put("Cookie", cookies)
                 }
@@ -99,12 +85,8 @@ class CimaLightProvider : MainAPI() {
                     return retryResponse.document
                 }
             }
-
-            // fallback إذا فشل retry ولكن الـ Solver أرجع Document
             return result
         }
-
-        // fallback لأي خطأ آخر
         return response.document
     }
 
@@ -252,8 +234,6 @@ class CimaLightProvider : MainAPI() {
     ): Boolean {
         val mainPageDoc = getDocOrSolve(data) ?: return false
         val intermediateUrl = mainPageDoc.selectFirst("a.xtgo")?.attr("href") ?: return false
-
-        // إضافة Referer للصفحة الوسيطة كما قمت بفعله أنت
         val headersWithReferer = customHeaders
             .filterKeys { it != "Host" }
             .toMutableMap()
