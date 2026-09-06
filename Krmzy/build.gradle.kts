@@ -1,17 +1,15 @@
-version = 33
+version = 1
 
 cloudstream {
-    description = "Includes Topmovies"
-    authors = listOf("megix")
+    description = "البحث لا يعمل حاليا مشكلة من الموقع"
+    authors = listOf("Abodabodd")
 
     status = 1
 
     tvTypes = listOf(
         "TvSeries",
-        "Movie",
-        "AsianDrama",
-        "Anime"
+        "Movie"
     )
 
-    iconUrl = "https://github.com/SaurabhKaperwan/CSX/raw/refs/heads/master/Moviesmod/icon.png"
+    iconUrl = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRwTnAJOvyri3uHzHxjkEdlaBBKs8MAvIuJtFmCoo9u5qYiuFpHZjcl6tDi&s=10"
 }

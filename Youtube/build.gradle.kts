@@ -1,26 +1,19 @@
-version = 33
+version = 2
 
 cloudstream {
-    //language = "hi"
-    // All of these properties are optional, you can safely remove them
+    description = ""
+    authors = listOf("Abodabodd")
 
-    description = "Includes Topmovies"
-     authors = listOf("megix")
+    status = 1
 
-    /**
-     * Status int as the following:
-     * 0: Down
-     * 1: Ok
-     * 2: Slow
-     * 3: Beta only
-     * */
-    status = 1 // will be 3 if unspecified
     tvTypes = listOf(
-        "TvSeries",
         "Movie",
-        "AsianDrama",
-        "Anime"
+        "TvSeries",
+        "Live",
+        "Anime",
+        "Music",
+        "Documentary"
     )
 
-    iconUrl = "https://github.com/SaurabhKaperwan/CSX/raw/refs/heads/master/Moviesmod/icon.png"
+    iconUrl = "https://raw.githubusercontent.com/Abodabodd/Oldarabrepo/refs/heads/main/img/IMG_%D9%A2%D9%A0%D9%A2%D9%A5%D9%A1%D9%A2%D9%A0%D9%A6_%D9%A1%D9%A7%D9%A2%D9%A6%D9%A1%D9%A6.jpg"
 }

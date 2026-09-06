@@ -1,17 +1,16 @@
-version = 33
+version = 1
 
 cloudstream {
-    description = "Includes Topmovies"
-    authors = listOf("megix")
+    description = ""
+    authors = listOf("Abodabodd")
 
     status = 1
 
     tvTypes = listOf(
         "TvSeries",
-        "Movie",
-        "AsianDrama",
-        "Anime"
+        "Live",
+        "Movie"
     )
 
-    iconUrl = "https://github.com/SaurabhKaperwan/CSX/raw/refs/heads/master/Moviesmod/icon.png"
+    iconUrl = "https://yt3.googleusercontent.com/ulm35tweg3do5istps0TgCjMmJSVczGUL2NIrXMwI1DDRi5ty29BIzQSUHVgqZN5CSo1PHhiA6M=s900-c-k-c0x00ffffff-no-rj"
 }

@@ -1,26 +1,15 @@
-version = 33
+version = 1
 
 cloudstream {
-    //language = "hi"
-    // All of these properties are optional, you can safely remove them
+    description = ""
+    authors = listOf("Abodabodd")
 
-    description = "Includes Topmovies"
-     authors = listOf("megix")
+    status = 1
 
-    /**
-     * Status int as the following:
-     * 0: Down
-     * 1: Ok
-     * 2: Slow
-     * 3: Beta only
-     * */
-    status = 1 // will be 3 if unspecified
     tvTypes = listOf(
         "TvSeries",
-        "Movie",
-        "AsianDrama",
-        "Anime"
+        "Movie"
     )
 
-    iconUrl = "https://github.com/SaurabhKaperwan/CSX/raw/refs/heads/master/Moviesmod/icon.png"
+    iconUrl = "https://fitnur.com/uploads/avatars/c5ae8dadf88bcea9549657ec451a1563.jpg"
 }

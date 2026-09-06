@@ -1,17 +1,15 @@
-version = 33
+version = 1
 
 cloudstream {
-    description = "Includes Topmovies"
-    authors = listOf("megix")
+    description = ""
+    authors = listOf("Abodabodd")
 
     status = 1
 
     tvTypes = listOf(
         "TvSeries",
-        "Movie",
-        "AsianDrama",
         "Anime"
     )
 
-    iconUrl = "https://github.com/SaurabhKaperwan/CSX/raw/refs/heads/master/Moviesmod/icon.png"
+    iconUrl = "https://www.dima-toon.com/wp-content/uploads/2025/10/DimaToonlogo11.png"
 }
