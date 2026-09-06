@@ -141,8 +141,16 @@ jobs:
               iconUrl = "{icon_url}"
           }}
           """
-                  with open(gradle_path, "w", encoding="utf-8") as f:
-                      f.write(content)
+                  
+                  existing_content = ""
+                  if os.path.exists(gradle_path):
+                      with open(gradle_path, "r", encoding="utf-8") as f:
+                          existing_content = f.read()
+                          
+                  if existing_content.strip() != content.strip():
+                      print(f"Updating: {gradle_path} for {internal_name}...")
+                      with open(gradle_path, "w", encoding="utf-8") as f:
+                          f.write(content)
 
       - name: Push updated build files back to source branch
         working-directory: "src"
