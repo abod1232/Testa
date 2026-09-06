@@ -41,6 +41,33 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4.0.1
 
+      - name: Remove comments from source files
+        working-directory: "src"
+        shell: python
+        run: |
+          import os
+          import re
+
+          pattern = re.compile(r'(?m)^\s*//.*')
+
+          for root, dirs, files in os.walk('.'):
+              dirs[:] = [d for d in dirs if not d.startswith('.') and d != 'builds' and d != 'src']
+              for file in files:
+                  if file.endswith('.kt') or file.endswith('.kts'):
+                      file_path = os.path.join(root, file)
+                      try:
+                          with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                              content = f.read()
+                          
+                          cleaned_content = pattern.sub('', content)
+                          
+                          if cleaned_content != content:
+                              with open(file_path, 'w', encoding='utf-8') as f:
+                                  f.write(cleaned_content)
+                              print(f"Removed comments from: {file_path}")
+                      except Exception as e:
+                          print(f"Error processing {file_path}: {e}")
+
       - name: Access Secrets & Create Properties
         working-directory: "src"
         env:
@@ -79,8 +106,11 @@ jobs:
             git_modules=$(git diff --name-only HEAD^ HEAD 2>/dev/null | grep -v '^\.' | cut -d'/' -f1 | sort -u) || git_modules=""
           fi
           
+          local_modules=$(git status --porcelain | grep -v '^\.' | awk '{print $2}' | cut -d'/' -f1 | sort -u) || local_modules=""
+          all_modules=$(echo -e "${git_modules}\n${local_modules}" | sort -u | grep -v 'build.gradle.kts' | grep -v '^$') || all_modules=""
+          
           build_commands=""
-          for module in $git_modules; do
+          for module in $all_modules; do
             if [ -d "$module" ] && [ "$module" != "builds" ] && [ "$module" != "src" ]; then
               build_commands="$build_commands :$module:make"
             fi
@@ -98,17 +128,17 @@ jobs:
           find . -type f -name "*.cs3" -exec cp {} $GITHUB_WORKSPACE/builds/ \; || echo "No .cs3 files found"
           find . -type f -name "plugins.json" -exec cp {} $GITHUB_WORKSPACE/builds/ \; || echo "No plugins.json found"
 
-      - name: Push plugins.json to master branch
+      - name: Push updated files back to master branch
         working-directory: "src"
         run: |
           git config --local user.email "actions@github.com"
           git config --local user.name "GitHub Actions"
-          git add plugins.json
-          if [[ -n $(git status -s plugins.json) ]]; then
-            git commit -m "Update plugins.json [skip ci]"
+          git add .
+          if [[ -n $(git status -s) ]]; then
+            git commit -m "Strip comments and update plugins.json [skip ci]"
             git push
           else
-            echo "No changes in plugins.json"
+            echo "No changes to push"
           fi
 
       - name: Push builds
