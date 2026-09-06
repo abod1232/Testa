@@ -1,26 +1,15 @@
-version = 33
+version = 4
 
 cloudstream {
-    //language = "hi"
-    // All of these properties are optional, you can safely remove them
+    description = "لا يعمل خارج العراق او اي شبكة غير ايرثلنك"
+    authors = listOf("Abodabodd")
 
-    description = "Includes Topmovies"
-     authors = listOf("megix")
+    status = 1
 
-    /**
-     * Status int as the following:
-     * 0: Down
-     * 1: Ok
-     * 2: Slow
-     * 3: Beta only
-     * */
-    status = 1 // will be 3 if unspecified
     tvTypes = listOf(
         "TvSeries",
-        "Movie",
-        "AsianDrama",
-        "Anime"
+        "Movie"
     )
 
-    iconUrl = "https://github.com/SaurabhKaperwan/CSX/raw/refs/heads/master/Moviesmod/icon.png"
+    iconUrl = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTZlAGH56cEnNEL93W3QqZWpUe8XR8i90olTA&s"
 }

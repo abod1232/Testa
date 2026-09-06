@@ -1,17 +1,16 @@
-version = 33
+version = 2
 
 cloudstream {
-    description = "Includes Topmovies"
-    authors = listOf("megix")
+    description = ""
+    authors = listOf("Abodabodd")
 
     status = 1
 
     tvTypes = listOf(
-        "TvSeries",
         "Movie",
-        "AsianDrama",
-        "Anime"
+        "Others",
+        "live"
     )
 
-    iconUrl = "https://github.com/SaurabhKaperwan/CSX/raw/refs/heads/master/Moviesmod/icon.png"
+    iconUrl = "https://fullmatchshows.com/wp-content/uploads/2024/04/LOGOSASO.png"
 }
