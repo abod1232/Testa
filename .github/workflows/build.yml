@@ -80,11 +80,11 @@ jobs:
               "fullmatchshows": "replaymatch",
               "shabakatycinemana": "cinemana",
               "shabakatcinemana": "cinemana",
+              "cee": "Cee",
               "cimanaw": "CimaNowProvider",
               "cimanawprovider": "CimaNowProvider",
               "eshek": "eseek",
               "brstege": "bristege",
-              "cee": "Cee",
           }
 
           modified_count = 0
@@ -135,6 +135,7 @@ jobs:
                   version = item.get("version", 1)
                   description = item.get("description", "")
                   authors = item.get("authors", ["Abodabodd"])
+                  language = item.get("language", "ar") # جلب متغير اللغة (الافتراضي ar)
                   status = item.get("status", 1)
                   tv_types = item.get("tvTypes", [])
                   icon_url = item.get("iconUrl", "")
@@ -142,11 +143,13 @@ jobs:
                   authors_kotlin = ", ".join([f'"{a}"' for a in authors])
                   tv_types_kotlin = ",\n        ".join([f'"{t}"' for t in tv_types])
                   
+                  # توليد محتوى ملف build.gradle.kts الجديد بالكامل مع إدراج اللغة
                   content = f"""version = {version}
 
           cloudstream {{
               description = "{description}"
               authors = listOf({authors_kotlin})
+              language = "{language}"
 
               status = {status}
 
