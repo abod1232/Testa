@@ -195,8 +195,8 @@ jobs:
             git_modules=$(git diff --name-only HEAD^ HEAD 2>/dev/null | grep -v '^\.' | cut -d'/' -f1 | sort -u) || git_modules=""
           fi
           
-          local_modules=$(git status --porcelain | grep -v '^\.' | awk '{print $2}' | cut -d'/' -f1 | sort -u)
-          all_modules=$(echo -e "${git_modules}\n${local_modules}" | sort -u | grep -v 'build.gradle.kts' | grep -v '^$')
+          local_modules=$(git status --porcelain | grep -v '^\.' | awk '{print $2}' | cut -d'/' -f1 | sort -u) || local_modules=""
+          all_modules=$(echo -e "${git_modules}\n${local_modules}" | sort -u | grep -v 'build.gradle.kts' | grep -v '^$') || all_modules=""
           
           build_commands=""
           for module in $all_modules; do
