@@ -21,7 +21,6 @@ class eishk : MainAPI() {
     override var lang = "ar"
     override val hasMainPage = true
 
-
     private fun Element.toSearchResponse(): SearchResponse? {
 
         val encodedUrl = this.attr("data-clse")
