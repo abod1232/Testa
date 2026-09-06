@@ -317,27 +317,6 @@
         "fileHash": "sha256-e2dd83da870ce6f4fce9ff62eee3ccae35e56cf52f69d17d1845721988779445"
     },
     {
-        "url": "https://raw.githubusercontent.com/abod1232/Testa/builds/CimaNowProvider.cs3",
-        "status": 1,
-        "version": 4,
-        "name": "CimaNowProvider",
-        "internalName": "CimaNowProvider",
-        "authors": [
-            "Abodabodd"
-        ],
-        "description": "\u064a\u0633\u062a\u063a\u0631\u0642 \u062a\u062d\u0645\u064a\u0644 \u0627\u0644\u0631\u0648\u0627\u0628\u0637 \u0628\u0639\u0636 \u0627\u0644\u0648\u0642\u062a \u0643\u0646 \u0635\u0628\u0648\u0631\u0627",
-        "fileSize": 79215,
-        "repositoryUrl": "https://github.com/abod1232/Testa",
-        "language": "ar",
-        "tvTypes": [
-            "TvSeries",
-            "Movie"
-        ],
-        "iconUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTcamMqAuvsinzX-pcOGRo1KkYEbfv2zVJawHsugiX3dDcr64h-CJiL8ShJ&s=10",
-        "apiVersion": 1,
-        "fileHash": "sha256-fe8f5048b15eae7a1a063df883c328b4f97fbd6c4dc02ddaf312e53bf0490dc3"
-    },
-    {
         "url": "https://raw.githubusercontent.com/abod1232/Testa/builds/Cimatn.cs3",
         "status": 1,
         "version": 1,
@@ -358,28 +337,6 @@
         "iconUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcS-7OxHmLaqTWIj7eJv55zxus1xKVp5ssQPAKYjydt7Lg&s",
         "apiVersion": 1,
         "fileHash": "sha256-57fd8f26fe607008da1224c7f1df61ac7a478985947d458f1b3bf3c9cf901f03"
-    },
-    {
-        "url": "https://raw.githubusercontent.com/abod1232/Testa/builds/Cimawbas.cs3",
-        "status": 1,
-        "version": 33,
-        "name": "Cimawbas",
-        "internalName": "Cimawbas",
-        "authors": [
-            "megix"
-        ],
-        "description": "Includes Topmovies",
-        "fileSize": 13198,
-        "repositoryUrl": "https://github.com/abod1232/Testa",
-        "tvTypes": [
-            "TvSeries",
-            "Movie",
-            "AsianDrama",
-            "Anime"
-        ],
-        "iconUrl": "https://github.com/SaurabhKaperwan/CSX/raw/refs/heads/master/Moviesmod/icon.png",
-        "apiVersion": 1,
-        "fileHash": "sha256-30e6af0e8368e18eb210a55138af8856ac0b07c256415bfb5b80b8138ca1581a"
     },
     {
         "url": "https://raw.githubusercontent.com/abod1232/Testa/builds/cinemana.cs3",
@@ -511,28 +468,6 @@
         "fileHash": "sha256-225b9ca347cab89ce0a41a5612fcce90370c127a0db06fff217e5902cf9d0e12"
     },
     {
-        "url": "https://raw.githubusercontent.com/abod1232/Testa/builds/Iptv.cs3",
-        "status": 1,
-        "version": 33,
-        "name": "Iptv",
-        "internalName": "Iptv",
-        "authors": [
-            "megix"
-        ],
-        "description": "Includes Topmovies",
-        "fileSize": 33010,
-        "repositoryUrl": "https://github.com/abod1232/Testa",
-        "tvTypes": [
-            "TvSeries",
-            "Movie",
-            "AsianDrama",
-            "Anime"
-        ],
-        "iconUrl": "https://github.com/SaurabhKaperwan/CSX/raw/refs/heads/master/Moviesmod/icon.png",
-        "apiVersion": 1,
-        "fileHash": "sha256-c6cbc53554f2173b41d21c6832868557703515b758bf0360b063881c2c5d6fd4"
-    },
-    {
         "url": "https://raw.githubusercontent.com/abod1232/Testa/builds/Krmzy.cs3",
         "status": 1,
         "version": 1,
@@ -596,28 +531,6 @@
         "iconUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTxoF3lscri32oVf0iQlhbjFEoUn2xg3OmQIx4wYdDmqw&s",
         "apiVersion": 1,
         "fileHash": "sha256-8c78e37410b342bc17a544e85738b13bec105aed1847f95e00e92906e93d9091"
-    },
-    {
-        "url": "https://raw.githubusercontent.com/abod1232/Testa/builds/Ohatv.cs3",
-        "status": 1,
-        "version": 33,
-        "name": "Ohatv",
-        "internalName": "Ohatv",
-        "authors": [
-            "megix"
-        ],
-        "description": "Includes Topmovies",
-        "fileSize": 19749,
-        "repositoryUrl": "https://github.com/abod1232/Testa",
-        "tvTypes": [
-            "TvSeries",
-            "Movie",
-            "AsianDrama",
-            "Anime"
-        ],
-        "iconUrl": "https://github.com/SaurabhKaperwan/CSX/raw/refs/heads/master/Moviesmod/icon.png",
-        "apiVersion": 1,
-        "fileHash": "sha256-7254150265ad84549cc7ceb8eb2a09b50748c9d97ff9d3ba02cfe58854dbba96"
     },
     {
         "url": "https://raw.githubusercontent.com/abod1232/Testa/builds/Replaymatch.cs3",
