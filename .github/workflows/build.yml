@@ -47,6 +47,84 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4.0.1
 
+      - name: Update build.gradle.kts from test.txt
+        working-directory: "src"
+        shell: python
+        run: |
+          import json
+          import os
+          import urllib.request
+
+          # رابط ملف البيانات الخاص بك
+          url = "https://raw.githubusercontent.com/abod1232/Testa/refs/heads/master/test.txt"
+
+          try:
+              response = urllib.request.urlopen(url)
+              data = json.loads(response.read().decode('utf-8'))
+          except Exception as e:
+              print(f"Error fetching JSON: {e}")
+              exit(1)
+
+          # جلب جميع مجلدات الإضافات الفرعية الحالية
+          dirs = [d for d in os.listdir('.') if os.path.isdir(d) and not d.startswith('.')]
+
+          # دالة لتنظيف الاسم للمطابقة الذكية وتجنب مشاكل المسافات والرموز
+          def clean_name(name):
+              return name.lower().replace(' ', '').replace('-', '').replace('_', '').replace('(', '').replace(')', '')
+
+          dir_map = {clean_name(d): d for d in dirs}
+
+          for item in data:
+              internal_name = item.get("internalName", "")
+              name = item.get("name", "")
+              
+              target_dir = None
+              cleaned_internal = clean_name(internal_name)
+              cleaned_name = clean_name(name)
+              
+              # محاولة مطابقة الاسم مع مجلد في المشروع
+              if cleaned_internal in dir_map:
+                  target_dir = dir_map[cleaned_internal]
+              elif cleaned_name in dir_map:
+                  target_dir = dir_map[cleaned_name]
+                  
+              if target_dir:
+                  gradle_path = os.path.join(target_dir, "build.gradle.kts")
+                  print(f"Updating: {gradle_path} for {internal_name}...")
+                  
+                  # جلب المتغيرات المطلوبة فقط وتجاهل fileSize وروابط التحميل الأخرى
+                  version = item.get("version", 1)
+                  description = item.get("description", "")
+                  authors = item.get("authors", ["Abodabodd"])
+                  status = item.get("status", 1)
+                  tv_types = item.get("tvTypes", [])
+                  icon_url = item.get("iconUrl", "")
+                  
+                  # تحويل مصفوفات الأبحاث والأنواع لتناسب كود Kotlin
+                  authors_kotlin = ", ".join([f'"{a}"' for a in authors])
+                  tv_types_kotlin = ",\n        ".join([f'"{t}"' for t in tv_types])
+                  
+                  # توليد محتوى ملف build.gradle.kts الجديد بالكامل
+                  content = f"""version = {version}
+
+          cloudstream {{
+              description = "{description}"
+              authors = listOf({authors_kotlin})
+
+              status = {status}
+
+              tvTypes = listOf(
+                  {tv_types_kotlin}
+              )
+
+              iconUrl = "{icon_url}"
+          }}
+          """
+                  with open(gradle_path, "w", encoding="utf-8") as f:
+                      f.write(content)
+              else:
+                  print(f"No matching directory found for: {internal_name} / {name}")
+
       - name: Access Secrets & Create Properties
         env:
           SIMKL_API: ${{ secrets.SIMKL_API }}
