@@ -54,8 +54,8 @@ jobs:
           import json
           import os
           import urllib.request
+          import difflib
 
-          # رابط ملف البيانات الخاص بك
           url = "https://raw.githubusercontent.com/abod1232/Testa/refs/heads/master/test.txt"
 
           try:
@@ -65,34 +65,25 @@ jobs:
               print(f"Error fetching JSON: {e}")
               exit(1)
 
-          # جلب جميع مجلدات الإضافات الفرعية الحالية
+          # جلب المجلدات الحقيقية في المشروع
           dirs = [d for d in os.listdir('.') if os.path.isdir(d) and not d.startswith('.')]
-
-          # دالة لتنظيف الاسم للمطابقة الذكية وتجنب مشاكل المسافات والرموز
-          def clean_name(name):
-              return name.lower().replace(' ', '').replace('-', '').replace('_', '').replace('(', '').replace(')', '')
-
-          dir_map = {clean_name(d): d for d in dirs}
 
           for item in data:
               internal_name = item.get("internalName", "")
               name = item.get("name", "")
               
               target_dir = None
-              cleaned_internal = clean_name(internal_name)
-              cleaned_name = clean_name(name)
               
-              # محاولة مطابقة الاسم مع مجلد في المشروع
-              if cleaned_internal in dir_map:
-                  target_dir = dir_map[cleaned_internal]
-              elif cleaned_name in dir_map:
-                  target_dir = dir_map[cleaned_name]
+              # مطابقة تقريبية ذكية باستخدام difflib للتعامل مع الفروق الإملائية الطفيفة
+              matches = difflib.get_close_matches(internal_name, dirs, n=1, cutoff=0.6)
+              if not matches:
+                  matches = difflib.get_close_matches(name, dirs, n=1, cutoff=0.6)
                   
-              if target_dir:
+              if matches:
+                  target_dir = matches[0]
                   gradle_path = os.path.join(target_dir, "build.gradle.kts")
-                  print(f"Updating: {gradle_path} for {internal_name}...")
+                  print(f"Matching: JSON '{internal_name}' -> Folder '{target_dir}'")
                   
-                  # جلب المتغيرات المطلوبة فقط وتجاهل fileSize وروابط التحميل الأخرى
                   version = item.get("version", 1)
                   description = item.get("description", "")
                   authors = item.get("authors", ["Abodabodd"])
@@ -100,11 +91,9 @@ jobs:
                   tv_types = item.get("tvTypes", [])
                   icon_url = item.get("iconUrl", "")
                   
-                  # تحويل مصفوفات الأبحاث والأنواع لتناسب كود Kotlin
                   authors_kotlin = ", ".join([f'"{a}"' for a in authors])
                   tv_types_kotlin = ",\n        ".join([f'"{t}"' for t in tv_types])
                   
-                  # توليد محتوى ملف build.gradle.kts الجديد بالكامل
                   content = f"""version = {version}
 
           cloudstream {{
@@ -123,7 +112,23 @@ jobs:
                   with open(gradle_path, "w", encoding="utf-8") as f:
                       f.write(content)
               else:
-                  print(f"No matching directory found for: {internal_name} / {name}")
+                  print(f"Could not match: {internal_name} / {name} with any folder")
+
+      # خطوة جديدة لحفظ التغييرات ودفعها لفرعك الرئيسي (master/main)
+      - name: Push updated build files back to source branch
+        run: |
+          cd $GITHUB_WORKSPACE/src
+          git config --local user.email "actions@github.com"
+          git config --local user.name "GitHub Actions"
+          git add **/build.gradle.kts
+          
+          # التحقق من وجود تغييرات حقيقية قبل الحفظ لتجنب الأخطاء
+          if [[ -n $(git status -s) ]]; then
+            git commit -m "Sync build.gradle.kts files with test.txt [skip ci]"
+            git push
+          else
+            echo "No build.gradle.kts changes to push"
+          fi
 
       - name: Access Secrets & Create Properties
         env:
