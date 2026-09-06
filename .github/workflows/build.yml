@@ -94,8 +94,22 @@ jobs:
             $GRADLE_CMD make makePluginsJson
           fi
 
+          cp build/plugins.json ./plugins.json || echo "No plugins.json found"
           find . -type f -name "*.cs3" -exec cp {} $GITHUB_WORKSPACE/builds/ \; || echo "No .cs3 files found"
           find . -type f -name "plugins.json" -exec cp {} $GITHUB_WORKSPACE/builds/ \; || echo "No plugins.json found"
+
+      - name: Push plugins.json to master branch
+        working-directory: "src"
+        run: |
+          git config --local user.email "actions@github.com"
+          git config --local user.name "GitHub Actions"
+          git add plugins.json
+          if [[ -n $(git status -s plugins.json) ]]; then
+            git commit -m "Update plugins.json [skip ci]"
+            git push
+          else
+            echo "No changes in plugins.json"
+          fi
 
       - name: Push builds
         working-directory: "builds"
