@@ -55,6 +55,7 @@ jobs:
           import os
           import urllib.request
           import difflib
+          import re
 
           url = "https://raw.githubusercontent.com/abod1232/Testa/refs/heads/master/test.txt"
 
@@ -68,21 +69,68 @@ jobs:
           # جلب المجلدات الحقيقية في المشروع
           dirs = [d for d in os.listdir('.') if os.path.isdir(d) and not d.startswith('.')]
 
+          # دالة لتنظيف الأسماء تماماً من الرموز التعبيرية والأقواس والمسافات والرموز الخاصة
+          def strict_clean(text):
+              return re.sub(r'[^a-z0-9]', '', text.lower())
+
+          dir_map = {strict_clean(d): d for d in dirs}
+
+          # خريطة المطابقة اليدوية لحل الاختلافات الكبيرة في الأسماء (اسم الـ JSON -> اسم المجلد الفعلي)
+          manual_map = {
+              "fullmatchshows": "replaymatch",
+              "shabakatycinemana": "cinemana",
+              "shabakatcinemana": "cinemana",
+              "cimanaw": "CimaNowProvider",
+              "cimanawprovider": "CimaNowProvider",
+              "eshek": "eseek",
+              "brstege": "bristege",
+              "cee": "Cee",
+          }
+
+          modified_count = 0
+          skipped_items = []
+
           for item in data:
               internal_name = item.get("internalName", "")
               name = item.get("name", "")
               
               target_dir = None
+              cleaned_internal = strict_clean(internal_name)
+              cleaned_name = strict_clean(name)
               
-              # مطابقة تقريبية ذكية باستخدام difflib للتعامل مع الفروق الإملائية الطفيفة
-              matches = difflib.get_close_matches(internal_name, dirs, n=1, cutoff=0.6)
-              if not matches:
-                  matches = difflib.get_close_matches(name, dirs, n=1, cutoff=0.6)
-                  
-              if matches:
-                  target_dir = matches[0]
+              # 1. محاولة المطابقة عبر الخريطة اليدوية أولاً
+              mapped_folder = manual_map.get(cleaned_internal) or manual_map.get(cleaned_name)
+              if mapped_folder:
+                  for d in dirs:
+                      if strict_clean(d) == strict_clean(mapped_folder):
+                          target_dir = d
+                          break
+              
+              # 2. محاولة المطابقة الصارمة بعد تنظيف الرموز والـ Emojis
+              if not target_dir:
+                  if cleaned_internal in dir_map:
+                      target_dir = dir_map[cleaned_internal]
+                  elif cleaned_name in dir_map:
+                      target_dir = dir_map[cleaned_name]
+              
+              # 3. محاولة المطابقة بالاحتواء الجزئي (مثال: cinemana داخل shabakatycinemana)
+              if not target_dir:
+                  for clean_d, actual_d in dir_map.items():
+                      if clean_d in cleaned_internal or cleaned_internal in clean_d or clean_d in cleaned_name or cleaned_name in clean_d:
+                          target_dir = actual_d
+                          break
+
+              # 4. محاولة المطابقة التقريبية كخيار أخير
+              if not target_dir:
+                  matches = difflib.get_close_matches(internal_name, dirs, n=1, cutoff=0.5)
+                  if not matches:
+                      matches = difflib.get_close_matches(name, dirs, n=1, cutoff=0.5)
+                  if matches:
+                      target_dir = matches[0]
+
+              if target_dir:
                   gradle_path = os.path.join(target_dir, "build.gradle.kts")
-                  print(f"Matching: JSON '{internal_name}' -> Folder '{target_dir}'")
+                  print(f"Match Found: '{internal_name}' -> folder '{target_dir}'")
                   
                   version = item.get("version", 1)
                   description = item.get("description", "")
@@ -111,10 +159,16 @@ jobs:
           """
                   with open(gradle_path, "w", encoding="utf-8") as f:
                       f.write(content)
+                  modified_count += 1
               else:
-                  print(f"Could not match: {internal_name} / {name} with any folder")
+                  skipped_items.append(internal_name or name)
 
-      # خطوة جديدة لحفظ التغييرات ودفعها لفرعك الرئيسي (master/main)
+          print(f"\n--- Modification Summary ---")
+          print(f"Successfully modified {modified_count} build.gradle.kts files.")
+          if skipped_items:
+              print(f"Skipped JSON items (No matching folders found): {skipped_items}")
+
+      # حفظ التغييرات ودفعها لفرعك الرئيسي (master/main)
       - name: Push updated build files back to source branch
         run: |
           cd $GITHUB_WORKSPACE/src
@@ -122,7 +176,6 @@ jobs:
           git config --local user.name "GitHub Actions"
           git add **/build.gradle.kts
           
-          # التحقق من وجود تغييرات حقيقية قبل الحفظ لتجنب الأخطاء
           if [[ -n $(git status -s) ]]; then
             git commit -m "Sync build.gradle.kts files with test.txt [skip ci]"
             git push
