@@ -128,7 +128,7 @@ jobs:
           find . -type f -name "*.cs3" -exec cp {} $GITHUB_WORKSPACE/builds/ \; || echo "No .cs3 files found"
           find . -type f -name "plugins.json" -exec cp {} $GITHUB_WORKSPACE/builds/ \; || echo "No plugins.json found"
 
-      - name: Push updated files back to master branch
+      - name: Push updated files back to source branch
         working-directory: "src"
         run: |
           git config --local user.email "actions@github.com"
@@ -136,7 +136,7 @@ jobs:
           git add .
           if [[ -n $(git status -s) ]]; then
             git commit -m "Strip comments and update plugins.json [skip ci]"
-            git push
+            git push origin HEAD:${{ github.ref_name }}
           else
             echo "No changes to push"
           fi
@@ -149,7 +149,7 @@ jobs:
           git add .
           if [[ -n $(git status -s) ]]; then
             git commit --amend -m "Build $GITHUB_SHA" || git commit -m "Build $GITHUB_SHA"
-            git push --force
+            git push --force origin HEAD:builds
           else
             echo "No changes to push"
           fi
