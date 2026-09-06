@@ -178,7 +178,17 @@ jobs:
       - name: Build Plugins
         working-directory: "src"
         run: |
-          chmod +x gradlew
+          echo "=== listing files in src folder ==="
+          ls -la
+          
+          if [ -f "gradlew" ]; then
+            echo "gradlew found, setting execution permissions..."
+            chmod +x gradlew
+            GRADLE_CMD="./gradlew"
+          else
+            echo "gradlew NOT found! Falling back to system gradle..."
+            GRADLE_CMD="gradle"
+          fi
           
           git_modules=$(git diff --name-only HEAD^ HEAD | grep -v '^\.' | cut -d'/' -f1 | sort -u)
           local_modules=$(git status --porcelain | grep -v '^\.' | awk '{print $2}' | cut -d'/' -f1 | sort -u)
@@ -192,9 +202,9 @@ jobs:
           done
           
           if [ -n "$build_commands" ]; then
-            ./gradlew $build_commands makePluginsJson
+            $GRADLE_CMD $build_commands makePluginsJson
           else
-            ./gradlew makePluginsJson
+            $GRADLE_CMD makePluginsJson
           fi
 
           cp **/build/*.cs3 $GITHUB_WORKSPACE/builds/ || echo "No .cs3 files found"
