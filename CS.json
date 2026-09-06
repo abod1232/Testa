@@ -1,0 +1,9 @@
+{
+  "name": "3arabi",
+  "description": "h",
+  "iconUrl": "https://wsrv.nl/?url=https://avatars.githubusercontent.com/u/91174352&mask=circle",
+  "manifestVersion": 2,
+  "pluginLists": [
+    "https://raw.githubusercontent.com/abod1232/Testa/refs/heads/builds/plugins.json"
+  ]
+}
