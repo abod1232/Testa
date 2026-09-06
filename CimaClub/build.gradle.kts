@@ -3,6 +3,7 @@ version = 1
 cloudstream {
     description = "سيرفرات الموقع بها ضعف احيانا اذا لم يفتح  غالبا المشكلة من الموقع"
     authors = listOf("Abodabodd")
+    language = "ar"
 
     status = 1
 

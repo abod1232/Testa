@@ -3,6 +3,7 @@ version = 3
 cloudstream {
     description = ""
     authors = listOf("Abodabodd")
+    language = "ar"
 
     status = 1
 

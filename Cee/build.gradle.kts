@@ -3,6 +3,7 @@ version = 1
 cloudstream {
     description = "لا يعمل خارج العراق"
     authors = listOf("Abodabodd")
+    language = "ar"
 
     status = 1
 

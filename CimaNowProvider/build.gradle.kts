@@ -3,6 +3,7 @@ version = 4
 cloudstream {
     description = "يستغرق تحميل الروابط بعض الوقت كن صبورا"
     authors = listOf("Abodabodd")
+    language = "ar"
 
     status = 1
 
