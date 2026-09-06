@@ -190,7 +190,11 @@ jobs:
             GRADLE_CMD="gradle"
           fi
           
-          git_modules=$(git diff --name-only HEAD^ HEAD | grep -v '^\.' | cut -d'/' -f1 | sort -u)
+          git_modules=""
+          if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+            git_modules=$(git diff --name-only HEAD^ HEAD 2>/dev/null | grep -v '^\.' | cut -d'/' -f1 | sort -u) || git_modules=""
+          fi
+          
           local_modules=$(git status --porcelain | grep -v '^\.' | awk '{print $2}' | cut -d'/' -f1 | sort -u)
           all_modules=$(echo -e "${git_modules}\n${local_modules}" | sort -u | grep -v 'build.gradle.kts' | grep -v '^$')
           
@@ -207,8 +211,8 @@ jobs:
             $GRADLE_CMD makePluginsJson
           fi
 
-          cp **/build/*.cs3 $GITHUB_WORKSPACE/builds/ || echo "No .cs3 files found"
-          cp build/plugins.json $GITHUB_WORKSPACE/builds/ || echo "No plugins.json found"
+          find . -type f -name "*.cs3" -exec cp {} $GITHUB_WORKSPACE/builds/ \; || echo "No .cs3 files found"
+          find . -type f -name "plugins.json" -exec cp {} $GITHUB_WORKSPACE/builds/ \; || echo "No plugins.json found"
 
       - name: Push builds
         working-directory: "builds"
