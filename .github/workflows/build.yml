@@ -48,10 +48,10 @@ jobs:
           import os
           import re
 
-          pattern = re.compile(r'^\s*//.*', re.MULTILINE)
+          pattern = re.compile(r'^\s*//.*\r?\n?', re.MULTILINE)
 
           for root, dirs, files in os.walk('.'):
-              dirs[:] = [d for d in dirs if not d.startswith('.') and d != 'builds' and d != 'src']
+              dirs[:] = [d for d in dirs if not d.startswith('.')]
               for file in files:
                   if file.endswith('.kt') or file.endswith('.kts'):
                       file_path = os.path.join(root, file)
