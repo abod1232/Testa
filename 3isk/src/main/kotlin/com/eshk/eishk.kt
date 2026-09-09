@@ -401,6 +401,7 @@ class eishk : MainAPI() {
     ) {
         referer = mainUrl
         this.quality = getQualityFromName(quality)
+        this.headers = customHeaders
     }
                             )
                         }
