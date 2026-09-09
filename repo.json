@@ -1,0 +1,8 @@
+{
+    "name": "3rabi عربي",
+    "description": "مشاهدة الافلام والمسلسلات تجربة خالية من الاعلانات",
+    "manifestVersion": 1,
+    "pluginLists": [
+        "https://raw.githubusercontent.com/abod1232/Testa/builds/plugins.json"
+    ]
+}
