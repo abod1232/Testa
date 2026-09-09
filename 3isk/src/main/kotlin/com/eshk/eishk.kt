@@ -110,9 +110,13 @@ class eishk : MainAPI() {
         val url = "https://firebaseremoteconfig.googleapis.com/v1/projects/536921039715/namespaces/firebase:fetch"
         val payload = mapOf(
             "appVersion" to "3.13.5",
+            "firstOpenTime" to "2026-09-09T00:00:00.000Z",
+            "timeZone" to "Asia/Baghdad",
             "appInstanceIdToken" to firebaseToken,
+            "languageCode" to "ar-IQ",
             "appBuild" to "68",
             "appInstanceId" to fid,
+            "countryCode" to "IQ",
             "analyticsUserProperties" to emptyMap<String, String>(),
             "appId" to FIREBASE_APP_ID,
             "platformVersion" to "36",
@@ -387,6 +391,7 @@ class eishk : MainAPI() {
                         val videoUrl = directLinkJson.get("videoUrl")?.asText()
 
                         if (!videoUrl.isNullOrEmpty()) {
+                            // 1. الهيدرز الأساسية
                             val customHeaders = mutableMapOf(
                                 "User-Agent" to "libmpv",
                                 "Accept" to "*/*",
@@ -394,12 +399,16 @@ class eishk : MainAPI() {
                                 "Connection" to "close",
                                 "Icy-MetaData" to "1"
                             )
+
+                            // تعيين Host رابط الفيديو تلقائياً أو استخدام القيمة الافتراضية
                             val hostFromUrl = try {
                                 java.net.URI(videoUrl).host
                             } catch (_: Exception) {
                                 null
                             }
                             customHeaders["Host"] = hostFromUrl ?: "media-1.rift-content.com"
+
+                            // 2. دمج الهيدرز القادمة من السيرفر مع منع التكرار
                             directLinkJson.get("http_headers")?.fields()?.forEach { (k, v) ->
                                 customHeaders[k] = v.asText()
                             }
