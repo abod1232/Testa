@@ -110,13 +110,9 @@ class eishk : MainAPI() {
         val url = "https://firebaseremoteconfig.googleapis.com/v1/projects/536921039715/namespaces/firebase:fetch"
         val payload = mapOf(
             "appVersion" to "3.13.5",
-            "firstOpenTime" to "2026-09-09T00:00:00.000Z",
-            "timeZone" to "Asia/Baghdad",
             "appInstanceIdToken" to firebaseToken,
-            "languageCode" to "ar-IQ",
             "appBuild" to "68",
             "appInstanceId" to fid,
-            "countryCode" to "IQ",
             "analyticsUserProperties" to emptyMap<String, String>(),
             "appId" to FIREBASE_APP_ID,
             "platformVersion" to "36",
@@ -142,22 +138,15 @@ class eishk : MainAPI() {
         deviceId = "$fid:$fcmToken"
 
         val deviceInfo = mapOf(
-            "model" to "RMX5061",
-            "brand" to "realme",
             "manufacturer" to "realme",
-            "device" to "RE60ADL1",
-            "hardware" to "mt6989",
-            "product" to "RMX5061",
             "androidVersion" to "16",
             "sdkInt" to 36,
-            "securityPatch" to "2026-07-01",
             "isPhysicalDevice" to true,
             "supportedAbis" to listOf("arm64-v8a"),
             "tags" to "release-keys",
             "type" to "user",
-            "buildId" to "BP2A.250605.015",
             "host" to "kvm-slave-build-s-system-12107393",
-            "fingerprint" to "realme/RMX5061/RE60ADL1:16/BP2A.250605.015/V.R4T2.1e9a227_615c94_611b91:user/release-keys"
+            
         )
 
         val payload = mapOf(
