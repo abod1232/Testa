@@ -330,6 +330,7 @@ class eishk : MainAPI() {
             val animeId = parts[0]
             val episodeId = parts[1]
             val episodeNumber = parts.getOrNull(2)?.toIntOrNull() ?: 1
+            
             val sourcesUrl = "$gatewayBaseUrl/library/episode/sources"
             val sourcesBody = mapOf(
                 "animeId" to animeId,
@@ -363,6 +364,7 @@ class eishk : MainAPI() {
                         )
                         val canPlayJson = apiCall(canPlayUrl, "ANIME.LIBRARY.EPISODES.SOURCES.CHECK_AVAILABILITY", method = "POST", body = canPlayBody)
                         val sessionId = canPlayJson.get("sessionId")?.asText() ?: ""
+                        
                         val claimUrl = "$gatewayBaseUrl/ads_manager/claim"
                         val claimBody = mapOf(
                             "event_name" to "play_episode_unlocked",
@@ -377,6 +379,7 @@ class eishk : MainAPI() {
                         try {
                             apiCall(claimUrl, "USER.ADS_MANAGER.CLAIMS", method = "PUT", body = claimBody)
                         } catch (_: Exception) {}
+                        
                         val directLinkUrl = "$gatewayBaseUrl/library/episode/source/direct_link"
                         val directLinkBody = mapOf(
                             "id" to hostId,
@@ -388,21 +391,37 @@ class eishk : MainAPI() {
                         val videoUrl = directLinkJson.get("videoUrl")?.asText()
 
                         if (!videoUrl.isNullOrEmpty()) {
-                            val customHeaders = mutableMapOf<String, String>()
+                            // 1. الهيدرز الأساسية
+                            val customHeaders = mutableMapOf(
+                                "User-Agent" to "libmpv",
+                                "Accept" to "*/*",
+                                "Range" to "bytes=0-",
+                                "Connection" to "close",
+                                "Icy-MetaData" to "1"
+                            )
+
+                            // تعيين Host رابط الفيديو تلقائياً أو استخدام القيمة الافتراضية
+                            val hostFromUrl = try {
+                                java.net.URI(videoUrl).host
+                            } catch (_: Exception) {
+                                null
+                            }
+                            customHeaders["Host"] = hostFromUrl ?: "media-1.rift-content.com"
+
+                            // 2. دمج الهيدرز القادمة من السيرفر مع منع التكرار
                             directLinkJson.get("http_headers")?.fields()?.forEach { (k, v) ->
                                 customHeaders[k] = v.asText()
                             }
 
                             callback.invoke(
-    newExtractorLink(
-        source = name,
-        name = "$serverName - $subTitle",
-        url = videoUrl,
-    ) {
-    
-        this.quality = getQualityFromName(quality)
-        this.headers = customHeaders
-    }
+                                newExtractorLink(
+                                    source = name,
+                                    name = "$serverName [$subTitle] - $quality",
+                                    url = videoUrl,
+                                ) {
+                                    this.quality = getQualityFromName(quality)
+                                    this.headers = customHeaders
+                                }
                             )
                         }
                     } catch (e: Exception) {
