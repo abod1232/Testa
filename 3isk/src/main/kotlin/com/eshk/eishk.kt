@@ -399,7 +399,7 @@ class eishk : MainAPI() {
         name = "$serverName - $subTitle",
         url = videoUrl,
     ) {
-        referer = mainUrl
+    
         this.quality = getQualityFromName(quality)
         this.headers = customHeaders
     }
