@@ -110,13 +110,9 @@ class eishk : MainAPI() {
         val url = "https://firebaseremoteconfig.googleapis.com/v1/projects/536921039715/namespaces/firebase:fetch"
         val payload = mapOf(
             "appVersion" to "3.13.5",
-            "firstOpenTime" to "2026-09-09T00:00:00.000Z",
-            "timeZone" to "Asia/Baghdad",
             "appInstanceIdToken" to firebaseToken,
-            "languageCode" to "ar-IQ",
             "appBuild" to "68",
             "appInstanceId" to fid,
-            "countryCode" to "IQ",
             "analyticsUserProperties" to emptyMap<String, String>(),
             "appId" to FIREBASE_APP_ID,
             "platformVersion" to "36",
