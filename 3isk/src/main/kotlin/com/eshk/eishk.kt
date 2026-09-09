@@ -316,8 +316,6 @@ class eishk : MainAPI() {
             addEpisodes(DubStatus.Subbed, episodesList)
         }
     }
-
-    // 1. تحديث دالة apiCall لدعم طلبات PUT
     
 
    override suspend fun loadLinks(
@@ -332,8 +330,6 @@ class eishk : MainAPI() {
             val animeId = parts[0]
             val episodeId = parts[1]
             val episodeNumber = parts.getOrNull(2)?.toIntOrNull() ?: 1
-
-            // الخطوة 1: طلب قائمة السيرفرات (Sources)
             val sourcesUrl = "$gatewayBaseUrl/library/episode/sources"
             val sourcesBody = mapOf(
                 "animeId" to animeId,
@@ -358,7 +354,6 @@ class eishk : MainAPI() {
 
                 for (quality in qualitiesList) {
                     try {
-                        // الخطوة 2: فحص السيرفر واستخراج sessionId
                         val canPlayUrl = "$gatewayBaseUrl/library/episode/source/can_play"
                         val canPlayBody = mapOf(
                             "episodeId" to episodeId,
@@ -368,8 +363,6 @@ class eishk : MainAPI() {
                         )
                         val canPlayJson = apiCall(canPlayUrl, "ANIME.LIBRARY.EPISODES.SOURCES.CHECK_AVAILABILITY", method = "POST", body = canPlayBody)
                         val sessionId = canPlayJson.get("sessionId")?.asText() ?: ""
-
-                        // الخطوة 3: تخطي الإعلان (Claim Ad)
                         val claimUrl = "$gatewayBaseUrl/ads_manager/claim"
                         val claimBody = mapOf(
                             "event_name" to "play_episode_unlocked",
@@ -384,8 +377,6 @@ class eishk : MainAPI() {
                         try {
                             apiCall(claimUrl, "USER.ADS_MANAGER.CLAIMS", method = "PUT", body = claimBody)
                         } catch (_: Exception) {}
-
-                        // الخطوة 4: جلب الرابط المباشر (Direct Link)
                         val directLinkUrl = "$gatewayBaseUrl/library/episode/source/direct_link"
                         val directLinkBody = mapOf(
                             "id" to hostId,
@@ -415,7 +406,6 @@ class eishk : MainAPI() {
                             )
                         }
                     } catch (e: Exception) {
-                        // في حال كان السيرفر خارجي (مثل Streamtape) وفشلت الخطوات، نحاول استخراجه بالطريقة التقليدية
                         if (provider == "streamtape") {
                             loadExtractor("https://streamtape.com/v/$hostId", mainUrl, subtitleCallback, callback)
                         }
