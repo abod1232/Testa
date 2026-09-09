@@ -186,7 +186,6 @@ class eishk : MainAPI() {
             "x-device-os-id" to "BP2A.250605.015",
             "user-agent" to "Dart/3.10 (dart:io)",
             "x-device-release-version" to "3.13.5",
-            "accept-encoding" to "gzip, deflate",
             "x-firebase-app-check" to "null",
             "authorization" to "Bearer null",
             "content-type" to "application/json; charset=UTF-8",
