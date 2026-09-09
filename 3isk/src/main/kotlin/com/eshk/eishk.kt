@@ -200,10 +200,10 @@ class eishk : MainAPI() {
             "x-os" to "android"
         )
 
-        val response = if (method == "POST") {
-            app.post(url, headers = headers, json = body)
-        } else {
-            app.get(url, headers = headers)
+        val response = when (method.uppercase()) {
+            "POST" -> app.post(url, headers = headers, json = body)
+            "PUT" -> app.put(url, headers = headers, json = body)
+            else -> app.get(url, headers = headers)
         }
         return response.parsed<JsonNode>()
     }
@@ -286,13 +286,13 @@ class eishk : MainAPI() {
                 val epNumber = ep.get("episode_number")?.asInt() ?: 1
                 val epId = ep.get("_id")?.asText() ?: ""
                 episodesList.add(
-                    newEpisode(data = "$animeId|$epId") {
-                        this.name = "الحلقة $epNumber"
-                        this.episode = epNumber
-                        this.season = 1
-                        this.posterUrl = ep.get("thumbnail")?.asText()
-                    }
-                )
+            newEpisode(data = "$animeId|$epId|$epNumber") {
+                this.name = "الحلقة $epNumber"
+                this.episode = epNumber
+                this.season = 1
+                this.posterUrl = ep.get("thumbnail")?.asText()
+               }
+              )
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -317,7 +317,10 @@ class eishk : MainAPI() {
         }
     }
 
-    override suspend fun loadLinks(
+    // 1. تحديث دالة apiCall لدعم طلبات PUT
+    
+
+   override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
@@ -328,39 +331,79 @@ class eishk : MainAPI() {
             if (parts.size < 2) return@withContext false
             val animeId = parts[0]
             val episodeId = parts[1]
+            val episodeNumber = parts.getOrNull(2)?.toIntOrNull() ?: 1
 
-            val sourceUrl = "$gatewayBaseUrl/library/episode/sources"
-            val body = mapOf("animeId" to animeId, "episodeId" to episodeId, "episode_number" to 1)
-            val json = apiCall(sourceUrl, "ANIME.LIBRARY.EPISODES.SOURCES.ALL", method = "POST", body = body)
+            // الخطوة 1: طلب قائمة السيرفرات (Sources)
+            val sourcesUrl = "$gatewayBaseUrl/library/episode/sources"
+            val sourcesBody = mapOf(
+                "animeId" to animeId,
+                "episodeId" to episodeId,
+                "episode_number" to episodeNumber
+            )
+            val sourcesJson = apiCall(sourcesUrl, "ANIME.LIBRARY.EPISODES.SOURCES.ALL", method = "POST", body = sourcesBody)
+            val items = sourcesJson.get("items") ?: return@withContext false
 
-            val serverList = mutableListOf<Pair<JsonNode, String>>()
-
-            json.get("items")?.forEach { src ->
-                val qualities = src.get("qualities")
-                val quality = if (qualities != null && qualities.size() > 0) qualities.get(0).asText() else "Unknown"
-                serverList.add(Pair(src, quality))
-            }
-
-            val sortedServers = serverList.sortedByDescending { getQualityFromName(it.second) }
-
-            for ((src, quality) in sortedServers) {
-                val serverName = src.get("server_name")?.asText() ?: "Unknown"
+            items.forEach { src ->
+                val hostId = src.get("_id")?.asText() ?: return@forEach
+                val serverName = src.get("server_name")?.asText() ?: "Server"
                 val provider = src.get("provider")?.asText() ?: ""
                 val subTitle = src.get("sub_title")?.asText() ?: ""
-                val srcId = src.get("_id")?.asText() ?: ""
+                val qualitiesNode = src.get("qualities")
 
-                val link = when (provider) {
-                    "streamtape" -> "https://streamtape.com/v/$srcId"
-                    "animeworld_realtime" -> "https://animeworld.tv/embed/$srcId"
-                    "anineko_realtime" -> "https://anineko.tv/embed/$srcId"
-                    else -> "$gatewayBaseUrl/stream/$srcId"
+                val qualitiesList = if (qualitiesNode != null && qualitiesNode.isArray && qualitiesNode.size() > 0) {
+                    qualitiesNode.map { it.asText() }
+                } else {
+                    listOf("1080P")
                 }
 
-                try {
-                    loadExtractor(link, mainUrl, subtitleCallback, callback)
-                } catch (e: Exception) {
-                    callback.invoke(
-                        newExtractorLink(
+                for (quality in qualitiesList) {
+                    try {
+                        // الخطوة 2: فحص السيرفر واستخراج sessionId
+                        val canPlayUrl = "$gatewayBaseUrl/library/episode/source/can_play"
+                        val canPlayBody = mapOf(
+                            "episodeId" to episodeId,
+                            "hostId" to hostId,
+                            "is_download" to false,
+                            "event_name" to "play_episode_unlocked"
+                        )
+                        val canPlayJson = apiCall(canPlayUrl, "ANIME.LIBRARY.EPISODES.SOURCES.CHECK_AVAILABILITY", method = "POST", body = canPlayBody)
+                        val sessionId = canPlayJson.get("sessionId")?.asText() ?: ""
+
+                        // الخطوة 3: تخطي الإعلان (Claim Ad)
+                        val claimUrl = "$gatewayBaseUrl/ads_manager/claim"
+                        val claimBody = mapOf(
+                            "event_name" to "play_episode_unlocked",
+                            "hostId" to hostId,
+                            "episodeId" to episodeId,
+                            "transactionRef" to "${System.currentTimeMillis()}_${Random().nextInt(999999999)}",
+                            "reward_result" to "not_filled",
+                            "streamingServerKey" to provider,
+                            "is_optional" to false,
+                            "is_reward" to true
+                        )
+                        try {
+                            apiCall(claimUrl, "USER.ADS_MANAGER.CLAIMS", method = "PUT", body = claimBody)
+                        } catch (_: Exception) {}
+
+                        // الخطوة 4: جلب الرابط المباشر (Direct Link)
+                        val directLinkUrl = "$gatewayBaseUrl/library/episode/source/direct_link"
+                        val directLinkBody = mapOf(
+                            "id" to hostId,
+                            "quality" to quality,
+                            "with_internal_player" to "1",
+                            "sessionId" to sessionId
+                        )
+                        val directLinkJson = apiCall(directLinkUrl, "ANIME.LIBRARY.EPISODES.SOURCES.DIRECT_LINK", method = "POST", body = directLinkBody)
+                        val videoUrl = directLinkJson.get("videoUrl")?.asText()
+
+                        if (!videoUrl.isNullOrEmpty()) {
+                            val customHeaders = mutableMapOf<String, String>()
+                            directLinkJson.get("http_headers")?.fields()?.forEach { (k, v) ->
+                                customHeaders[k] = v.asText()
+                            }
+
+                            callback.invoke(
+                                newExtractorLink(
                             source = name,
                             name = "$serverName - $subTitle",
                             url = link,
@@ -368,8 +411,15 @@ class eishk : MainAPI() {
                             referer = mainUrl
                             this.quality = getQualityFromName(quality)
             
+                                }
+                            )
                         }
-                    )
+                    } catch (e: Exception) {
+                        // في حال كان السيرفر خارجي (مثل Streamtape) وفشلت الخطوات، نحاول استخراجه بالطريقة التقليدية
+                        if (provider == "streamtape") {
+                            loadExtractor("https://streamtape.com/v/$hostId", mainUrl, subtitleCallback, callback)
+                        }
+                    }
                 }
             }
             return@withContext true
