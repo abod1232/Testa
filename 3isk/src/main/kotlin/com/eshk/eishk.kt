@@ -1,4 +1,4 @@
-package com.lagradost.cloudstream3.plugins
+package com.eshk
 
 import android.util.Base64
 import com.fasterxml.jackson.databind.JsonNode
@@ -14,7 +14,7 @@ import java.util.*
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
-class AnimeRift : MainAPI() {
+class eishk : MainAPI() {
     override var mainUrl = "https://gateway.anime-rift.com"
     override var name = "أنمي ريفت"
     override val hasMainPage = true
@@ -239,7 +239,7 @@ class AnimeRift : MainAPI() {
                 homeLists.add(HomePageList(title, list))
             }
         }
-        return HomePageResponse(homeLists)
+        return newHomePageResponse(homeLists)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
@@ -311,7 +311,6 @@ class AnimeRift : MainAPI() {
             this.posterUrl = item.get("main_picture")?.asText()
             this.plot = item.get("synopsis")?.asText()
             this.year = item.get("release_year")?.asInt()
-            this.rating = item.get("myAnimeList_rating")?.asText()?.toRatingInt()
             this.tags = item.get("genreLabels")?.mapNotNull { it.get("label")?.asText() }
             this.showStatus = when (item.get("release_status")?.asText()) {
                 "on_going" -> ShowStatus.Ongoing
