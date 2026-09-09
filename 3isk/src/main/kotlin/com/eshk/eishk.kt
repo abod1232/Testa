@@ -403,15 +403,15 @@ class eishk : MainAPI() {
                             }
 
                             callback.invoke(
-                                newExtractorLink(
-                            source = name,
-                            name = "$serverName - $subTitle",
-                            url = link,
-                            ){
-                            referer = mainUrl
-                            this.quality = getQualityFromName(quality)
-            
-                                }
+    newExtractorLink(
+        source = name,
+        name = "$serverName - $subTitle",
+        url = videoUrl,
+    ) {
+        referer = mainUrl
+        this.quality = getQualityFromName(quality)
+        this.headers = customHeaders
+    }
                             )
                         }
                     } catch (e: Exception) {
