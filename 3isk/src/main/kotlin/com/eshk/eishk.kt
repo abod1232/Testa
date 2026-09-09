@@ -1,210 +1,325 @@
-package com.eshk
+package com.lagradost.cloudstream3.plugins
 
+import android.util.Base64
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.utils.AppUtils.parseJson
-import com.lagradost.cloudstream3.utils.Qualities
-import com.lagradost.cloudstream3.utils.getAndUnpack
-import org.jsoup.nodes.Element
-import com.lagradost.cloudstream3.utils.newExtractorLink
-import com.lagradost.cloudstream3.utils.ExtractorLink
-import com.lagradost.cloudstream3.utils.ExtractorLinkType
-import com.lagradost.cloudstream3.utils.newExtractorLink
-import android.util.Log
-import kotlin.io.encoding.Base64
-import android.service.controls.ControlsProviderService.TAG
-import com.lagradost.cloudstream3.syncproviders.providers.OpenSubtitlesApi.Companion.headers
+import com.lagradost.cloudstream3.utils.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.text.SimpleDateFormat
+import java.util.*
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 
-class eishk : MainAPI() {
-    override var mainUrl = "https://3esk.onl"
-    override var name = "قصة عشق"
-    override val supportedTypes = setOf(TvType.TvSeries, TvType.Movie)
-    override var lang = "ar"
+class AnimeRift : MainAPI() {
+    override var mainUrl = "https://gateway.anime-rift.com"
+    override var name = "أنمي ريفت"
     override val hasMainPage = true
+    override val hasDownloadSupport = true
+    override val supportedTypes = setOf(TvType.Anime)
 
-    private fun Element.toSearchResponse(): SearchResponse? {
+    private val JWT_SECRET = "e6c9e1af5c6e3e1f0664947361d954e7446d56dc9a7aa9ae4a62df8d7b919cd1"
+    private val FIREBASE_API_KEY = "AIzaSyBiLkiGEm7ruugny3tDFHEZvqli8yv1k7I"
+    private val FIREBASE_APP_ID = "1:536921039715:android:78825c96b74de921b8e956"
+    private val ANDROID_PACKAGE = "com.riftapps.animerift"
+    private val ANDROID_CERT = "AF40CE82A52AA4107F311D8B9727D01C8D02250B"
 
-        val encodedUrl = this.attr("data-clse")
+    private lateinit var fid: String
+    private lateinit var firebaseToken: String
+    private lateinit var gatewayBaseUrl: String
+    private var sessionKey: String? = null
+    private var deviceId: String? = null
 
-        val href = if (encodedUrl.isNotBlank()) {
-            try {
+    private val mapper = ObjectMapper()
 
-                try {
-                    String(android.util.Base64.decode(encodedUrl, android.util.Base64.DEFAULT))
-                } catch (_: Exception) {
-                    try {
-                        String(android.util.Base64.decode(encodedUrl, android.util.Base64.URL_SAFE))
-                    } catch (_: Exception) {
+    // دالة Base64 متوافقة مع Android API 21+
+    private fun base64UrlEncode(bytes: ByteArray): String {
+        return Base64.encodeToString(
+            bytes,
+            Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP
+        )
+    }
 
-                        String(android.util.Base64.decode(encodedUrl, android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING))
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Base64 decoding failed for '$encodedUrl'. Falling back to href. Error: ${e.message}")
-                this.attr("href")
-            }
+    private fun generateIntegrityToken(scope: String): String {
+        val now = System.currentTimeMillis() / 1000
+        val exp = now + 60
+        val header = base64UrlEncode("""{"alg":"HS256","typ":"JWT"}""".toByteArray())
+        val payload = base64UrlEncode("""{"scope":"$scope","exp":$exp,"iat":$now}""".toByteArray())
+        val toSign = "$header.$payload"
+        val secretKey = SecretKeySpec(JWT_SECRET.toByteArray(), "HmacSHA256")
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(secretKey)
+        val signature = base64UrlEncode(mac.doFinal(toSign.toByteArray()))
+        return "$toSign.$signature"
+    }
+
+    private fun generateFcmToken(): String {
+        val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+        return "APA91b" + (1..80).map { chars.random() }.joinToString("")
+    }
+
+    private fun generateDeviceTimezone(): String {
+        val now = Date()
+        val format = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US)
+        val nano = Random().nextInt(999999).toString().padStart(6, '0')
+        return "${format.format(now)}.$nano"
+    }
+
+    private fun gzipCompress(data: String): ByteArray {
+        val bos = java.io.ByteArrayOutputStream()
+        java.util.zip.GZIPOutputStream(bos).use { it.write(data.toByteArray()) }
+        return bos.toByteArray()
+    }
+
+    private suspend fun ensureInitialized() {
+        if (this::fid.isInitialized && this::gatewayBaseUrl.isInitialized) return
+        withContext(Dispatchers.IO) {
+            registerFirebaseInstallation()
+            fetchRemoteConfig()
+            registerDevice()
+        }
+    }
+
+    private suspend fun registerFirebaseInstallation() {
+        val url = "https://firebaseinstallations.googleapis.com/v1/projects/anime-rift-4142e/installations"
+        val payloadStr = """{"fid":"","appId":"$FIREBASE_APP_ID","authVersion":"FIS_v2","sdkVersion":"a:19.1.0"}"""
+
+        val request = okhttp3.Request.Builder()
+            .url(url)
+            .post(gzipCompress(payloadStr).toRequestBody("application/json; charset=UTF-8".toMediaType()))
+            .addHeader("Content-Type", "application/json")
+            .addHeader("Accept", "application/json")
+            .addHeader("Content-Encoding", "gzip")
+            .addHeader("Cache-Control", "no-cache")
+            .addHeader("X-Android-Package", ANDROID_PACKAGE)
+            .addHeader("X-Android-Cert", ANDROID_CERT)
+            .addHeader("x-goog-api-key", FIREBASE_API_KEY)
+            .addHeader("x-firebase-client", "H4sIAAAAAAAA_6tWykhNLCpJSk0sKVayio7VUSpLLSrOzM9TslIyUqoFAFyivEQfAAAA")
+            .addHeader("User-Agent", "Dalvik/2.1.0 (Linux; U; Android 16; RMX5061 Build/BP2A.250605.015)")
+            .build()
+
+        val response = app.baseClient.newCall(request).execute()
+        val body = response.body?.string() ?: throw Exception("No response from Firebase")
+        val json = mapper.readTree(body)
+        fid = json.get("fid").asText()
+        firebaseToken = json.get("authToken").get("token").asText()
+    }
+
+    private suspend fun fetchRemoteConfig() {
+        val url = "https://firebaseremoteconfig.googleapis.com/v1/projects/536921039715/namespaces/firebase:fetch"
+        val payload = mapOf(
+            "appVersion" to "3.13.5",
+            "firstOpenTime" to "2026-09-09T00:00:00.000Z",
+            "timeZone" to "Asia/Baghdad",
+            "appInstanceIdToken" to firebaseToken,
+            "languageCode" to "ar-IQ",
+            "appBuild" to "68",
+            "appInstanceId" to fid,
+            "countryCode" to "IQ",
+            "analyticsUserProperties" to emptyMap<String, String>(),
+            "appId" to FIREBASE_APP_ID,
+            "platformVersion" to "36",
+            "sdkVersion" to "23.0.1",
+            "packageName" to ANDROID_PACKAGE
+        )
+
+        val headers = mapOf(
+            "X-Goog-Api-Key" to FIREBASE_API_KEY,
+            "X-Android-Package" to ANDROID_PACKAGE,
+            "X-Android-Cert" to ANDROID_CERT,
+            "X-Goog-Firebase-Installations-Auth" to firebaseToken,
+            "Content-Type" to "application/json"
+        )
+
+        val json = app.post(url, headers = headers, json = payload).parsed<JsonNode>()
+        gatewayBaseUrl = json.get("entries")?.get("anime_rift_android_gateway_base_url_v4")?.asText()?.replace("\"", "") ?: mainUrl
+    }
+
+    private suspend fun registerDevice() {
+        val url = "$gatewayBaseUrl/auth/register/device"
+        val fcmToken = generateFcmToken()
+        deviceId = "$fid:$fcmToken"
+
+        val deviceInfo = mapOf(
+            "model" to "RMX5061",
+            "brand" to "realme",
+            "manufacturer" to "realme",
+            "device" to "RE60ADL1",
+            "hardware" to "mt6989",
+            "product" to "RMX5061",
+            "androidVersion" to "16",
+            "sdkInt" to 36,
+            "securityPatch" to "2026-07-01",
+            "isPhysicalDevice" to true,
+            "supportedAbis" to listOf("arm64-v8a"),
+            "tags" to "release-keys",
+            "type" to "user",
+            "buildId" to "BP2A.250605.015",
+            "host" to "kvm-slave-build-s-system-12107393",
+            "fingerprint" to "realme/RMX5061/RE60ADL1:16/BP2A.250605.015/V.R4T2.1e9a227_615c94_611b91:user/release-keys"
+        )
+
+        val payload = mapOf(
+            "deviceId" to deviceId,
+            "current_app_version" to "3.13.5",
+            "device_os" to "android",
+            "device_environment" to "production",
+            "device_info" to mapper.writeValueAsString(deviceInfo),
+            "install_source" to "IS_INSTALLED_FROM_PLAY_PACKAGE_INSTALLER",
+            "deviceOsId" to "BP2A.250605.015",
+            "firebaseInstallationId" to fid,
+            "apn_token" to null,
+            "install_mode" to 2
+        )
+
+        val json = apiCall(url, "USER.AUTH.DEVICE.REGISTER", "POST", payload)
+        sessionKey = json.get("sessionKey")?.asText()
+    }
+
+    private suspend fun apiCall(url: String, scope: String, method: String = "GET", body: Map<String, Any?>? = null): JsonNode {
+        if (!this::fid.isInitialized && !url.contains("installations")) ensureInitialized()
+        val integrityToken = generateIntegrityToken(scope)
+        val timezone = generateDeviceTimezone()
+
+        val headers = mapOf(
+            "x-device-os-id" to "BP2A.250605.015",
+            "user-agent" to "Dart/3.10 (dart:io)",
+            "x-device-release-version" to "3.13.5",
+            "accept-encoding" to "gzip, deflate",
+            "x-firebase-app-check" to "null",
+            "authorization" to "Bearer null",
+            "content-type" to "application/json; charset=UTF-8",
+            "x-installation-source" to "IS_INSTALLED_FROM_PLAY_PACKAGE_INSTALLER",
+            "integrity" to "Bearer $integrityToken",
+            "accept" to "application/json",
+            "x-firebase-id" to (if (this::fid.isInitialized) fid else ""),
+            "x-device-id" to (deviceId ?: ""),
+            "x-device-timezone" to timezone,
+            "x-device-language" to "ar",
+            "x-platform" to "Mobile",
+            "x-os" to "android"
+        )
+
+        val response = if (method == "POST") {
+            app.post(url, headers = headers, json = body)
         } else {
-            this.attr("href")
+            app.get(url, headers = headers)
         }
-
-        if (href.isBlank()) return null
-        val title = this.attr("title")
-        val posterUrl = this.selectFirst("img")?.let { it.attr("data-image").ifBlank { it.attr("src") } }
-
-        return when {
-            href.contains("/tvshows/") -> newTvSeriesSearchResponse(title, href) { this.posterUrl = posterUrl }
-            href.contains("/movies/") -> newMovieSearchResponse(title, href) { this.posterUrl = posterUrl }
-            href.contains("/episodes/") -> {
-                val seriesTitle = title.substringBefore(" الحلقة").trim()
-                newTvSeriesSearchResponse(seriesTitle.ifBlank { title }, href) { this.posterUrl = posterUrl }
-            }
-            else -> null
-        }
+        return response.parsed<JsonNode>()
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = app.get(mainUrl).document
-        val all = ArrayList<HomePageList>()
+        ensureInitialized()
+        val url = "$gatewayBaseUrl/library/home_content?with_genres=true"
+        val json = apiCall(url, "ANIME.LIBRARY.HOME_CONTENT")
 
-        document.select("section.home-items-sec").forEach { section ->
-            val title = section.selectFirst(".sec-title")?.text() ?: return@forEach
-            val items =
-                section.select("li.type_item_box a.type_item, li.type_item_wide_box a.type_item_wide")
-                    .mapNotNull { it.toSearchResponse() }
+        val homeLists = mutableListOf<HomePageList>()
+        val sections = json.get("sections")
 
-            if (items.isNotEmpty()) {
-                all.add(HomePageList(title, items))
-            }
-        }
-        return newHomePageResponse(all)
-    }
+        sections?.forEach { section ->
+            val title = section.get("sectionTitle")?.asText() ?: ""
+            val items = section.get("items")
+            val list = mutableListOf<SearchResponse>()
 
-    override suspend fun search(query: String): List<SearchResponse> {
-        val url = "$mainUrl/search/$query/"
-        Log.d(TAG, "search called with query: '$query', URL: $url")
-        val document = app.get(url, headers = headers).document
-
-        val results = document.select("ul.search-page li.type_item_box a.type_item").mapNotNull {
-            it.toSearchResponse()
-        }
-        Log.d(TAG, "Found ${results.size} search results.")
-        return results
-    }
-
-    private fun decodeBase64Compat(encoded: String): String? {
-        var s = encoded.trim()
-
-        val mod = s.length % 4
-        if (mod != 0) {
-            s += "=".repeat(4 - mod)
-        }
-
-        val flagsToTry = listOf(
-            android.util.Base64.DEFAULT,
-            android.util.Base64.NO_WRAP,
-            android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP
-        )
-
-        for (flags in flagsToTry) {
-            try {
-                val bytes = android.util.Base64.decode(s, flags)
-
-                return try {
-                    String(bytes, Charsets.UTF_8)
-                } catch (e: Exception) {
-                    String(bytes)
-                }
-            } catch (ignored: IllegalArgumentException) {
-
-            }
-        }
-
-        return null
-    }
-
-    override suspend fun load(url: String): LoadResponse? {
-        val TAG = "Qesat3eshqProvider"
-        Log.d(TAG, "load started for URL: $url")
-
-        if (url.contains("/episodes/")) {
-            Log.d(TAG, "URL is an episode link, finding the main series URL.")
-            val episodePage = app.get(url).document
-            val seriesUrl = episodePage.selectFirst("a.single-serie-btn")?.attr("href")
-            if (seriesUrl.isNullOrBlank()) {
-                Log.e(TAG, "Could not find series URL from episode page.")
-                return null
-            }
-            Log.d(TAG, "Found series URL: $seriesUrl. Redirecting to load it.")
-            return load(seriesUrl) // أعِد استدعاء الدالة مع رابط المسلسل
-        }
-
-        val document = app.get(url).document
-        val title = document.selectFirst("div.single_info h1.title")?.text()
-            ?.replace("مترجم", "")?.replace("مدبلج", "")?.trim()
-            ?: return null
-        Log.d(TAG, "Loading series: $title")
-
-        val poster = document.selectFirst("div.poster-wrapper img")?.attr("src")
-        val description = document.selectFirst("div.description span[data-nosnippet]")?.text()
-        val tvType = if (url.contains("/tvshows/")) TvType.TvSeries else TvType.Movie
-
-        if (tvType == TvType.Movie) {
-            return newMovieLoadResponse(title, url, tvType, url) {
-                this.posterUrl = poster
-                this.plot = description
-            }
-        }
-
-        val episodes = ArrayList<Episode>()
-
-        document.select("div.season-eps").forEach { seasonDiv ->
-
-            val seasonNum = seasonDiv.attr("id").removePrefix("season-num-").toIntOrNull() ?: 1
-
-            seasonDiv.select("a.ep-num").forEach { epA ->
-
-                val rawUrl = epA.attr("data-clse").ifBlank { epA.attr("href") }
-
-                if (rawUrl.isBlank()) {
-                    Log.w(TAG, "Skipping episode, both 'data-clse' and 'href' are missing.")
-                    return@forEach
-                }
-
-                val epUrl = if (rawUrl.startsWith("http")) {
-                    rawUrl
-                } else {
-                    try {
-                        decodeBase64Compat(rawUrl) ?: epA.attr("href")
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Base64 decoding failed for: $rawUrl. Falling back to href.")
-                        epA.attr("href")
-                    }
-                }
-
-                Log.d(TAG, "Found Episode URL: $epUrl")
-
-                val epNum = epA.attr("data-ep-num").toIntOrNull()
-                val epName = epA.attr("title").ifBlank { "الحلقة $epNum" }
-
-                episodes.add(
-                    newEpisode(epUrl) {
-                        name = epName
-                        episode = epNum
-                        season = seasonNum
-                        posterUrl = poster
+            items?.forEach { item ->
+                list.add(
+                    newAnimeSearchResponse(
+                        name = item.get("title")?.asText() ?: "",
+                        url = "$mainUrl/api/v4/library/details/${item.get("_id")?.asText()}"
+                    ) {
+                        this.posterUrl = item.get("medium_picture")?.asText()
+                        this.year = item.get("release_year")?.asInt()
                     }
                 )
             }
+            if (list.isNotEmpty()) {
+                homeLists.add(HomePageList(title, list))
+            }
+        }
+        return HomePageResponse(homeLists)
+    }
+
+    override suspend fun search(query: String): List<SearchResponse> {
+        ensureInitialized()
+        val url = "$gatewayBaseUrl/library/search?page=0&sort_by=release_year&sort_direction=1&text_direction=jp"
+        val json = apiCall(url, "ANIME.LIBRARY.SEARCH", method = "POST", body = mapOf("query" to query))
+
+        val result = mutableListOf<SearchResponse>()
+        json.get("items")?.forEach { item ->
+            result.add(
+                newAnimeSearchResponse(
+                    name = item.get("title")?.asText() ?: "",
+                    url = "$mainUrl/api/v4/library/details/${item.get("_id")?.asText()}"
+                ) {
+                    this.posterUrl = item.get("medium_picture")?.asText()
+                }
+            )
+        }
+        return result
+    }
+
+    override suspend fun load(url: String): LoadResponse {
+        ensureInitialized()
+        val animeId = url.substringAfterLast("/")
+        val detailUrl = "$gatewayBaseUrl/library/details/$animeId"
+        val json = apiCall(detailUrl, "ANIME.LIBRARY.DETAILS")
+        val item = json.get("item") ?: throw ErrorLoadingException("Failed to load anime details")
+
+        val allRelated = mutableListOf<AnimeSearchResponse>()
+        val others = json.get("others")
+
+        others?.get("recommendations")?.forEach { rec ->
+            allRelated.add(
+                newAnimeSearchResponse(
+                    name = rec.get("title")?.asText() ?: "",
+                    url = "$mainUrl/api/v4/library/details/${rec.get("_id")?.asText()}"
+                ) {
+                    this.posterUrl = rec.get("main_picture")?.asText()
+                }
+            )
         }
 
-
-        if (episodes.isEmpty()) {
-            Log.e(TAG, "No episodes found for series: $title")
-            return null
+        // جلب الحلقات مباشرة داخل دالة load
+        val episodesList = mutableListOf<Episode>()
+        try {
+            val episodeUrl = "$gatewayBaseUrl/library/episodes/$animeId?sort_by_latest=1&with_arcs=true&with_favorites=true"
+            val epJson = apiCall(episodeUrl, "ANIME.LIBRARY.EPISODES.ALL")
+            epJson.get("items")?.forEach { ep ->
+                val epNumber = ep.get("episode_number")?.asInt() ?: 1
+                val epId = ep.get("_id")?.asText() ?: ""
+                episodesList.add(
+                    newEpisode(data = "$animeId|$epId") {
+                        this.name = "الحلقة $epNumber"
+                        this.episode = epNumber
+                        this.season = 1
+                        this.posterUrl = ep.get("thumbnail")?.asText()
+                    }
+                )
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
 
-        return newTvSeriesLoadResponse(title, url, tvType, episodes.sortedBy { it.episode }) {
-            this.posterUrl = poster
-            this.plot = description
+        return newAnimeLoadResponse(
+            name = item.get("title")?.asText() ?: "",
+            url = url,
+            type = TvType.Anime
+        ) {
+            this.posterUrl = item.get("main_picture")?.asText()
+            this.plot = item.get("synopsis")?.asText()
+            this.year = item.get("release_year")?.asInt()
+            this.rating = item.get("myAnimeList_rating")?.asText()?.toRatingInt()
+            this.tags = item.get("genreLabels")?.mapNotNull { it.get("label")?.asText() }
+            this.showStatus = when (item.get("release_status")?.asText()) {
+                "on_going" -> ShowStatus.Ongoing
+                "finished" -> ShowStatus.Completed
+                else -> null
+            }
+            this.recommendations = allRelated
+            addEpisodes(DubStatus.Subbed, episodesList)
         }
     }
 
@@ -213,382 +328,66 @@ class eishk : MainAPI() {
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
-    ): Boolean {
-        Log.d(TAG, "=== loadLinks START for: $data ===")
-
-        fun jsStringUnescape(s: String): String {
-            val regex = Regex("""\\u[0-9a-fA-F]{4}|\\x[0-9a-fA-F]{2}|\\.|\\n|\\r|\\t""")
-            return regex.replace(s) { m ->
-                val esc = m.value
-                try {
-                    when {
-                        esc.startsWith("\\x") -> esc.substring(2).toInt(16).toChar().toString()
-                        esc.startsWith("\\u") -> esc.substring(2).toInt(16).toChar().toString()
-                        esc == "\\n" -> "\n"
-                        esc == "\\r" -> "\r"
-                        esc == "\\t" -> "\t"
-                        esc == "\\'" -> "'"
-                        esc == "\\\"" -> "\""
-                        esc == "\\\\" -> "\\"
-                        else -> if (esc.length >= 2 && esc[0] == '\\') esc.substring(1) else esc
-                    }
-                } catch (_: Exception) {
-                    esc
-                }
-            }
-        }
-
-        fun intToBase36(n0: Int): String {
-            if (n0 == 0) return "0"
-            var n = n0
-            val chars = "0123456789abcdefghijklmnopqrstuvwxyz"
-            val sb = StringBuilder()
-            while (n > 0) {
-                sb.append(chars[n % 36])
-                n /= 36
-            }
-            return sb.reverse().toString()
-        }
-
-        fun parseJsStringAt(text: String, idxInit: Int): Pair<String?, Int> {
-            var idx = idxInit
-            if (idx >= text.length) return Pair(null, idx)
-            val quote = text[idx]
-            if (quote != '"' && quote != '\'') return Pair(null, idx)
-            idx += 1
-            val out = StringBuilder()
-            while (idx < text.length) {
-                val ch = text[idx]
-                if (ch == '\\') {
-                    if (idx + 1 < text.length) {
-                        out.append(text.substring(idx, idx + 2))
-                        idx += 2
-                    } else {
-                        idx++
-                    }
-                } else if (ch == quote) {
-                    val valStr = out.toString()
-                    return Pair(jsStringUnescape(valStr), idx + 1)
-                } else {
-                    out.append(ch)
-                    idx++
-                }
-            }
-            return Pair(null, idx)
-        }
-
-        fun findMatchingBrace(text: String, startIdx: Int): Int {
-            if (startIdx < 0 || startIdx >= text.length || text[startIdx] != '{') return -1
-            var depth = 0
-            var i = startIdx
-            while (i < text.length) {
-                val ch = text[i]
-                if (ch == '{') depth++
-                else if (ch == '}') {
-                    depth--
-                    if (depth == 0) return i
-                }
-                i++
-            }
-            return -1
-        }
-
-        fun unpackPackerFromEval(evalText: String): Pair<String?, String?> {
-            try {
-                val startFn = evalText.indexOf("function(p,a,c,k,e,d)")
-                if (startFn == -1) return Pair(null, "no function signature")
-                val braceOpen = evalText.indexOf('{', startFn)
-                if (braceOpen == -1) return Pair(null, "no opening brace")
-                val braceClose = findMatchingBrace(evalText, braceOpen)
-                if (braceClose == -1) return Pair(null, "no matching brace found for function body")
-                val argsStart = evalText.indexOf('(', braceClose)
-                if (argsStart == -1) return Pair(null, "no args start found")
-                var i = argsStart + 1
-                while (i < evalText.length && evalText[i].isWhitespace()) i++
-                val (pVal, newI) = parseJsStringAt(evalText, i); i = newI
-                if (pVal == null) return Pair(null, "cannot parse p string")
-                while (i < evalText.length && (evalText[i].isWhitespace() || evalText[i] == ',')) i++
-                val aMatch = Regex("""\d+""").find(evalText.substring(i))
-                if (aMatch == null) return Pair(null, "cannot parse a")
-                val aVal = aMatch.value.toInt()
-                i += aMatch.range.last + 1
-                while (i < evalText.length && (evalText[i].isWhitespace() || evalText[i] == ',')) i++
-                val cMatch = Regex("""\d+""").find(evalText.substring(i))
-                if (cMatch == null) return Pair(null, "cannot parse c")
-                val cVal = cMatch.value.toInt()
-                i += cMatch.range.last + 1
-                while (i < evalText.length && (evalText[i].isWhitespace() || evalText[i] == ',')) i++
-                val kList = mutableListOf<String>()
-                if (i < evalText.length && (evalText[i] == '"' || evalText[i] == '\'')) {
-                    val (kStr, i2) = parseJsStringAt(evalText, i)
-                    i = i2
-                    if (kStr != null) {
-                        kList.addAll(kStr.split("|"))
-                    }
-                } else {
-                    val m2 = Regex(
-                        """(['"])(.*?)\1\s*\.split\s*\(\s*['"]\|['"]\s*\)""",
-                        RegexOption.DOT_MATCHES_ALL
-                    ).find(evalText)
-                    if (m2 != null) {
-                        kList.addAll(m2.groupValues[2].split("|"))
-                    }
-                }
-
-                var p = pVal
-                for (idx in cVal - 1 downTo 0) {
-                    val key = intToBase36(idx)
-                    if (idx < kList.size && kList[idx].isNotEmpty()) {
-                        p = Regex("\\b" + Regex.escape(key) + "\\b").replace(p ?: "") { kList[idx] }
-                    }
-                }
-                return Pair(p, null)
-            } catch (e: Exception) {
-                return Pair(null, "exception:${e.message}")
-            }
-        }
-
-        fun analyzeAndSaveEvalScripts(htmlText: String): List<String> {
-            try {
-                val doc = org.jsoup.Jsoup.parse(htmlText)
-                val scripts = doc.select("script")
-                val found = mutableListOf<String>()
-                for (s in scripts) {
-                    val content = s.data().ifBlank { s.html() }
-                    if (content.contains("eval(")) {
-                        val m =
-                            Regex("""eval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*,\s*d\s*\)\s*\{""").find(
-                                content
-                            )
-                        if (m != null) {
-                            val start = m.range.first
-                            val sample = if (content.length > start + 10000) content.substring(
-                                start,
-                                start + 10000
-                            ) else content.substring(start)
-                            val (unpacked, err) = unpackPackerFromEval(sample)
-                            if (unpacked != null) {
-                                val mediaRegex = Regex(
-                                    """(https?://[^\s"']+\.(?:m3u8|mp4|webm|mov)[^\s"']*)""",
-                                    RegexOption.IGNORE_CASE
-                                )
-                                mediaRegex.findAll(unpacked)
-                                    .forEach { found.add(it.groupValues[1]) }
-                            }
-                        }
-                    }
-                }
-                return found
-            } catch (e: Exception) {
-                Log.e(TAG, "analyzeAndSaveEvalScripts error", e)
-                return emptyList()
-            }
-        }
-
-        fun getAllIframeSrcs(doc: org.jsoup.nodes.Document): List<String> {
-            return doc.select("iframe").mapNotNull { it.attr("src").ifBlank { null } }
-        }
-
-        suspend fun processSingleEmbedServer(
-            embedUrl: String,
-            refererFromPrevPage: String,
-            headersBase: Map<String, String>,
-            serverLabel: String = "unknown"
-        ): Set<String> {
-            val result = mutableSetOf<String>()
-            try {
-                val hdrs = headersBase.toMutableMap()
-                hdrs["Referer"] = refererFromPrevPage
-                val rIf1 = try {
-                    app.get(embedUrl, referer = refererFromPrevPage, headers = hdrs)
-                } catch (e: Exception) {
-                    Log.w(TAG, "GET embed $embedUrl failed", e)
-                    return result
-                }
-                val text1 = rIf1.text
-
-                Regex(
-                    """(https?://[^\s"']+\.(?:m3u8|mp4|webm|mov)[^\s"']*)""",
-                    RegexOption.IGNORE_CASE
-                ).findAll(text1)
-                    .forEach { result.add(it.groupValues[1]) }
-
-                analyzeAndSaveEvalScripts(text1).forEach { result.add(it) }
-
-                val docIf1 = rIf1.document
-                val iframe1Srcs = getAllIframeSrcs(docIf1)
-                if (iframe1Srcs.isNotEmpty()) {
-                    val iframe2Src = iframe1Srcs[0]
-                    val hdrs2 = hdrs.toMutableMap()
-                    hdrs2["Referer"] = embedUrl
-                    val rFinal = try {
-                        app.get(iframe2Src, referer = embedUrl, headers = hdrs2)
-                    } catch (e: Exception) {
-                        Log.w(TAG, "GET nested iframe $iframe2Src failed", e)
-                        null
-                    }
-                    if (rFinal != null) {
-                        val t = rFinal.text
-                        Regex(
-                            """(https?://[^\s"']+\.(?:m3u8|mp4|webm|mov)[^\s"']*)""",
-                            RegexOption.IGNORE_CASE
-                        ).findAll(t)
-                            .forEach { result.add(it.groupValues[1]) }
-                        analyzeAndSaveEvalScripts(t).forEach { result.add(it) }
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "processSingleEmbedServer exception", e)
-            }
-            return result
-        }
-
+    ): Boolean = withContext(Dispatchers.IO) {
         try {
+            val parts = data.split('|')
+            if (parts.size < 2) return@withContext false
+            val animeId = parts[0]
+            val episodeId = parts[1]
 
-            Log.d(TAG, "STEP: GET initial page: $data")
-            val r0 = try {
-                app.get(data, headers = headers)
-            } catch (e: Exception) {
-                Log.e(TAG, "Initial GET failed", e); return false
+            val sourceUrl = "$gatewayBaseUrl/library/episode/sources"
+            val body = mapOf("animeId" to animeId, "episodeId" to episodeId, "episode_number" to 1)
+            val json = apiCall(sourceUrl, "ANIME.LIBRARY.EPISODES.SOURCES.ALL", method = "POST", body = body)
+
+            val serverList = mutableListOf<Pair<JsonNode, String>>()
+
+            json.get("items")?.forEach { src ->
+                val qualities = src.get("qualities")
+                val quality = if (qualities != null && qualities.size() > 0) qualities.get(0).asText() else "Unknown"
+                serverList.add(Pair(src, quality))
             }
 
-            r0.text.chunked(3000).forEachIndexed { i, ch ->
-                Log.d(
-                    TAG,
-                    "initial page chunk ${i + 1}/${(r0.text.length + 2999) / 3000}: $ch"
-                )
-            }
+            val sortedServers = serverList.sortedByDescending { getQualityFromName(it.second) }
 
-            val soup0 = r0.document
-            var watchForm = soup0.selectFirst("button.single-watch-btn")
-                ?.let { it.parent() } // قد لا يكون دقيقًا، لذلك fallback
-            if (watchForm == null) {
-                for (f in soup0.select("form")) {
-                    val act = f.attr("action")
-                    if (act.contains("3isk") || act.contains("aa.3isk") || act.contains("watch")) {
-                        watchForm = f
-                        break
-                    }
+            for ((src, quality) in sortedServers) {
+                val serverName = src.get("server_name")?.asText() ?: "Unknown"
+                val provider = src.get("provider")?.asText() ?: ""
+                val subTitle = src.get("sub_title")?.asText() ?: ""
+                val srcId = src.get("_id")?.asText() ?: ""
+
+                val link = when (provider) {
+                    "streamtape" -> "https://streamtape.com/v/$srcId"
+                    "animeworld_realtime" -> "https://animeworld.tv/embed/$srcId"
+                    "anineko_realtime" -> "https://anineko.tv/embed/$srcId"
+                    else -> "$gatewayBaseUrl/stream/$srcId"
                 }
-            }
-            if (watchForm == null) {
-                Log.e(TAG, "No watch form found on initial page. Dumping HTML for debug.")
-                r0.text.chunked(3000)
-                    .forEachIndexed { i, ch -> Log.d(TAG, "initial page chunk ${i + 1}: $ch") }
-                return false
-            }
-            val firstPostUrl = watchForm.attr("action")
-            val firstFormData = watchForm.select("input[type=hidden]")
-                .associate { it.attr("name") to it.attr("value") }.toMutableMap()
-
-            val watchBtn = soup0.selectFirst("button.single-watch-btn")
-            if (watchBtn != null) {
-                val btnName = watchBtn.attr("name")
-                if (btnName.isNotBlank()) firstFormData[btnName] = watchBtn.attr("value")
-            }
-            Log.d(TAG, "STEP: POST 1 -> $firstPostUrl (fields=${firstFormData.size})")
-            headers.toMutableMap()["Referer"] = data
-            val r1 = try {
-                app.post(firstPostUrl, data = firstFormData, referer = data, headers = headers)
-            } catch (e: Exception) {
-                Log.e(TAG, "POST first failed to $firstPostUrl", e); return false
-            }
-            Log.d(TAG, "POST1 response length=${r1.text.length}")
-            r1.text.chunked(3000)
-                .forEachIndexed { i, ch -> Log.d(TAG, "post1 chunk ${i + 1}: $ch") }
-            val mMyurl = Regex("""var\s+myUrl\s*=\s*["']([^"']+)["']""").find(r1.text)
-            val mNews = Regex("""myInput\.value\s*=\s*["']([^"']+)["']""").find(r1.text)
-            if (mMyurl == null || mNews == null) {
-                Log.e(TAG, "Failed to extract myUrl or news from POST1 response. Dumping response.")
-                r1.text.chunked(3000)
-                    .forEachIndexed { i, ch -> Log.d(TAG, "post1 chunk ${i + 1}: $ch") }
-                return false
-            }
-            val nextPost = mMyurl.groupValues[1]
-            val newsVal = mNews.groupValues[1]
-            Log.d(TAG, "STEP: nextPost=$nextPost , newsVal length=${newsVal.length}")
-            val post2Data = mapOf("news" to newsVal, "u" to "", "submit" to "submit")
-            val r2 = try {
-                app.post(nextPost, data = post2Data, referer = r1.url, headers = headers)
-            } catch (e: Exception) {
-                Log.e(TAG, "POST2 failed to $nextPost", e); return false
-            }
-            Log.d(TAG, "POST2 response length=${r2.text.length}")
-            r2.text.chunked(3000)
-                .forEachIndexed { i, ch -> Log.d(TAG, "post2 chunk ${i + 1}: $ch") }
-            val soup2 = r2.document
-            val iframeSrcsOnR2 = getAllIframeSrcs(soup2)
-            Log.d(TAG, "STEP: found ${iframeSrcsOnR2.size} iframe(s) on r2")
-            if (iframeSrcsOnR2.isEmpty()) {
-                Log.e(TAG, "No iframe found on page after POST2")
-                return false
-            }
-            val baseIframeSrc = iframeSrcsOnR2[0]
-            Log.d(TAG, "Base iframe src: $baseIframeSrc")
-
-            val foundAllMediaLinks = mutableMapOf<String, MutableSet<String>>()
-            val embedMatch = Regex("""(https://3esk\.onl/embed/)(\d+)/(.*)""").find(baseIframeSrc)
-            if (embedMatch != null) {
-                val baseUrlPrefix = embedMatch.groupValues[1]
-                val trailingPart = embedMatch.groupValues[3]
-                Log.d(TAG, "Processing embed servers 1..5 (trailing=$trailingPart)")
-                val maxServersToCheck = 5
-                for (serverNum in 1..maxServersToCheck) {
-                    val currentEmbedUrl = "$baseUrlPrefix$serverNum/$trailingPart"
-                    Log.d(TAG, "Checking embed server $serverNum -> $currentEmbedUrl")
-                    val mediaLinks = processSingleEmbedServer(
-                        currentEmbedUrl,
-                        r2.url,
-                        headers,
-                        serverLabel = serverNum.toString()
-                    )
-                    if (mediaLinks.isNotEmpty()) {
-                        Log.d(TAG, "  -> found ${mediaLinks.size} link(s) on server $serverNum")
-                        mediaLinks.forEach { link ->
-                            foundAllMediaLinks.getOrPut(link) { mutableSetOf() }
-                                .add(serverNum.toString())
-                        }
-                    } else {
-                        Log.d(TAG, "  -> no links on server $serverNum")
-                    }
-                }
-            } else {
-                Log.d(TAG, "Embed pattern didn't match; processing base iframe directly")
-                val mediaLinks =
-                    processSingleEmbedServer(baseIframeSrc, r2.url, headers, serverLabel = "base")
-                if (mediaLinks.isNotEmpty()) {
-                    mediaLinks.forEach {
-                        foundAllMediaLinks.getOrPut(it) { mutableSetOf() }.add("base")
-                    }
-                }
-            }
-            if (foundAllMediaLinks.isEmpty()) {
-                Log.e(TAG, "No media links were extracted from any embed servers.")
-                return false
-            }
-            for ((link, servers) in foundAllMediaLinks) {
-                Log.d(TAG, "EXTRACTED: $link (servers=${servers.joinToString(",")})")
 
                 try {
+                    loadExtractor(link, mainUrl, subtitleCallback, callback)
+                } catch (e: Exception) {
                     callback.invoke(
                         newExtractorLink(
-                            source = this.name,
-                            name = this.name,
+                            source = name,
+                            name = "$serverName - $subTitle",
                             url = link,
-                            type = ExtractorLinkType.M3U8
-                        ) {
-                            this.quality = Qualities.Unknown.value
+                            ){
+                            referer = mainUrl
+                            this.quality = getQualityFromName(quality)
+            
                         }
                     )
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error sending link to player: ${e.message}")
                 }
             }
-            return true
-
+            return@withContext true
         } catch (e: Exception) {
-            Log.e(TAG, "Unexpected error in loadLinks", e)
-            return false
+            e.printStackTrace()
+            return@withContext false
         }
-    } // ← إغلاق try الرئيسي
-} // ← إغلاق دالة loadLinks بالكامل
+    }
+
+    private fun getQualityFromName(quality: String?): Int {
+        if (quality == null) return Qualities.Unknown.value
+        val digits = quality.filter { it.isDigit() }
+        return digits.toIntOrNull() ?: Qualities.Unknown.value
+    }
+}
