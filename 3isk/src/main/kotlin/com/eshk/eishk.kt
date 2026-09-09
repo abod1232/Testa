@@ -34,8 +34,6 @@ class eishk : MainAPI() {
     private var deviceId: String? = null
 
     private val mapper = ObjectMapper()
-
-    // دالة Base64 متوافقة مع Android API 21+
     private fun base64UrlEncode(bytes: ByteArray): String {
         return Base64.encodeToString(
             bytes,
@@ -281,8 +279,6 @@ class eishk : MainAPI() {
                 }
             )
         }
-
-        // جلب الحلقات مباشرة داخل دالة load
         val episodesList = mutableListOf<Episode>()
         try {
             val episodeUrl = "$gatewayBaseUrl/library/episodes/$animeId?sort_by_latest=1&with_arcs=true&with_favorites=true"
