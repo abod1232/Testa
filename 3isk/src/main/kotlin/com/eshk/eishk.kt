@@ -13,15 +13,12 @@ import java.text.SimpleDateFormat
 import java.util.*
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
-import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
-import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
 
 class eishk : MainAPI() {
     override var mainUrl = "https://gateway.anime-rift.com"
     override var name = "AnimeRift"
     override var lang = "ar"
     override val hasMainPage = true
-
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Anime)
 
@@ -30,15 +27,14 @@ class eishk : MainAPI() {
     private val FIREBASE_APP_ID = "1:536921039715:android:78825c96b74de921b8e956"
     private val ANDROID_PACKAGE = "com.riftapps.animerift"
     private val ANDROID_CERT = "AF40CE82A52AA4107F311D8B9727D01C8D02250B"
-    private val PREF_FID = "anime_rift_fid"
-    private val PREF_FB_TOKEN = "anime_rift_fb_token"
-    private val PREF_GATEWAY_URL = "anime_rift_gateway_url"
-    private val PREF_SESSION_KEY = "anime_rift_session_key"
 
-    private var fid: String? = null
-    private var firebaseToken: String? = null
-    private var gatewayBaseUrl: String? = null
-    private var sessionKey: String? = null
+    // تخزين البيانات في ذاكرة الـ Companion Object لتبقى حية طوال تشغيل التطبيق
+    companion object {
+        private var fid: String? = null
+        private var firebaseToken: String? = null
+        private var gatewayBaseUrl: String? = null
+        private var sessionKey: String? = null
+    }
 
     private val mapper = ObjectMapper()
 
@@ -79,27 +75,16 @@ class eishk : MainAPI() {
         java.util.zip.GZIPOutputStream(bos).use { it.write(data.toByteArray()) }
         return bos.toByteArray()
     }
-    private suspend fun ensureInitialized(forceRefresh: Boolean = false) {
-        if (!forceRefresh) {
-            if (fid != null && gatewayBaseUrl != null && firebaseToken != null) return
-            fid = getKey(PREF_FID)
-            firebaseToken = getKey(PREF_FB_TOKEN)
-            gatewayBaseUrl = getKey(PREF_GATEWAY_URL)
-            sessionKey = getKey(PREF_SESSION_KEY)
 
-            if (!fid.isNullOrEmpty() && !gatewayBaseUrl.isNullOrEmpty() && !firebaseToken.isNullOrEmpty() ) {
-                return
-            }
+    private suspend fun ensureInitialized(forceRefresh: Boolean = false) {
+        if (!forceRefresh && fid != null && gatewayBaseUrl != null && firebaseToken != null) {
+            return // البيانات موجودة في الذاكرة بالفعل، لا نرسل أي طلبات
         }
+
         withContext(Dispatchers.IO) {
             registerFirebaseInstallation()
             fetchRemoteConfig()
             registerDevice()
-
-            setKey(PREF_FID, fid)
-            setKey(PREF_FB_TOKEN, firebaseToken)
-            setKey(PREF_GATEWAY_URL, gatewayBaseUrl)
-            setKey(PREF_SESSION_KEY, sessionKey)
         }
     }
 
@@ -156,7 +141,6 @@ class eishk : MainAPI() {
         val baseUrl = gatewayBaseUrl ?: mainUrl
         val url = "$baseUrl/auth/register/device"
 
-
         val payload = mapOf(
             "current_app_version" to "3.13.5",
             "device_os" to "android",
@@ -170,10 +154,10 @@ class eishk : MainAPI() {
         val json = apiCall(url, "USER.AUTH.DEVICE.REGISTER", "POST", payload)
         sessionKey = json.get("sessionKey")?.asText()
     }
+
     private suspend fun apiCall(url: String, scope: String, method: String = "GET", body: Map<String, Any?>? = null, isRetry: Boolean = false): JsonNode {
         ensureInitialized()
         val integrityToken = generateIntegrityToken(scope)
-        val timezone = generateDeviceTimezone()
 
         val headers = mapOf(
             "user-agent" to "Dart/3.10 (dart:io)",
