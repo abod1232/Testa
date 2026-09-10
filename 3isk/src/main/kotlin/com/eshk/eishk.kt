@@ -29,8 +29,6 @@ class eishk : MainAPI() {
     private val FIREBASE_APP_ID = "1:536921039715:android:78825c96b74de921b8e956"
     private val ANDROID_PACKAGE = "com.riftapps.animerift"
     private val ANDROID_CERT = "AF40CE82A52AA4107F311D8B9727D01C8D02250B"
-
-    // ذاكرة دائمة (RAM + Disk Cache) لحفظ الجلسة
     companion object {
         private var fid: String? = null
         private var firebaseToken: String? = null
@@ -112,16 +110,11 @@ class eishk : MainAPI() {
         java.util.zip.GZIPOutputStream(bos).use { it.write(data.toByteArray()) }
         return bos.toByteArray()
     }
-
-    // فحص الذاكرة والقرص وتجديد البيانات فقط عند الحاجة
     private suspend fun ensureInitialized(forceRefresh: Boolean = false) {
         if (!forceRefresh) {
-            // 1. فحص الـ RAM
             if (!fid.isNullOrEmpty() && !gatewayBaseUrl.isNullOrEmpty() && !firebaseToken.isNullOrEmpty() && !deviceId.isNullOrEmpty()) {
                 return
             }
-
-            // 2. فحص التخزين على القرص
             val disk = loadFromDisk()
             if (disk != null) {
                 fid = disk["fid"]
@@ -135,8 +128,6 @@ class eishk : MainAPI() {
                 }
             }
         }
-
-        // 3. الاتصال بسيرفرات Firebase وحفظ البيانات بشكل دائم
         withContext(Dispatchers.IO) {
             registerFirebaseInstallation()
             fetchRemoteConfig()
@@ -269,7 +260,6 @@ class eishk : MainAPI() {
             }
             return response.parsed<JsonNode>()
         } catch (e: Exception) {
-            // تجديد البيانات تلقائياً في حال انتهاء صلاحية الجلسة
             if (!isRetry && (e.message?.contains("401") == true || e.message?.contains("403") == true)) {
                 ensureInitialized(forceRefresh = true)
                 return apiCall(url, scope, method, body, isRetry = true)
