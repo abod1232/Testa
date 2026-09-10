@@ -30,8 +30,6 @@ class eishk : MainAPI() {
     private val FIREBASE_APP_ID = "1:536921039715:android:78825c96b74de921b8e956"
     private val ANDROID_PACKAGE = "com.riftapps.animerift"
     private val ANDROID_CERT = "AF40CE82A52AA4107F311D8B9727D01C8D02250B"
-
-    // مفاتيح التخزين الدائم
     private val PREF_FID = "anime_rift_fid"
     private val PREF_FB_TOKEN = "anime_rift_fb_token"
     private val PREF_GATEWAY_URL = "anime_rift_gateway_url"
@@ -81,13 +79,9 @@ class eishk : MainAPI() {
         java.util.zip.GZIPOutputStream(bos).use { it.write(data.toByteArray()) }
         return bos.toByteArray()
     }
-
-    // دالة التهيئة الذكية: تقرأ من التخزين الدائم وتطلب البيانات فقط إذا لم تكن موجودة
     private suspend fun ensureInitialized(forceRefresh: Boolean = false) {
         if (!forceRefresh) {
             if (fid != null && gatewayBaseUrl != null && firebaseToken != null) return
-
-            // استرجاع البيانات من الذاكرة الدائمة للتطبيق
             fid = getKey(PREF_FID)
             firebaseToken = getKey(PREF_FB_TOKEN)
             gatewayBaseUrl = getKey(PREF_GATEWAY_URL)
@@ -97,8 +91,6 @@ class eishk : MainAPI() {
                 return
             }
         }
-
-        // جلب البيانات من السيرفر وحفظها بشكل دائم في حال كانت فارغة أو طُلب التجديد
         withContext(Dispatchers.IO) {
             registerFirebaseInstallation()
             fetchRemoteConfig()
@@ -178,8 +170,6 @@ class eishk : MainAPI() {
         val json = apiCall(url, "USER.AUTH.DEVICE.REGISTER", "POST", payload)
         sessionKey = json.get("sessionKey")?.asText()
     }
-
-    // دالة API مع ميزة التجديد التلقائي عند حدوث خطأ في الصلاحيات
     private suspend fun apiCall(url: String, scope: String, method: String = "GET", body: Map<String, Any?>? = null, isRetry: Boolean = false): JsonNode {
         ensureInitialized()
         val integrityToken = generateIntegrityToken(scope)
@@ -207,7 +197,6 @@ class eishk : MainAPI() {
             }
             return response.parsed<JsonNode>()
         } catch (e: Exception) {
-            // إذا كان الخطأ متعلقاً بانتهاء صلاحية التوكن، نجدد البيانات لمرة واحدة تلقائياً
             if (!isRetry && (e.message?.contains("401") == true || e.message?.contains("403") == true)) {
                 ensureInitialized(forceRefresh = true)
                 return apiCall(url, scope, method, body, isRetry = true)
