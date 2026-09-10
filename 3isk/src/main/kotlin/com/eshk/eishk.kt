@@ -24,11 +24,11 @@ class eishk : MainAPI() {
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Anime)
 
-    private val JWT_SECRET = "e6c9e1af5c6e3e1f0664947361d954e7446d56dc9a7aa9ae4a62df8d7b919cd1"
-    private val FIREBASE_API_KEY = "AIzaSyBiLkiGEm7ruugny3tDFHEZvqli8yv1k7I"
-    private val FIREBASE_APP_ID = "1:536921039715:android:78825c96b74de921b8e956"
-    private val ANDROID_PACKAGE = "com.riftapps.animerift"
-    private val ANDROID_CERT = "AF40CE82A52AA4107F311D8B9727D01C8D02250B"
+private val JWT_SECRET = "RIFT_JWT_SECRET_PLACEHOLDER"
+    private val FIREBASE_API_KEY = "RIFT_FIREBASE_API_KEY_PLACEHOLDER"
+    private val FIREBASE_APP_ID = "RIFT_FIREBASE_APP_ID_PLACEHOLDER"
+    private val ANDROID_PACKAGE = "RIFT_ANDROID_PACKAGE_PLACEHOLDER"
+    private val ANDROID_CERT = "RIFT_ANDROID_CERT_PLACEHOLDER"
     companion object {
         private var fid: String? = null
         private var firebaseToken: String? = null
