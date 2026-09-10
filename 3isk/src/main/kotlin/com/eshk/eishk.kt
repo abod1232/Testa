@@ -527,8 +527,6 @@ class eishk : MainAPI() {
                             "sessionId" to sessionId
                         )
                         val directLinkJson = apiCall(directLinkUrl, "ANIME.LIBRARY.EPISODES.SOURCES.DIRECT_LINK", method = "POST", body = directLinkBody)
-
-                        // 1. استخراج ملفات الترجمة
                         directLinkJson.get("tracks")?.forEach { track ->
                             val trackUrl = track.get("file")?.asText() ?: track.get("url")?.asText()
                             val trackLang = track.get("label")?.asText() ?: track.get("language")?.asText() ?: "Arabic"
@@ -536,8 +534,6 @@ class eishk : MainAPI() {
                                 subtitleCallback(SubtitleFile(trackLang, trackUrl))
                             }
                         }
-
-                        // 2. الروابط المباشرة (VRV / CR2)
                         if (directLinkJson.get("url_response")?.asBoolean() == true) {
                             val videoUrl = directLinkJson.get("videoUrl")?.asText()
 
@@ -572,7 +568,6 @@ class eishk : MainAPI() {
                                 )
                             }
                         } 
-                        // 3. معالجة Streamtape مع سجلات الطباعة المفصلة
                         else if (directLinkJson.get("ticket_response")?.asBoolean() == true) {
                             val fileId = directLinkJson.get("fileId")?.asText() ?: ""
                             val ticket = directLinkJson.get("ticket")?.asText() ?: ""
