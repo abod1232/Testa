@@ -18,6 +18,7 @@ class eishk : MainAPI() {
     override var mainUrl = "https://gateway.anime-rift.com"
     override var name = "أنمي ريفت"
     override val hasMainPage = true
+    override val hasSearch = true
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Anime)
 
@@ -34,6 +35,7 @@ class eishk : MainAPI() {
     private var deviceId: String? = null
 
     private val mapper = ObjectMapper()
+
     private fun base64UrlEncode(bytes: ByteArray): String {
         return Base64.encodeToString(
             bytes,
@@ -145,8 +147,7 @@ class eishk : MainAPI() {
             "supportedAbis" to listOf("arm64-v8a"),
             "tags" to "release-keys",
             "type" to "user",
-            "host" to "kvm-slave-build-s-system-12107393",
-            
+            "host" to "kvm-slave-build-s-system-12107393"
         )
 
         val payload = mapOf(
@@ -197,7 +198,6 @@ class eishk : MainAPI() {
         return response.parsed<JsonNode>()
     }
 
-    // 1. تعريف الفئات الرئيسية وروابط الفرز الخاصة بها
     override val mainPage = mainPageOf(
         "sort_by=recently_updated&sort_direction=-1&filter_by=recent_releases" to "الإصدارات الحديثة",
         "sort_by=popularity&sort_direction=-1&filter_by=all" to "الأكثر شعبية",
@@ -205,11 +205,8 @@ class eishk : MainAPI() {
         "sort_by=created_at&sort_direction=-1&filter_by=all" to "أحدث الأنميات المضافة"
     )
 
-    // 2. دالة جلب محتوى الفئات مع دعم التمرير اللانهائي (Pagination)
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         ensureInitialized()
-        
-        // Cloudstream يبدأ الصفحات من 1 بينما السيرفر يبدأ من 0
         val apiPage = page - 1
         val filterQuery = request.data
         val url = "$gatewayBaseUrl/library/all?page=$apiPage&$filterQuery&text_direction=jp"
@@ -236,7 +233,6 @@ class eishk : MainAPI() {
             )
         }
 
-        // قراءة hasNext لمعرفة هل يسمح بالتمرير لصفحة جديدة أم لا
         val hasNext = json.get("hasNext")?.asBoolean() ?: false
         
         return newHomePageResponse(
@@ -254,7 +250,7 @@ class eishk : MainAPI() {
         val allResults = mutableListOf<SearchResponse>()
         var currentPage = 0
         var hasNext = true
-        val maxPages = 4 // حد أقصى 4 صفحات (حتى 120 نتيجة بحث) لضمان السرعة
+        val maxPages = 4
 
         while (hasNext && currentPage < maxPages) {
             val url = "$gatewayBaseUrl/library/search?page=$currentPage&sort_by=release_year&sort_direction=1&text_direction=jp"
@@ -274,7 +270,6 @@ class eishk : MainAPI() {
                     )
                 }
 
-                // قراءة حقل hasNext من رد السيرفر لمعرفة هل توجد صفحات أخرى
                 hasNext = json.get("hasNext")?.asBoolean() ?: false
                 currentPage++
             } catch (e: Exception) {
@@ -305,6 +300,7 @@ class eishk : MainAPI() {
                 }
             )
         }
+
         val episodesList = mutableListOf<Episode>()
         try {
             val episodeUrl = "$gatewayBaseUrl/library/episodes/$animeId?sort_by_latest=1&with_arcs=true&with_favorites=true"
@@ -313,13 +309,13 @@ class eishk : MainAPI() {
                 val epNumber = ep.get("episode_number")?.asInt() ?: 1
                 val epId = ep.get("_id")?.asText() ?: ""
                 episodesList.add(
-            newEpisode(data = "$animeId|$epId|$epNumber") {
-                this.name = "الحلقة $epNumber"
-                this.episode = epNumber
-                this.season = 1
-                this.posterUrl = ep.get("thumbnail")?.asText()
-               }
-              )
+                    newEpisode(data = "$animeId|$epId|$epNumber") {
+                        this.name = "الحلقة $epNumber"
+                        this.episode = epNumber
+                        this.season = 1
+                        this.posterUrl = ep.get("thumbnail")?.asText()
+                    }
+                )
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -343,9 +339,8 @@ class eishk : MainAPI() {
             addEpisodes(DubStatus.Subbed, episodesList)
         }
     }
-    
 
-   override suspend fun loadLinks(
+    override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
@@ -366,79 +361,7 @@ class eishk : MainAPI() {
             )
             val sourcesJson = apiCall(sourcesUrl, "ANIME.LIBRARY.EPISODES.SOURCES.ALL", method = "POST", body = sourcesBody)
             val items = sourcesJson.get("items") ?: return@withContext false
-            val priorityProviders = listOf("cr2", "rift-streamer", "streamtape")
-            val filteredItems = items.filter { src ->
-                val subTitle = src.get("sub_title")?.asText() ?: ""
-                subTitle.startsWith("ar_") || subTitle.isEmpty()
-            }.ifEmpty { items.toList() }
 
-            val sortedItems = filteredItems.sortedBy { src ->
-                val provider = src.get("provider")?.asText() ?: ""
-                val index = priorityProviders.indexOf(provider)
-                if (index != -1) index else 99
-            }.take(6)
-
-            sortedItems.forEach { src ->
-                val hostId = src.get("_id")?.asText() ?: return@forEach
-                val serverName = src.get("server_name")?.asText() ?: "Server"
-                val provider = src.get("provider")?.asText() ?: ""
-                val subTitle = src.get("sub_title")?.asText() ?: ""
-                val qualitiesNode = src.get("qualities")
-                val qualitiesList = if (qualitiesNode != null && qualitiesNode.isArray && qualitiesNode.size() > 0) {
-                    qualitiesNode.map { it.asText() }
-                } else {
-                    listOf("720P")
-                }
-                for (quality in qualitiesList) {
-                    try {
-                        val canPlayUrl = "$gatewayBaseUrl/library/episode/source/can_play"
-                        val canPlayBody = mapOf(
-                            "episodeId" to episodeId,
-                            "hostId" to hostId,
-                            "is_download" to false,
-                            "event_name" to "play_episode_unlocked"
-                        )
-                        val canPlayJson = apiCall(canPlayUrl, "ANIME.LIBRARY.EPISODES.SOURCES.CHECK_AVAILABILITY", method = "POST", body = canPlayBody)
-                        val sessionId = canPlayJson.get("sessionId")?.asText() ?: ""
-                        
-                        val claimUrl = "$gatewayBaseUrl/ads_manager/claim"
-                        val claimBody = mapOf(
-                            "event_name" to "play_episode_unlocked",
-                            "hostId" to hostId,
-                            "episodeId" to episodeId,
-                            "transactionRef" to "${System.currentTimeMillis()}_${Random().nextInt(99999999)}",
-                            "reward_result" to "not_filled",
-                            "streamingServerKey" to provider,
-                            "is_optional" to false,
-                            "is_reward" to true
-                        )
-                        try {
-                            apiCall(claimUrl, "USER.ADS_MANAGER.CLAIMS", method = "PUT", body = claimBody)
-                        } catch (_: Exception) {}
-override suspend fun loadLinks(
-        data: String,
-        isCasting: Boolean,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val parts = data.split('|')
-            if (parts.size < 2) return@withContext false
-            val animeId = parts[0]
-            val episodeId = parts[1]
-            val episodeNumber = parts.getOrNull(2)?.toIntOrNull() ?: 1
-            
-            // 1. طلب قائمة السيرفرات
-            val sourcesUrl = "$gatewayBaseUrl/library/episode/sources"
-            val sourcesBody = mapOf(
-                "animeId" to animeId,
-                "episodeId" to episodeId,
-                "episode_number" to episodeNumber
-            )
-            val sourcesJson = apiCall(sourcesUrl, "ANIME.LIBRARY.EPISODES.SOURCES.ALL", method = "POST", body = sourcesBody)
-            val items = sourcesJson.get("items") ?: return@withContext false
-
-            // 2. فلترة السيرفرات العربية
             val priorityProviders = listOf("cr2", "rift-streamer", "streamtape")
             val filteredItems = items.filter { src ->
                 val subTitle = src.get("sub_title")?.asText() ?: ""
@@ -466,7 +389,6 @@ override suspend fun loadLinks(
 
                 for (quality in qualitiesList) {
                     try {
-                        // أ. فحص إمكانية التشغيل
                         val canPlayUrl = "$gatewayBaseUrl/library/episode/source/can_play"
                         val canPlayBody = mapOf(
                             "episodeId" to episodeId,
@@ -477,7 +399,6 @@ override suspend fun loadLinks(
                         val canPlayJson = apiCall(canPlayUrl, "ANIME.LIBRARY.EPISODES.SOURCES.CHECK_AVAILABILITY", method = "POST", body = canPlayBody)
                         val sessionId = canPlayJson.get("sessionId")?.asText() ?: ""
                         
-                        // ب. تأكيد تخطي الإعلان
                         val claimUrl = "$gatewayBaseUrl/ads_manager/claim"
                         val claimBody = mapOf(
                             "event_name" to "play_episode_unlocked",
@@ -493,7 +414,6 @@ override suspend fun loadLinks(
                             apiCall(claimUrl, "USER.ADS_MANAGER.CLAIMS", method = "PUT", body = claimBody)
                         } catch (_: Exception) {}
                         
-                        // ج. طلب الرابط المباشر
                         val directLinkUrl = "$gatewayBaseUrl/library/episode/source/direct_link"
                         val directLinkBody = mapOf(
                             "id" to hostId,
@@ -503,7 +423,6 @@ override suspend fun loadLinks(
                         )
                         val directLinkJson = apiCall(directLinkUrl, "ANIME.LIBRARY.EPISODES.SOURCES.DIRECT_LINK", method = "POST", body = directLinkBody)
 
-                        // الحالة 1: روابط VRV / CR2 المباشرة (url_response)
                         if (directLinkJson.get("url_response")?.asBoolean() == true) {
                             val videoUrl = directLinkJson.get("videoUrl")?.asText()
 
@@ -537,9 +456,7 @@ override suspend fun loadLinks(
                                     }
                                 )
                             }
-                        } 
-                        // الحالة 2: روابط Streamtape عبر التذكرة الرسمية (ticket_response)
-                        else if (directLinkJson.get("ticket_response")?.asBoolean() == true) {
+                        } else if (directLinkJson.get("ticket_response")?.asBoolean() == true) {
                             val fileId = directLinkJson.get("fileId")?.asText() ?: ""
                             val ticket = directLinkJson.get("ticket")?.asText() ?: ""
 
