@@ -19,6 +19,7 @@ class eishk : MainAPI() {
     override var name = "أنمي ريفت"
     override var lang = "ar"
     override val hasMainPage = true
+    override val hasSearch = true
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Anime)
 
@@ -28,9 +29,16 @@ class eishk : MainAPI() {
     private val ANDROID_PACKAGE = "com.riftapps.animerift"
     private val ANDROID_CERT = "AF40CE82A52AA4107F311D8B9727D01C8D02250B"
 
-    private lateinit var fid: String
-    private lateinit var firebaseToken: String
-    private lateinit var gatewayBaseUrl: String
+    // مفاتيح التخزين الدائم
+    private val PREF_FID = "anime_rift_fid"
+    private val PREF_FB_TOKEN = "anime_rift_fb_token"
+    private val PREF_GATEWAY_URL = "anime_rift_gateway_url"
+    private val PREF_DEVICE_ID = "anime_rift_device_id"
+    private val PREF_SESSION_KEY = "anime_rift_session_key"
+
+    private var fid: String? = null
+    private var firebaseToken: String? = null
+    private var gatewayBaseUrl: String? = null
     private var sessionKey: String? = null
     private var deviceId: String? = null
 
@@ -74,12 +82,34 @@ class eishk : MainAPI() {
         return bos.toByteArray()
     }
 
-    private suspend fun ensureInitialized() {
-        if (this::fid.isInitialized && this::gatewayBaseUrl.isInitialized) return
+    // دالة التهيئة الذكية: تقرأ من التخزين الدائم وتطلب البيانات فقط إذا لم تكن موجودة
+    private suspend fun ensureInitialized(forceRefresh: Boolean = false) {
+        if (!forceRefresh) {
+            if (fid != null && gatewayBaseUrl != null && deviceId != null && firebaseToken != null) return
+
+            // استرجاع البيانات من الذاكرة الدائمة للتطبيق
+            fid = getKey(PREF_FID)
+            firebaseToken = getKey(PREF_FB_TOKEN)
+            gatewayBaseUrl = getKey(PREF_GATEWAY_URL)
+            deviceId = getKey(PREF_DEVICE_ID)
+            sessionKey = getKey(PREF_SESSION_KEY)
+
+            if (!fid.isNullOrEmpty() && !gatewayBaseUrl.isNullOrEmpty() && !firebaseToken.isNullOrEmpty() && !deviceId.isNullOrEmpty()) {
+                return
+            }
+        }
+
+        // جلب البيانات من السيرفر وحفظها بشكل دائم في حال كانت فارغة أو طُلب التجديد
         withContext(Dispatchers.IO) {
             registerFirebaseInstallation()
             fetchRemoteConfig()
             registerDevice()
+
+            setKey(PREF_FID, fid)
+            setKey(PREF_FB_TOKEN, firebaseToken)
+            setKey(PREF_GATEWAY_URL, gatewayBaseUrl)
+            setKey(PREF_DEVICE_ID, deviceId)
+            setKey(PREF_SESSION_KEY, sessionKey)
         }
     }
 
@@ -135,7 +165,8 @@ class eishk : MainAPI() {
     }
 
     private suspend fun registerDevice() {
-        val url = "$gatewayBaseUrl/auth/register/device"
+        val baseUrl = gatewayBaseUrl ?: mainUrl
+        val url = "$baseUrl/auth/register/device"
         val fcmToken = generateFcmToken()
         deviceId = "$fid:$fcmToken"
 
@@ -167,8 +198,9 @@ class eishk : MainAPI() {
         sessionKey = json.get("sessionKey")?.asText()
     }
 
-    private suspend fun apiCall(url: String, scope: String, method: String = "GET", body: Map<String, Any?>? = null): JsonNode {
-        if (!this::fid.isInitialized && !url.contains("installations")) ensureInitialized()
+    // دالة API مع ميزة التجديد التلقائي عند حدوث خطأ في الصلاحيات
+    private suspend fun apiCall(url: String, scope: String, method: String = "GET", body: Map<String, Any?>? = null, isRetry: Boolean = false): JsonNode {
+        ensureInitialized()
         val integrityToken = generateIntegrityToken(scope)
         val timezone = generateDeviceTimezone()
 
@@ -182,7 +214,7 @@ class eishk : MainAPI() {
             "x-installation-source" to "IS_INSTALLED_FROM_PLAY_PACKAGE_INSTALLER",
             "integrity" to "Bearer $integrityToken",
             "accept" to "application/json",
-            "x-firebase-id" to (if (this::fid.isInitialized) fid else ""),
+            "x-firebase-id" to (fid ?: ""),
             "x-device-id" to (deviceId ?: ""),
             "x-device-timezone" to timezone,
             "x-device-language" to "ar",
@@ -190,12 +222,21 @@ class eishk : MainAPI() {
             "x-os" to "android"
         )
 
-        val response = when (method.uppercase()) {
-            "POST" -> app.post(url, headers = headers, json = body)
-            "PUT" -> app.put(url, headers = headers, json = body)
-            else -> app.get(url, headers = headers)
+        try {
+            val response = when (method.uppercase()) {
+                "POST" -> app.post(url, headers = headers, json = body)
+                "PUT" -> app.put(url, headers = headers, json = body)
+                else -> app.get(url, headers = headers)
+            }
+            return response.parsed<JsonNode>()
+        } catch (e: Exception) {
+            // إذا كان الخطأ متعلقاً بانتهاء صلاحية التوكن، نجدد البيانات لمرة واحدة تلقائياً
+            if (!isRetry && (e.message?.contains("401") == true || e.message?.contains("403") == true)) {
+                ensureInitialized(forceRefresh = true)
+                return apiCall(url, scope, method, body, isRetry = true)
+            }
+            throw e
         }
-        return response.parsed<JsonNode>()
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
@@ -204,7 +245,8 @@ class eishk : MainAPI() {
         }
 
         ensureInitialized()
-        val url = "$gatewayBaseUrl/library/home_content?with_genres=true"
+        val baseUrl = gatewayBaseUrl ?: mainUrl
+        val url = "$baseUrl/library/home_content?with_genres=true"
         val json = apiCall(url, "ANIME.LIBRARY.HOME_CONTENT")
 
         val homeLists = mutableListOf<HomePageList>()
@@ -241,8 +283,9 @@ class eishk : MainAPI() {
 
     override suspend fun search(query: String, page: Int): SearchResponseList? {
         ensureInitialized()
+        val baseUrl = gatewayBaseUrl ?: mainUrl
         val apiPage = (page - 1).coerceAtLeast(0)
-        val url = "$gatewayBaseUrl/library/search?page=$apiPage&sort_by=release_year&sort_direction=1&text_direction=jp"
+        val url = "$baseUrl/library/search?page=$apiPage&sort_by=release_year&sort_direction=1&text_direction=jp"
 
         return try {
             val json = apiCall(url, "ANIME.LIBRARY.SEARCH", method = "POST", body = mapOf("query" to query))
@@ -273,8 +316,9 @@ class eishk : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse {
         ensureInitialized()
+        val baseUrl = gatewayBaseUrl ?: mainUrl
         val animeId = url.substringAfterLast("/")
-        val detailUrl = "$gatewayBaseUrl/library/details/$animeId"
+        val detailUrl = "$baseUrl/library/details/$animeId"
         val json = apiCall(detailUrl, "ANIME.LIBRARY.DETAILS")
         val item = json.get("item") ?: throw ErrorLoadingException("Failed to load anime details")
 
@@ -296,7 +340,7 @@ class eishk : MainAPI() {
 
         val episodesList = mutableListOf<Episode>()
         try {
-            val episodeUrl = "$gatewayBaseUrl/library/episodes/$animeId?sort_by_latest=1&with_arcs=true&with_favorites=true"
+            val episodeUrl = "$baseUrl/library/episodes/$animeId?sort_by_latest=1&with_arcs=true&with_favorites=true"
             val epJson = apiCall(episodeUrl, "ANIME.LIBRARY.EPISODES.ALL")
             epJson.get("items")?.forEach { ep ->
                 val epNumber = ep.get("episode_number")?.asInt() ?: 1
@@ -349,7 +393,8 @@ class eishk : MainAPI() {
             val episodeId = parts[1]
             val episodeNumber = parts.getOrNull(2)?.toIntOrNull() ?: 1
             
-            val sourcesUrl = "$gatewayBaseUrl/library/episode/sources"
+            val baseUrl = gatewayBaseUrl ?: mainUrl
+            val sourcesUrl = "$baseUrl/library/episode/sources"
             val sourcesBody = mapOf(
                 "animeId" to animeId,
                 "episodeId" to episodeId,
@@ -385,7 +430,7 @@ class eishk : MainAPI() {
 
                 for (quality in qualitiesList) {
                     try {
-                        val canPlayUrl = "$gatewayBaseUrl/library/episode/source/can_play"
+                        val canPlayUrl = "$baseUrl/library/episode/source/can_play"
                         val canPlayBody = mapOf(
                             "episodeId" to episodeId,
                             "hostId" to hostId,
@@ -395,7 +440,7 @@ class eishk : MainAPI() {
                         val canPlayJson = apiCall(canPlayUrl, "ANIME.LIBRARY.EPISODES.SOURCES.CHECK_AVAILABILITY", method = "POST", body = canPlayBody)
                         val sessionId = canPlayJson.get("sessionId")?.asText() ?: ""
                         
-                        val claimUrl = "$gatewayBaseUrl/ads_manager/claim"
+                        val claimUrl = "$baseUrl/ads_manager/claim"
                         val claimBody = mapOf(
                             "event_name" to "play_episode_unlocked",
                             "hostId" to hostId,
@@ -410,7 +455,7 @@ class eishk : MainAPI() {
                             apiCall(claimUrl, "USER.ADS_MANAGER.CLAIMS", method = "PUT", body = claimBody)
                         } catch (_: Exception) {}
                         
-                        val directLinkUrl = "$gatewayBaseUrl/library/episode/source/direct_link"
+                        val directLinkUrl = "$baseUrl/library/episode/source/direct_link"
                         val directLinkBody = mapOf(
                             "id" to hostId,
                             "quality" to quality,
@@ -418,6 +463,7 @@ class eishk : MainAPI() {
                             "sessionId" to sessionId
                         )
                         val directLinkJson = apiCall(directLinkUrl, "ANIME.LIBRARY.EPISODES.SOURCES.DIRECT_LINK", method = "POST", body = directLinkBody)
+
                         directLinkJson.get("tracks")?.forEach { track ->
                             val trackUrl = track.get("file")?.asText() ?: track.get("url")?.asText()
                             val trackLang = track.get("label")?.asText() ?: track.get("language")?.asText() ?: "Arabic"
