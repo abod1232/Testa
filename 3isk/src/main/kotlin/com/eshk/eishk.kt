@@ -16,10 +16,9 @@ import javax.crypto.spec.SecretKeySpec
 
 class eishk : MainAPI() {
     override var mainUrl = "https://gateway.anime-rift.com"
-    override var name = "أنمي ريفت"
+    override var name = "AnimeRift"
     override var lang = "ar"
     override val hasMainPage = true
-    override val hasSearch = true
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Anime)
 
