@@ -199,6 +199,11 @@ class eishk : MainAPI() {
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        // 1. إذا طلب التطبيق أي صفحة بعد الصفحة الأولى، نتوقف فوراً ونُرجع قائمة فارغة لمنع التكرار
+        if (page > 1) {
+            return newHomePageResponse(emptyList(), hasNext = false)
+        }
+
         ensureInitialized()
         val url = "$gatewayBaseUrl/library/home_content?with_genres=true"
         val json = apiCall(url, "ANIME.LIBRARY.HOME_CONTENT")
@@ -212,6 +217,7 @@ class eishk : MainAPI() {
             val list = mutableListOf<SearchResponse>()
 
             items?.forEach { item ->
+                val ratingFloat = item.get("myAnimeList_rating")?.asDouble()?.toFloat()
                 list.add(
                     newAnimeSearchResponse(
                         name = item.get("title")?.asText() ?: "",
@@ -219,14 +225,17 @@ class eishk : MainAPI() {
                     ) {
                         this.posterUrl = item.get("medium_picture")?.asText()
                         this.year = item.get("release_year")?.asInt()
+                        this.score = ratingFloat?.let { Score.from10(it) }
                     }
                 )
             }
             if (list.isNotEmpty()) {
-                homeLists.add(HomePageList(title, list))
+                homeLists.add(HomePageList(title, list, isHorizontalImages = true))
             }
         }
-        return newHomePageResponse(homeLists)
+
+        // 2. إرسال hasNext = false بشكل صريح لإبلاغ المشغل بالتوقف عن طلب المزيد عند السحب
+        return newHomePageResponse(homeLists, hasNext = false)
     }
 
     override suspend fun search(query: String): List<SearchResponse>? {
