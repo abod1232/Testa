@@ -198,53 +198,35 @@ class eishk : MainAPI() {
         return response.parsed<JsonNode>()
     }
 
-    override val mainPage = mainPageOf(
-        "sort_by=recently_updated&sort_direction=-1&filter_by=recent_releases" to "الإصدارات الحديثة",
-        "sort_by=popularity&sort_direction=-1&filter_by=all" to "الأكثر شعبية",
-        "sort_by=rating&sort_direction=-1&filter_by=all" to "الأعلى تقييماً",
-        "sort_by=created_at&sort_direction=-1&filter_by=all" to "أحدث الأنميات المضافة"
-    )
-
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         ensureInitialized()
-        val apiPage = (page - 1).coerceAtLeast(0)
-        val filterQuery = request.data
-        val url = "$gatewayBaseUrl/library/all?page=$apiPage&$filterQuery&text_direction=jp"
-        
-        val json = apiCall(
-            url = url,
-            scope = "ANIME.LIBRARY.ALL",
-            method = "POST",
-            body = mapOf("country_origin" to null)
-        )
+        val url = "$gatewayBaseUrl/library/home_content?with_genres=true"
+        val json = apiCall(url, "ANIME.LIBRARY.HOME_CONTENT")
 
-        val items = json.get("items")
-        val animeList = mutableListOf<SearchResponse>()
+        val homeLists = mutableListOf<HomePageList>()
+        val sections = json.get("sections")
 
-        items?.forEach { item ->
-            val ratingFloat = item.get("myAnimeList_rating")?.asDouble()?.toFloat()
-            animeList.add(
-                newAnimeSearchResponse(
-                    name = item.get("title")?.asText() ?: "",
-                    url = "$mainUrl/api/v4/library/details/${item.get("_id")?.asText()}"
-                ) {
-                    this.posterUrl = item.get("medium_picture")?.asText()
-                    this.year = item.get("release_year")?.asInt()
-                    this.score = ratingFloat?.let { Score.from10(it) }
-                }
-            )
+        sections?.forEach { section ->
+            val title = section.get("sectionTitle")?.asText() ?: ""
+            val items = section.get("items")
+            val list = mutableListOf<SearchResponse>()
+
+            items?.forEach { item ->
+                list.add(
+                    newAnimeSearchResponse(
+                        name = item.get("title")?.asText() ?: "",
+                        url = "$mainUrl/api/v4/library/details/${item.get("_id")?.asText()}"
+                    ) {
+                        this.posterUrl = item.get("medium_picture")?.asText()
+                        this.year = item.get("release_year")?.asInt()
+                    }
+                )
+            }
+            if (list.isNotEmpty()) {
+                homeLists.add(HomePageList(title, list))
+            }
         }
-
-        val hasNext = json.get("hasNext")?.asBoolean() ?: false
-        
-        return newHomePageResponse(
-            list = HomePageList(
-                name = request.name,
-                list = animeList,
-                isHorizontalImages = true
-            ),
-            hasNext = hasNext
-        )
+        return newHomePageResponse(homeLists)
     }
 
     override suspend fun search(query: String): List<SearchResponse>? {
