@@ -377,6 +377,85 @@ class eishk : MainAPI() {
                         try {
                             apiCall(claimUrl, "USER.ADS_MANAGER.CLAIMS", method = "PUT", body = claimBody)
                         } catch (_: Exception) {}
+override suspend fun loadLinks(
+        data: String,
+        isCasting: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val parts = data.split('|')
+            if (parts.size < 2) return@withContext false
+            val animeId = parts[0]
+            val episodeId = parts[1]
+            val episodeNumber = parts.getOrNull(2)?.toIntOrNull() ?: 1
+            
+            // 1. طلب قائمة السيرفرات
+            val sourcesUrl = "$gatewayBaseUrl/library/episode/sources"
+            val sourcesBody = mapOf(
+                "animeId" to animeId,
+                "episodeId" to episodeId,
+                "episode_number" to episodeNumber
+            )
+            val sourcesJson = apiCall(sourcesUrl, "ANIME.LIBRARY.EPISODES.SOURCES.ALL", method = "POST", body = sourcesBody)
+            val items = sourcesJson.get("items") ?: return@withContext false
+
+            // 2. فلترة السيرفرات العربية
+            val priorityProviders = listOf("cr2", "rift-streamer", "streamtape")
+            val filteredItems = items.filter { src ->
+                val subTitle = src.get("sub_title")?.asText() ?: ""
+                subTitle.startsWith("ar_") || subTitle.isEmpty()
+            }.ifEmpty { items.toList() }
+
+            val sortedItems = filteredItems.sortedBy { src ->
+                val provider = src.get("provider")?.asText() ?: ""
+                val index = priorityProviders.indexOf(provider)
+                if (index != -1) index else 99
+            }.take(6)
+
+            sortedItems.forEach { src ->
+                val hostId = src.get("_id")?.asText() ?: return@forEach
+                val serverName = src.get("server_name")?.asText() ?: "Server"
+                val provider = src.get("provider")?.asText() ?: ""
+                val subTitle = src.get("sub_title")?.asText() ?: ""
+                
+                val qualitiesNode = src.get("qualities")
+                val qualitiesList = if (qualitiesNode != null && qualitiesNode.isArray && qualitiesNode.size() > 0) {
+                    qualitiesNode.map { it.asText() }
+                } else {
+                    listOf("720P")
+                }
+
+                for (quality in qualitiesList) {
+                    try {
+                        // أ. فحص إمكانية التشغيل
+                        val canPlayUrl = "$gatewayBaseUrl/library/episode/source/can_play"
+                        val canPlayBody = mapOf(
+                            "episodeId" to episodeId,
+                            "hostId" to hostId,
+                            "is_download" to false,
+                            "event_name" to "play_episode_unlocked"
+                        )
+                        val canPlayJson = apiCall(canPlayUrl, "ANIME.LIBRARY.EPISODES.SOURCES.CHECK_AVAILABILITY", method = "POST", body = canPlayBody)
+                        val sessionId = canPlayJson.get("sessionId")?.asText() ?: ""
+                        
+                        // ب. تأكيد تخطي الإعلان
+                        val claimUrl = "$gatewayBaseUrl/ads_manager/claim"
+                        val claimBody = mapOf(
+                            "event_name" to "play_episode_unlocked",
+                            "hostId" to hostId,
+                            "episodeId" to episodeId,
+                            "transactionRef" to "${System.currentTimeMillis()}_${Random().nextInt(99999999)}",
+                            "reward_result" to "not_filled",
+                            "streamingServerKey" to provider,
+                            "is_optional" to false,
+                            "is_reward" to true
+                        )
+                        try {
+                            apiCall(claimUrl, "USER.ADS_MANAGER.CLAIMS", method = "PUT", body = claimBody)
+                        } catch (_: Exception) {}
+                        
+                        // ج. طلب الرابط المباشر
                         val directLinkUrl = "$gatewayBaseUrl/library/episode/source/direct_link"
                         val directLinkBody = mapOf(
                             "id" to hostId,
@@ -385,37 +464,68 @@ class eishk : MainAPI() {
                             "sessionId" to sessionId
                         )
                         val directLinkJson = apiCall(directLinkUrl, "ANIME.LIBRARY.EPISODES.SOURCES.DIRECT_LINK", method = "POST", body = directLinkBody)
-                        val videoUrl = directLinkJson.get("videoUrl")?.asText()
 
-                        if (!videoUrl.isNullOrEmpty()) {
-                            val customHeaders = mutableMapOf(
-                                "User-Agent" to "libmpv",
-                                "Accept" to "*/*",
-                                "Range" to "bytes=0-",
-                                "Connection" to "close",
-                                "Icy-MetaData" to "1"
-                            )
-                            val hostFromUrl = try {
-                                java.net.URI(videoUrl).host
-                            } catch (_: Exception) {
-                                null
-                            }
-                            customHeaders["Host"] = hostFromUrl ?: "media-1.rift-content.com"
-                            
-                            directLinkJson.get("http_headers")?.fields()?.forEach { (k, v) ->
-                                customHeaders[k] = v.asText()
-                            }
+                        // الحالة 1: روابط VRV / CR2 المباشرة (url_response)
+                        if (directLinkJson.get("url_response")?.asBoolean() == true) {
+                            val videoUrl = directLinkJson.get("videoUrl")?.asText()
 
-                            callback.invoke(
-                                newExtractorLink(
-                                    source = name,
-                                    name = "$serverName [$subTitle] - $quality",
-                                    url = videoUrl,
-                                ) {
-                                    this.quality = getQualityFromName(quality)
-                                    this.headers = customHeaders
+                            if (!videoUrl.isNullOrEmpty()) {
+                                val customHeaders = mutableMapOf(
+                                    "User-Agent" to "libmpv",
+                                    "Accept" to "*/*",
+                                    "Range" to "bytes=0-",
+                                    "Connection" to "close",
+                                    "Icy-MetaData" to "1"
+                                )
+                                val hostFromUrl = try {
+                                    java.net.URI(videoUrl).host
+                                } catch (_: Exception) {
+                                    null
                                 }
-                            )
+                                customHeaders["Host"] = hostFromUrl ?: "media-1.rift-content.com"
+                                
+                                directLinkJson.get("http_headers")?.fields()?.forEach { (k, v) ->
+                                    customHeaders[k] = v.asText()
+                                }
+
+                                callback.invoke(
+                                    newExtractorLink(
+                                        source = name,
+                                        name = "$serverName [$subTitle] - $quality",
+                                        url = videoUrl,
+                                    ) {
+                                        this.quality = getQualityFromName(quality)
+                                        this.headers = customHeaders
+                                    }
+                                )
+                            }
+                        } 
+                        // الحالة 2: روابط Streamtape عبر التذكرة الرسمية (ticket_response)
+                        else if (directLinkJson.get("ticket_response")?.asBoolean() == true) {
+                            val fileId = directLinkJson.get("fileId")?.asText() ?: ""
+                            val ticket = directLinkJson.get("ticket")?.asText() ?: ""
+
+                            if (fileId.isNotEmpty() && ticket.isNotEmpty()) {
+                                val tapeApiUrl = "https://api.streamtape.com/file/dl?file=$fileId&ticket=$ticket"
+                                val tapeRes = app.get(tapeApiUrl).parsed<JsonNode>()
+                                val tapeDirectUrl = tapeRes.get("result")?.get("url")?.asText()
+
+                                if (!tapeDirectUrl.isNullOrEmpty()) {
+                                    callback.invoke(
+                                        newExtractorLink(
+                                            source = name,
+                                            name = "$serverName [$subTitle] - $quality",
+                                            url = tapeDirectUrl,
+                                        ) {
+                                            this.quality = getQualityFromName(quality)
+                                            this.headers = mapOf(
+                                                "User-Agent" to "libmpv",
+                                                "Accept" to "*/*"
+                                            )
+                                        }
+                                    )
+                                }
+                            }
                         }
                     } catch (e: Exception) {
                         e.printStackTrace()
