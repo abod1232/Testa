@@ -199,7 +199,6 @@ class eishk : MainAPI() {
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        // 1. إذا طلب التطبيق أي صفحة بعد الصفحة الأولى، نتوقف فوراً ونُرجع قائمة فارغة لمنع التكرار
         if (page > 1) {
             return newHomePageResponse(emptyList(), hasNext = false)
         }
@@ -233,8 +232,6 @@ class eishk : MainAPI() {
                 homeLists.add(HomePageList(title, list, isHorizontalImages = true))
             }
         }
-
-        // 2. إرسال hasNext = false بشكل صريح لإبلاغ المشغل بالتوقف عن طلب المزيد عند السحب
         return newHomePageResponse(homeLists, hasNext = false)
     }
 
