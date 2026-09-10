@@ -430,8 +430,6 @@ class eishk : MainAPI() {
                             "sessionId" to sessionId
                         )
                         val directLinkJson = apiCall(directLinkUrl, "ANIME.LIBRARY.EPISODES.SOURCES.DIRECT_LINK", method = "POST", body = directLinkBody)
-
-                        // استخراج أي ملفات ترجمة مدمجة
                         directLinkJson.get("tracks")?.forEach { track ->
                             val trackUrl = track.get("file")?.asText() ?: track.get("url")?.asText()
                             val trackLang = track.get("label")?.asText() ?: track.get("language")?.asText() ?: "Arabic"
