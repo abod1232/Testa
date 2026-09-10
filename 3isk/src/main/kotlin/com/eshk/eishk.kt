@@ -528,6 +528,7 @@ class eishk : MainAPI() {
                         )
                         val directLinkJson = apiCall(directLinkUrl, "ANIME.LIBRARY.EPISODES.SOURCES.DIRECT_LINK", method = "POST", body = directLinkBody)
 
+                        // 1. استخراج ملفات الترجمة إن وجدت
                         directLinkJson.get("tracks")?.forEach { track ->
                             val trackUrl = track.get("file")?.asText() ?: track.get("url")?.asText()
                             val trackLang = track.get("label")?.asText() ?: track.get("language")?.asText() ?: "Arabic"
@@ -536,6 +537,7 @@ class eishk : MainAPI() {
                             }
                         }
 
+                        // 2. معالجة روابط البث المباشر (HLS / MP4)
                         if (directLinkJson.get("url_response")?.asBoolean() == true) {
                             val videoUrl = directLinkJson.get("videoUrl")?.asText()
 
@@ -569,13 +571,25 @@ class eishk : MainAPI() {
                                     }
                                 )
                             }
-                        } else if (directLinkJson.get("ticket_response")?.asBoolean() == true) {
+                        } 
+                        // 3. معالجة تذاكر Streamtape مع الانتظار التلقائي
+                        else if (directLinkJson.get("ticket_response")?.asBoolean() == true) {
                             val fileId = directLinkJson.get("fileId")?.asText() ?: ""
                             val ticket = directLinkJson.get("ticket")?.asText() ?: ""
+                            val waitTimeSeconds = directLinkJson.get("wait_time")?.asLong() ?: 5L
 
                             if (fileId.isNotEmpty() && ticket.isNotEmpty()) {
+                                // انتظار انتهاء وقت التذكرة (5 ثوانٍ + هامش أمان)
+                                kotlinx.coroutines.delay((waitTimeSeconds * 1000) + 500)
+
                                 val tapeApiUrl = "https://api.streamtape.com/file/dl?file=$fileId&ticket=$ticket"
-                                val tapeRes = app.get(tapeApiUrl).parsed<JsonNode>()
+                                var tapeRes = app.get(tapeApiUrl).parsed<JsonNode>()
+
+                                if (tapeRes.get("status")?.asInt() != 200) {
+                                    kotlinx.coroutines.delay(2000)
+                                    tapeRes = app.get(tapeApiUrl).parsed<JsonNode>()
+                                }
+
                                 val tapeDirectUrl = tapeRes.get("result")?.get("url")?.asText()
 
                                 if (!tapeDirectUrl.isNullOrEmpty()) {
