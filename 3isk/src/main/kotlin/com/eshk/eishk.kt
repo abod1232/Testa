@@ -29,8 +29,6 @@ class eishk : MainAPI() {
     private val FIREBASE_APP_ID = "1:536921039715:android:78825c96b74de921b8e956"
     private val ANDROID_PACKAGE = "com.riftapps.animerift"
     private val ANDROID_CERT = "AF40CE82A52AA4107F311D8B9727D01C8D02250B"
-
-    // ذاكرة دائمة لحفظ الجلسة ومواصفات الجهاز الوهمي
     companion object {
         private var fid: String? = null
         private var firebaseToken: String? = null
@@ -78,8 +76,6 @@ class eishk : MainAPI() {
     }
 
     private val mapper = ObjectMapper()
-
-    // دالة توليد بيانات هاتف وهمي عشوائي بالكامل
     private fun generateSyntheticDevice(): Pair<String, String> {
         val brands = listOf(
             Triple("google", "Google", "Pixel 8 Pro"),
@@ -247,8 +243,6 @@ class eishk : MainAPI() {
         val url = "$baseUrl/auth/register/device"
         val fcmToken = generateFcmToken()
         deviceId = "${fid ?: ""}:$fcmToken"
-
-        // توليد جهاز وهمي جديد وحفظه
         val (buildId, deviceInfoJson) = generateSyntheticDevice()
         syntheticBuildId = buildId
         syntheticDeviceInfoJson = deviceInfoJson
