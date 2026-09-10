@@ -13,12 +13,15 @@ import java.text.SimpleDateFormat
 import java.util.*
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
+import com.lagradost.cloudstream3.AcraApplication.Companion.getKey
+import com.lagradost.cloudstream3.AcraApplication.Companion.setKey
 
 class eishk : MainAPI() {
     override var mainUrl = "https://gateway.anime-rift.com"
     override var name = "AnimeRift"
     override var lang = "ar"
     override val hasMainPage = true
+
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Anime)
 
@@ -32,14 +35,12 @@ class eishk : MainAPI() {
     private val PREF_FID = "anime_rift_fid"
     private val PREF_FB_TOKEN = "anime_rift_fb_token"
     private val PREF_GATEWAY_URL = "anime_rift_gateway_url"
-    private val PREF_DEVICE_ID = "anime_rift_device_id"
     private val PREF_SESSION_KEY = "anime_rift_session_key"
 
     private var fid: String? = null
     private var firebaseToken: String? = null
     private var gatewayBaseUrl: String? = null
     private var sessionKey: String? = null
-    private var deviceId: String? = null
 
     private val mapper = ObjectMapper()
 
@@ -84,16 +85,15 @@ class eishk : MainAPI() {
     // دالة التهيئة الذكية: تقرأ من التخزين الدائم وتطلب البيانات فقط إذا لم تكن موجودة
     private suspend fun ensureInitialized(forceRefresh: Boolean = false) {
         if (!forceRefresh) {
-            if (fid != null && gatewayBaseUrl != null && deviceId != null && firebaseToken != null) return
+            if (fid != null && gatewayBaseUrl != null && firebaseToken != null) return
 
             // استرجاع البيانات من الذاكرة الدائمة للتطبيق
             fid = getKey(PREF_FID)
             firebaseToken = getKey(PREF_FB_TOKEN)
             gatewayBaseUrl = getKey(PREF_GATEWAY_URL)
-            deviceId = getKey(PREF_DEVICE_ID)
             sessionKey = getKey(PREF_SESSION_KEY)
 
-            if (!fid.isNullOrEmpty() && !gatewayBaseUrl.isNullOrEmpty() && !firebaseToken.isNullOrEmpty() && !deviceId.isNullOrEmpty()) {
+            if (!fid.isNullOrEmpty() && !gatewayBaseUrl.isNullOrEmpty() && !firebaseToken.isNullOrEmpty() ) {
                 return
             }
         }
@@ -107,12 +107,11 @@ class eishk : MainAPI() {
             setKey(PREF_FID, fid)
             setKey(PREF_FB_TOKEN, firebaseToken)
             setKey(PREF_GATEWAY_URL, gatewayBaseUrl)
-            setKey(PREF_DEVICE_ID, deviceId)
             setKey(PREF_SESSION_KEY, sessionKey)
         }
     }
 
-    private suspend fun registerFirebaseInstallation() {
+    private fun registerFirebaseInstallation() {
         val url = "https://firebaseinstallations.googleapis.com/v1/projects/anime-rift-4142e/installations"
         val payloadStr = """{"fid":"","appId":"$FIREBASE_APP_ID","authVersion":"FIS_v2","sdkVersion":"a:19.1.0"}"""
 
@@ -141,13 +140,11 @@ class eishk : MainAPI() {
         val url = "https://firebaseremoteconfig.googleapis.com/v1/projects/536921039715/namespaces/firebase:fetch"
         val payload = mapOf(
             "appVersion" to "3.13.5",
-            "appInstanceIdToken" to firebaseToken,
+            "appInstanceIdToken" to (firebaseToken ?: ""),
             "appBuild" to "68",
-            "appInstanceId" to fid,
+            "appInstanceId" to (fid ?: ""),
             "analyticsUserProperties" to emptyMap<String, String>(),
             "appId" to FIREBASE_APP_ID,
-            "platformVersion" to "36",
-            "sdkVersion" to "23.0.1",
             "packageName" to ANDROID_PACKAGE
         )
 
@@ -155,7 +152,7 @@ class eishk : MainAPI() {
             "X-Goog-Api-Key" to FIREBASE_API_KEY,
             "X-Android-Package" to ANDROID_PACKAGE,
             "X-Android-Cert" to ANDROID_CERT,
-            "X-Goog-Firebase-Installations-Auth" to firebaseToken,
+            "X-Goog-Firebase-Installations-Auth" to (firebaseToken ?: ""),
             "Content-Type" to "application/json"
         )
 
@@ -166,28 +163,13 @@ class eishk : MainAPI() {
     private suspend fun registerDevice() {
         val baseUrl = gatewayBaseUrl ?: mainUrl
         val url = "$baseUrl/auth/register/device"
-        val fcmToken = generateFcmToken()
-        deviceId = "$fid:$fcmToken"
 
-        val deviceInfo = mapOf(
-            "manufacturer" to "realme",
-            "androidVersion" to "16",
-            "sdkInt" to 36,
-            "isPhysicalDevice" to true,
-            "supportedAbis" to listOf("arm64-v8a"),
-            "tags" to "release-keys",
-            "type" to "user",
-            "host" to "kvm-slave-build-s-system-12107393"
-        )
 
         val payload = mapOf(
-            "deviceId" to deviceId,
             "current_app_version" to "3.13.5",
             "device_os" to "android",
             "device_environment" to "production",
-            "device_info" to mapper.writeValueAsString(deviceInfo),
             "install_source" to "IS_INSTALLED_FROM_PLAY_PACKAGE_INSTALLER",
-            "deviceOsId" to "BP2A.250605.015",
             "firebaseInstallationId" to fid,
             "apn_token" to null,
             "install_mode" to 2
@@ -204,7 +186,6 @@ class eishk : MainAPI() {
         val timezone = generateDeviceTimezone()
 
         val headers = mapOf(
-            "x-device-os-id" to "BP2A.250605.015",
             "user-agent" to "Dart/3.10 (dart:io)",
             "x-device-release-version" to "3.13.5",
             "x-firebase-app-check" to "null",
@@ -214,9 +195,6 @@ class eishk : MainAPI() {
             "integrity" to "Bearer $integrityToken",
             "accept" to "application/json",
             "x-firebase-id" to (fid ?: ""),
-            "x-device-id" to (deviceId ?: ""),
-            "x-device-timezone" to timezone,
-            "x-device-language" to "ar",
             "x-platform" to "Mobile",
             "x-os" to "android"
         )
@@ -391,7 +369,7 @@ class eishk : MainAPI() {
             val animeId = parts[0]
             val episodeId = parts[1]
             val episodeNumber = parts.getOrNull(2)?.toIntOrNull() ?: 1
-            
+
             val baseUrl = gatewayBaseUrl ?: mainUrl
             val sourcesUrl = "$baseUrl/library/episode/sources"
             val sourcesBody = mapOf(
@@ -419,7 +397,7 @@ class eishk : MainAPI() {
                 val serverName = src.get("server_name")?.asText() ?: "Server"
                 val provider = src.get("provider")?.asText() ?: ""
                 val subTitle = src.get("sub_title")?.asText() ?: ""
-                
+
                 val qualitiesNode = src.get("qualities")
                 val qualitiesList = if (qualitiesNode != null && qualitiesNode.isArray && qualitiesNode.size() > 0) {
                     qualitiesNode.map { it.asText() }
@@ -438,7 +416,7 @@ class eishk : MainAPI() {
                         )
                         val canPlayJson = apiCall(canPlayUrl, "ANIME.LIBRARY.EPISODES.SOURCES.CHECK_AVAILABILITY", method = "POST", body = canPlayBody)
                         val sessionId = canPlayJson.get("sessionId")?.asText() ?: ""
-                        
+
                         val claimUrl = "$baseUrl/ads_manager/claim"
                         val claimBody = mapOf(
                             "event_name" to "play_episode_unlocked",
@@ -453,7 +431,7 @@ class eishk : MainAPI() {
                         try {
                             apiCall(claimUrl, "USER.ADS_MANAGER.CLAIMS", method = "PUT", body = claimBody)
                         } catch (_: Exception) {}
-                        
+
                         val directLinkUrl = "$baseUrl/library/episode/source/direct_link"
                         val directLinkBody = mapOf(
                             "id" to hostId,
@@ -488,7 +466,7 @@ class eishk : MainAPI() {
                                     null
                                 }
                                 customHeaders["Host"] = hostFromUrl ?: "media-1.rift-content.com"
-                                
+
                                 directLinkJson.get("http_headers")?.fields()?.forEach { (k, v) ->
                                     customHeaders[k] = v.asText()
                                 }
