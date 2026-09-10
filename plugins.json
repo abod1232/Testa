@@ -9,7 +9,7 @@
             "Abodabodd"
         ],
         "description": "",
-        "fileSize": 39276,
+        "fileSize": 39091,
         "repositoryUrl": "https://github.com/abod1232/Testa",
         "language": "ar",
         "tvTypes": [
@@ -18,7 +18,7 @@
         ],
         "iconUrl": "https://3esk.onl/wp-content/uploads/2021/01/3isk-logo.png",
         "apiVersion": 1,
-        "fileHash": "sha256-19fa4ba042a3adb31b5f74e7c0d7bfdec7a0f92ad5a7f515023c3164f751ebe7"
+        "fileHash": "sha256-09b93e9a92f29d430afcf919eaf96d180fef5c7301c5d56d1ebdf04e8b5a5d93"
     },
     {
         "url": "https://raw.githubusercontent.com/abod1232/Testa/builds/Aflaam.cs3",
