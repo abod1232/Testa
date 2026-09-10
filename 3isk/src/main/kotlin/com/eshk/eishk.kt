@@ -17,6 +17,7 @@ import javax.crypto.spec.SecretKeySpec
 class eishk : MainAPI() {
     override var mainUrl = "https://gateway.anime-rift.com"
     override var name = "أنمي ريفت"
+    override var lang = "ar"
     override val hasMainPage = true
     override val hasSearch = true
     override val hasDownloadSupport = true
@@ -207,7 +208,7 @@ class eishk : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         ensureInitialized()
-        val apiPage = page - 1
+        val apiPage = (page - 1).coerceAtLeast(0)
         val filterQuery = request.data
         val url = "$gatewayBaseUrl/library/all?page=$apiPage&$filterQuery&text_direction=jp"
         
@@ -222,6 +223,7 @@ class eishk : MainAPI() {
         val animeList = mutableListOf<SearchResponse>()
 
         items?.forEach { item ->
+            val ratingFloat = item.get("myAnimeList_rating")?.asDouble()?.toFloat()
             animeList.add(
                 newAnimeSearchResponse(
                     name = item.get("title")?.asText() ?: "",
@@ -229,6 +231,7 @@ class eishk : MainAPI() {
                 ) {
                     this.posterUrl = item.get("medium_picture")?.asText()
                     this.year = item.get("release_year")?.asInt()
+                    this.score = ratingFloat?.let { Score.from10(it) }
                 }
             )
         }
@@ -239,45 +242,46 @@ class eishk : MainAPI() {
             list = HomePageList(
                 name = request.name,
                 list = animeList,
-                isHorizontal = true
+                isHorizontalImages = true
             ),
             hasNext = hasNext
         )
     }
 
-    override suspend fun search(query: String): List<SearchResponse> {
+    override suspend fun search(query: String): List<SearchResponse>? {
+        return search(query, 1)?.items
+    }
+
+    override suspend fun search(query: String, page: Int): SearchResponseList? {
         ensureInitialized()
-        val allResults = mutableListOf<SearchResponse>()
-        var currentPage = 0
-        var hasNext = true
-        val maxPages = 4
+        val apiPage = (page - 1).coerceAtLeast(0)
+        val url = "$gatewayBaseUrl/library/search?page=$apiPage&sort_by=release_year&sort_direction=1&text_direction=jp"
 
-        while (hasNext && currentPage < maxPages) {
-            val url = "$gatewayBaseUrl/library/search?page=$currentPage&sort_by=release_year&sort_direction=1&text_direction=jp"
-            try {
-                val json = apiCall(url, "ANIME.LIBRARY.SEARCH", method = "POST", body = mapOf("query" to query))
-                val items = json.get("items") ?: break
+        return try {
+            val json = apiCall(url, "ANIME.LIBRARY.SEARCH", method = "POST", body = mapOf("query" to query))
+            val items = json.get("items") ?: return null
 
-                items.forEach { item ->
-                    allResults.add(
-                        newAnimeSearchResponse(
-                            name = item.get("title")?.asText() ?: "",
-                            url = "$mainUrl/api/v4/library/details/${item.get("_id")?.asText()}"
-                        ) {
-                            this.posterUrl = item.get("medium_picture")?.asText()
-                            this.year = item.get("release_year")?.asInt()
-                        }
-                    )
-                }
-
-                hasNext = json.get("hasNext")?.asBoolean() ?: false
-                currentPage++
-            } catch (e: Exception) {
-                e.printStackTrace()
-                break
+            val results = mutableListOf<SearchResponse>()
+            items.forEach { item ->
+                val ratingFloat = item.get("myAnimeList_rating")?.asDouble()?.toFloat()
+                results.add(
+                    newAnimeSearchResponse(
+                        name = item.get("title")?.asText() ?: "",
+                        url = "$mainUrl/api/v4/library/details/${item.get("_id")?.asText()}"
+                    ) {
+                        this.posterUrl = item.get("medium_picture")?.asText()
+                        this.year = item.get("release_year")?.asInt()
+                        this.score = ratingFloat?.let { Score.from10(it) }
+                    }
+                )
             }
+
+            val hasNext = json.get("hasNext")?.asBoolean() ?: false
+            newSearchResponseList(results, hasNext)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
         }
-        return allResults
     }
 
     override suspend fun load(url: String): LoadResponse {
@@ -291,13 +295,15 @@ class eishk : MainAPI() {
         val others = json.get("others")
 
         others?.get("recommendations")?.forEach { rec ->
+            val recRating = rec.get("myAnimeList_rating")?.asDouble()?.toFloat()
             allRelated.add(
                 newAnimeSearchResponse(
                     name = rec.get("title")?.asText() ?: "",
                     url = "$mainUrl/api/v4/library/details/${rec.get("_id")?.asText()}"
                 ) {
                     this.posterUrl = rec.get("main_picture")?.asText()
-                }
+                    this.score = recRating?.let { Score.from10(it) }
+                } as AnimeSearchResponse
             )
         }
 
@@ -321,6 +327,8 @@ class eishk : MainAPI() {
             e.printStackTrace()
         }
 
+        val ratingFloat = item.get("myAnimeList_rating")?.asDouble()?.toFloat()
+
         return newAnimeLoadResponse(
             name = item.get("title")?.asText() ?: "",
             url = url,
@@ -329,6 +337,7 @@ class eishk : MainAPI() {
             this.posterUrl = item.get("main_picture")?.asText()
             this.plot = item.get("synopsis")?.asText()
             this.year = item.get("release_year")?.asInt()
+            this.score = ratingFloat?.let { Score.from10(it) }
             this.tags = item.get("genreLabels")?.mapNotNull { it.get("label")?.asText() }
             this.showStatus = when (item.get("release_status")?.asText()) {
                 "on_going" -> ShowStatus.Ongoing
@@ -423,6 +432,15 @@ class eishk : MainAPI() {
                         )
                         val directLinkJson = apiCall(directLinkUrl, "ANIME.LIBRARY.EPISODES.SOURCES.DIRECT_LINK", method = "POST", body = directLinkBody)
 
+                        // استخراج أي ملفات ترجمة مدمجة
+                        directLinkJson.get("tracks")?.forEach { track ->
+                            val trackUrl = track.get("file")?.asText() ?: track.get("url")?.asText()
+                            val trackLang = track.get("label")?.asText() ?: track.get("language")?.asText() ?: "Arabic"
+                            if (!trackUrl.isNullOrEmpty()) {
+                                subtitleCallback(SubtitleFile(trackLang, trackUrl))
+                            }
+                        }
+
                         if (directLinkJson.get("url_response")?.asBoolean() == true) {
                             val videoUrl = directLinkJson.get("videoUrl")?.asText()
 
@@ -451,7 +469,7 @@ class eishk : MainAPI() {
                                         name = "$serverName [$subTitle] - $quality",
                                         url = videoUrl,
                                     ) {
-                                        this.quality = getQualityFromName(quality)
+                                        this.quality = extractQuality(quality)
                                         this.headers = customHeaders
                                     }
                                 )
@@ -472,7 +490,7 @@ class eishk : MainAPI() {
                                             name = "$serverName [$subTitle] - $quality",
                                             url = tapeDirectUrl,
                                         ) {
-                                            this.quality = getQualityFromName(quality)
+                                            this.quality = extractQuality(quality)
                                             this.headers = mapOf(
                                                 "User-Agent" to "libmpv",
                                                 "Accept" to "*/*"
@@ -494,9 +512,18 @@ class eishk : MainAPI() {
         }
     }
 
-    private fun getQualityFromName(quality: String?): Int {
-        if (quality == null) return Qualities.Unknown.value
-        val digits = quality.filter { it.isDigit() }
-        return digits.toIntOrNull() ?: Qualities.Unknown.value
+    private fun extractQuality(resolution: String?): Int {
+        if (resolution == null) return Qualities.Unknown.value
+        val cleanRes = resolution.lowercase().trim()
+        return when {
+            cleanRes.contains("2160") || cleanRes.contains("4k") -> Qualities.P2160.value
+            cleanRes.contains("1440") -> Qualities.P1440.value
+            cleanRes.contains("1080") -> Qualities.P1080.value
+            cleanRes.contains("720") -> Qualities.P720.value
+            cleanRes.contains("480") -> Qualities.P480.value
+            cleanRes.contains("360") -> Qualities.P360.value
+            cleanRes.contains("240") -> Qualities.P240.value
+            else -> Qualities.Unknown.value
+        }
     }
 }
