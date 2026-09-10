@@ -328,8 +328,6 @@ class eishk : MainAPI() {
             )
             val sourcesJson = apiCall(sourcesUrl, "ANIME.LIBRARY.EPISODES.SOURCES.ALL", method = "POST", body = sourcesBody)
             val items = sourcesJson.get("items") ?: return@withContext false
-
-            // فلترة السيرفرات العربية
             val priorityProviders = listOf("cr2", "rift-streamer", "streamtape")
             val filteredItems = items.filter { src ->
                 val subTitle = src.get("sub_title")?.asText() ?: ""
@@ -347,16 +345,12 @@ class eishk : MainAPI() {
                 val serverName = src.get("server_name")?.asText() ?: "Server"
                 val provider = src.get("provider")?.asText() ?: ""
                 val subTitle = src.get("sub_title")?.asText() ?: ""
-                
-                // استخراج جميع الجودات المتاحة لهذا السيرفر (480P, 720P, 1080P)
                 val qualitiesNode = src.get("qualities")
                 val qualitiesList = if (qualitiesNode != null && qualitiesNode.isArray && qualitiesNode.size() > 0) {
                     qualitiesNode.map { it.asText() }
                 } else {
                     listOf("720P")
                 }
-
-                // حلقة تكرار لطلب كل جودة متاحة (مثل 480P و 720P)
                 for (quality in qualitiesList) {
                     try {
                         val canPlayUrl = "$gatewayBaseUrl/library/episode/source/can_play"
@@ -383,8 +377,6 @@ class eishk : MainAPI() {
                         try {
                             apiCall(claimUrl, "USER.ADS_MANAGER.CLAIMS", method = "PUT", body = claimBody)
                         } catch (_: Exception) {}
-                        
-                        // طلب الرابط المباشر للجودة المحددة (سواء 480P أو 720P)
                         val directLinkUrl = "$gatewayBaseUrl/library/episode/source/direct_link"
                         val directLinkBody = mapOf(
                             "id" to hostId,
