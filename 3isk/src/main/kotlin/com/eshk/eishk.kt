@@ -21,6 +21,7 @@ class eishk : MainAPI() {
     override var name = "أنمي ريفت"
     override var lang = "ar"
     override val hasMainPage = true
+    override val hasSearch = true
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Anime)
 
@@ -29,12 +30,16 @@ class eishk : MainAPI() {
     private val FIREBASE_APP_ID = "1:536921039715:android:78825c96b74de921b8e956"
     private val ANDROID_PACKAGE = "com.riftapps.animerift"
     private val ANDROID_CERT = "AF40CE82A52AA4107F311D8B9727D01C8D02250B"
+
+    // ذاكرة دائمة لحفظ الجلسة ومواصفات الجهاز الوهمي
     companion object {
         private var fid: String? = null
         private var firebaseToken: String? = null
         private var gatewayBaseUrl: String? = null
         private var sessionKey: String? = null
         private var deviceId: String? = null
+        private var syntheticBuildId: String? = null
+        private var syntheticDeviceInfoJson: String? = null
 
         private fun getCacheFile(): File {
             val tmp = System.getProperty("java.io.tmpdir") ?: "."
@@ -61,7 +66,9 @@ class eishk : MainAPI() {
                             "firebaseToken" to (node.get("firebaseToken")?.asText() ?: ""),
                             "gatewayBaseUrl" to (node.get("gatewayBaseUrl")?.asText() ?: ""),
                             "deviceId" to (node.get("deviceId")?.asText() ?: ""),
-                            "sessionKey" to (node.get("sessionKey")?.asText() ?: "")
+                            "sessionKey" to (node.get("sessionKey")?.asText() ?: ""),
+                            "syntheticBuildId" to (node.get("syntheticBuildId")?.asText() ?: ""),
+                            "syntheticDeviceInfoJson" to (node.get("syntheticDeviceInfoJson")?.asText() ?: "")
                         )
                     } else null
                 } else null
@@ -72,6 +79,40 @@ class eishk : MainAPI() {
     }
 
     private val mapper = ObjectMapper()
+
+    // دالة توليد بيانات هاتف وهمي عشوائي بالكامل
+    private fun generateSyntheticDevice(): Pair<String, String> {
+        val brands = listOf(
+            Triple("google", "Google", "Pixel 8 Pro"),
+            Triple("google", "Google", "Pixel 7"),
+            Triple("samsung", "samsung", "Galaxy S23"),
+            Triple("xiaomi", "Xiaomi", "Xiaomi 13")
+        )
+        val selected = brands.random()
+        val randomNum = "${Random().nextInt(899999) + 100000}.015"
+        val buildId = "AP2A.240805.$randomNum"
+        val uniqueTag = UUID.randomUUID().toString().substring(0, 8)
+
+        val deviceInfo = mapOf(
+            "model" to selected.third,
+            "brand" to selected.first,
+            "manufacturer" to selected.second,
+            "device" to selected.first,
+            "hardware" to "qcom",
+            "product" to selected.first,
+            "androidVersion" to "14",
+            "sdkInt" to 34,
+            "securityPatch" to "2025-01-01",
+            "isPhysicalDevice" to true,
+            "supportedAbis" to listOf("arm64-v8a"),
+            "tags" to "release-keys",
+            "type" to "user",
+            "buildId" to buildId,
+            "host" to "build-server-$uniqueTag",
+            "fingerprint" to "${selected.first}/${selected.third}/${selected.first}:14/$buildId/V.1e9a_$uniqueTag:user/release-keys"
+        )
+        return Pair(buildId, mapper.writeValueAsString(deviceInfo))
+    }
 
     private fun base64UrlEncode(bytes: ByteArray): String {
         return Base64.encodeToString(
@@ -110,11 +151,13 @@ class eishk : MainAPI() {
         java.util.zip.GZIPOutputStream(bos).use { it.write(data.toByteArray()) }
         return bos.toByteArray()
     }
+
     private suspend fun ensureInitialized(forceRefresh: Boolean = false) {
         if (!forceRefresh) {
             if (!fid.isNullOrEmpty() && !gatewayBaseUrl.isNullOrEmpty() && !firebaseToken.isNullOrEmpty() && !deviceId.isNullOrEmpty()) {
                 return
             }
+
             val disk = loadFromDisk()
             if (disk != null) {
                 fid = disk["fid"]
@@ -122,12 +165,15 @@ class eishk : MainAPI() {
                 gatewayBaseUrl = disk["gatewayBaseUrl"]
                 deviceId = disk["deviceId"]
                 sessionKey = disk["sessionKey"]
+                syntheticBuildId = disk["syntheticBuildId"]
+                syntheticDeviceInfoJson = disk["syntheticDeviceInfoJson"]
 
                 if (!fid.isNullOrEmpty() && !gatewayBaseUrl.isNullOrEmpty() && !firebaseToken.isNullOrEmpty() && !deviceId.isNullOrEmpty()) {
                     return
                 }
             }
         }
+
         withContext(Dispatchers.IO) {
             registerFirebaseInstallation()
             fetchRemoteConfig()
@@ -138,7 +184,9 @@ class eishk : MainAPI() {
                 "firebaseToken" to (firebaseToken ?: ""),
                 "gatewayBaseUrl" to (gatewayBaseUrl ?: mainUrl),
                 "deviceId" to (deviceId ?: ""),
-                "sessionKey" to (sessionKey ?: "")
+                "sessionKey" to (sessionKey ?: ""),
+                "syntheticBuildId" to (syntheticBuildId ?: "BP2A.250605.015"),
+                "syntheticDeviceInfoJson" to (syntheticDeviceInfoJson ?: "{}")
             )
             saveToDisk(map)
         }
@@ -159,7 +207,7 @@ class eishk : MainAPI() {
             .addHeader("X-Android-Cert", ANDROID_CERT)
             .addHeader("x-goog-api-key", FIREBASE_API_KEY)
             .addHeader("x-firebase-client", "H4sIAAAAAAAA_6tWykhNLCpJSk0sKVayio7VUSpLLSrOzM9TslIyUqoFAFyivEQfAAAA")
-            .addHeader("User-Agent", "Dalvik/2.1.0 (Linux; U; Android 16; RMX5061 Build/BP2A.250605.015)")
+            .addHeader("User-Agent", "Dalvik/2.1.0 (Linux; U; Android 14; Pixel 8 Pro Build/AP2A.240805.015)")
             .build()
 
         val response = app.baseClient.newCall(request).execute()
@@ -178,7 +226,7 @@ class eishk : MainAPI() {
             "appInstanceId" to (fid ?: ""),
             "analyticsUserProperties" to emptyMap<String, String>(),
             "appId" to FIREBASE_APP_ID,
-            "platformVersion" to "36",
+            "platformVersion" to "34",
             "sdkVersion" to "23.0.1",
             "packageName" to ANDROID_PACKAGE
         )
@@ -201,25 +249,19 @@ class eishk : MainAPI() {
         val fcmToken = generateFcmToken()
         deviceId = "${fid ?: ""}:$fcmToken"
 
-        val deviceInfo = mapOf(
-            "manufacturer" to "realme",
-            "androidVersion" to "16",
-            "sdkInt" to 36,
-            "isPhysicalDevice" to true,
-            "supportedAbis" to listOf("arm64-v8a"),
-            "tags" to "release-keys",
-            "type" to "user",
-            "host" to "kvm-slave-build-s-system-12107393"
-        )
+        // توليد جهاز وهمي جديد وحفظه
+        val (buildId, deviceInfoJson) = generateSyntheticDevice()
+        syntheticBuildId = buildId
+        syntheticDeviceInfoJson = deviceInfoJson
 
         val payload = mapOf(
             "deviceId" to deviceId,
             "current_app_version" to "3.13.5",
             "device_os" to "android",
             "device_environment" to "production",
-            "device_info" to mapper.writeValueAsString(deviceInfo),
+            "device_info" to deviceInfoJson,
             "install_source" to "IS_INSTALLED_FROM_PLAY_PACKAGE_INSTALLER",
-            "deviceOsId" to "BP2A.250605.015",
+            "deviceOsId" to buildId,
             "firebaseInstallationId" to fid,
             "apn_token" to null,
             "install_mode" to 2
@@ -235,7 +277,7 @@ class eishk : MainAPI() {
         val timezone = generateDeviceTimezone()
 
         val headers = mapOf(
-            "x-device-os-id" to "BP2A.250605.015",
+            "x-device-os-id" to (syntheticBuildId ?: "AP2A.240805.015"),
             "user-agent" to "Dart/3.10 (dart:io)",
             "x-device-release-version" to "3.13.5",
             "x-firebase-app-check" to "null",
