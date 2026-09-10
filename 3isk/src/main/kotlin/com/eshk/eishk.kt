@@ -197,54 +197,92 @@ class eishk : MainAPI() {
         return response.parsed<JsonNode>()
     }
 
+    // 1. تعريف الفئات الرئيسية وروابط الفرز الخاصة بها
+    override val mainPage = mainPageOf(
+        "sort_by=recently_updated&sort_direction=-1&filter_by=recent_releases" to "الإصدارات الحديثة",
+        "sort_by=popularity&sort_direction=-1&filter_by=all" to "الأكثر شعبية",
+        "sort_by=rating&sort_direction=-1&filter_by=all" to "الأعلى تقييماً",
+        "sort_by=created_at&sort_direction=-1&filter_by=all" to "أحدث الأنميات المضافة"
+    )
+
+    // 2. دالة جلب محتوى الفئات مع دعم التمرير اللانهائي (Pagination)
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         ensureInitialized()
-        val url = "$gatewayBaseUrl/library/home_content?with_genres=true"
-        val json = apiCall(url, "ANIME.LIBRARY.HOME_CONTENT")
+        
+        // Cloudstream يبدأ الصفحات من 1 بينما السيرفر يبدأ من 0
+        val apiPage = page - 1
+        val filterQuery = request.data
+        val url = "$gatewayBaseUrl/library/all?page=$apiPage&$filterQuery&text_direction=jp"
+        
+        val json = apiCall(
+            url = url,
+            scope = "ANIME.LIBRARY.ALL",
+            method = "POST",
+            body = mapOf("country_origin" to null)
+        )
 
-        val homeLists = mutableListOf<HomePageList>()
-        val sections = json.get("sections")
+        val items = json.get("items")
+        val animeList = mutableListOf<SearchResponse>()
 
-        sections?.forEach { section ->
-            val title = section.get("sectionTitle")?.asText() ?: ""
-            val items = section.get("items")
-            val list = mutableListOf<SearchResponse>()
-
-            items?.forEach { item ->
-                list.add(
-                    newAnimeSearchResponse(
-                        name = item.get("title")?.asText() ?: "",
-                        url = "$mainUrl/api/v4/library/details/${item.get("_id")?.asText()}"
-                    ) {
-                        this.posterUrl = item.get("medium_picture")?.asText()
-                        this.year = item.get("release_year")?.asInt()
-                    }
-                )
-            }
-            if (list.isNotEmpty()) {
-                homeLists.add(HomePageList(title, list))
-            }
-        }
-        return newHomePageResponse(homeLists)
-    }
-
-    override suspend fun search(query: String): List<SearchResponse> {
-        ensureInitialized()
-        val url = "$gatewayBaseUrl/library/search?page=0&sort_by=release_year&sort_direction=1&text_direction=jp"
-        val json = apiCall(url, "ANIME.LIBRARY.SEARCH", method = "POST", body = mapOf("query" to query))
-
-        val result = mutableListOf<SearchResponse>()
-        json.get("items")?.forEach { item ->
-            result.add(
+        items?.forEach { item ->
+            animeList.add(
                 newAnimeSearchResponse(
                     name = item.get("title")?.asText() ?: "",
                     url = "$mainUrl/api/v4/library/details/${item.get("_id")?.asText()}"
                 ) {
                     this.posterUrl = item.get("medium_picture")?.asText()
+                    this.year = item.get("release_year")?.asInt()
                 }
             )
         }
-        return result
+
+        // قراءة hasNext لمعرفة هل يسمح بالتمرير لصفحة جديدة أم لا
+        val hasNext = json.get("hasNext")?.asBoolean() ?: false
+        
+        return newHomePageResponse(
+            list = HomePageList(
+                name = request.name,
+                list = animeList,
+                isHorizontal = true
+            ),
+            hasNext = hasNext
+        )
+    }
+
+    override suspend fun search(query: String): List<SearchResponse> {
+        ensureInitialized()
+        val allResults = mutableListOf<SearchResponse>()
+        var currentPage = 0
+        var hasNext = true
+        val maxPages = 4 // حد أقصى 4 صفحات (حتى 120 نتيجة بحث) لضمان السرعة
+
+        while (hasNext && currentPage < maxPages) {
+            val url = "$gatewayBaseUrl/library/search?page=$currentPage&sort_by=release_year&sort_direction=1&text_direction=jp"
+            try {
+                val json = apiCall(url, "ANIME.LIBRARY.SEARCH", method = "POST", body = mapOf("query" to query))
+                val items = json.get("items") ?: break
+
+                items.forEach { item ->
+                    allResults.add(
+                        newAnimeSearchResponse(
+                            name = item.get("title")?.asText() ?: "",
+                            url = "$mainUrl/api/v4/library/details/${item.get("_id")?.asText()}"
+                        ) {
+                            this.posterUrl = item.get("medium_picture")?.asText()
+                            this.year = item.get("release_year")?.asInt()
+                        }
+                    )
+                }
+
+                // قراءة حقل hasNext من رد السيرفر لمعرفة هل توجد صفحات أخرى
+                hasNext = json.get("hasNext")?.asBoolean() ?: false
+                currentPage++
+            } catch (e: Exception) {
+                e.printStackTrace()
+                break
+            }
+        }
+        return allResults
     }
 
     override suspend fun load(url: String): LoadResponse {
