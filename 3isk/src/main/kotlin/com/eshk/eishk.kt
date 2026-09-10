@@ -319,8 +319,6 @@ class eishk : MainAPI() {
             val animeId = parts[0]
             val episodeId = parts[1]
             val episodeNumber = parts.getOrNull(2)?.toIntOrNull() ?: 1
-            
-            // 1. طلب قائمة السيرفرات
             val sourcesUrl = "$gatewayBaseUrl/library/episode/sources"
             val sourcesBody = mapOf(
                 "animeId" to animeId,
@@ -329,29 +327,21 @@ class eishk : MainAPI() {
             )
             val sourcesJson = apiCall(sourcesUrl, "ANIME.LIBRARY.EPISODES.SOURCES.ALL", method = "POST", body = sourcesBody)
             val items = sourcesJson.get("items") ?: return@withContext false
-
-            // 2. تصفية السيرفرات: التركيز على السيرفرات العربية أولاً لتجنب حظر الـ Rate Limit
             val priorityProviders = listOf("cr2", "rift-streamer", "streamtape")
             val filteredItems = items.filter { src ->
                 val subTitle = src.get("sub_title")?.asText() ?: ""
                 subTitle.startsWith("ar_") || subTitle.isEmpty()
             }.ifEmpty { items.toList() } // إذا لم تتوفر ترجمة عربية نأخذ المتاح
-
-            // ترتيب السيرفرات واختيار أفضل 8 سيرفرات لتفادي تجاوز حد الـ 3 طلبات/ثانية
             val sortedItems = filteredItems.sortedBy { src ->
                 val provider = src.get("provider")?.asText() ?: ""
                 val index = priorityProviders.indexOf(provider)
                 if (index != -1) index else 99
             }.take(8)
-
-            // 3. استخراج الروابط من السيرفرات المختارة
             sortedItems.forEach { src ->
                 val hostId = src.get("_id")?.asText() ?: return@forEach
                 val serverName = src.get("server_name")?.asText() ?: "Server"
                 val provider = src.get("provider")?.asText() ?: ""
                 val subTitle = src.get("sub_title")?.asText() ?: ""
-                
-                // جلب الجودة المحددة لهذا السيرفر
                 val qualitiesNode = src.get("qualities")
                 val quality = if (qualitiesNode != null && qualitiesNode.isArray && qualitiesNode.size() > 0) {
                     qualitiesNode.get(0).asText()
@@ -360,7 +350,6 @@ class eishk : MainAPI() {
                 }
 
                 try {
-                    // أ. فحص إمكانية التشغيل واستخراج sessionId
                     val canPlayUrl = "$gatewayBaseUrl/library/episode/source/can_play"
                     val canPlayBody = mapOf(
                         "episodeId" to episodeId,
@@ -370,8 +359,6 @@ class eishk : MainAPI() {
                     )
                     val canPlayJson = apiCall(canPlayUrl, "ANIME.LIBRARY.EPISODES.SOURCES.CHECK_AVAILABILITY", method = "POST", body = canPlayBody)
                     val sessionId = canPlayJson.get("sessionId")?.asText() ?: ""
-                    
-                    // ب. تأكيد تخطي الإعلان (Claim Ad)
                     val claimUrl = "$gatewayBaseUrl/ads_manager/claim"
                     val claimBody = mapOf(
                         "event_name" to "play_episode_unlocked",
@@ -386,8 +373,6 @@ class eishk : MainAPI() {
                     try {
                         apiCall(claimUrl, "USER.ADS_MANAGER.CLAIMS", method = "PUT", body = claimBody)
                     } catch (_: Exception) {}
-                    
-                    // ج. جلب الرابط المباشر
                     val directLinkUrl = "$gatewayBaseUrl/library/episode/source/direct_link"
                     val directLinkBody = mapOf(
                         "id" to hostId,
