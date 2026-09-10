@@ -527,6 +527,8 @@ class eishk : MainAPI() {
                             "sessionId" to sessionId
                         )
                         val directLinkJson = apiCall(directLinkUrl, "ANIME.LIBRARY.EPISODES.SOURCES.DIRECT_LINK", method = "POST", body = directLinkBody)
+
+                        // 1. استخراج ملفات الترجمة
                         directLinkJson.get("tracks")?.forEach { track ->
                             val trackUrl = track.get("file")?.asText() ?: track.get("url")?.asText()
                             val trackLang = track.get("label")?.asText() ?: track.get("language")?.asText() ?: "Arabic"
@@ -534,6 +536,8 @@ class eishk : MainAPI() {
                                 subtitleCallback(SubtitleFile(trackLang, trackUrl))
                             }
                         }
+
+                        // 2. الروابط المباشرة (VRV / CR2)
                         if (directLinkJson.get("url_response")?.asBoolean() == true) {
                             val videoUrl = directLinkJson.get("videoUrl")?.asText()
 
@@ -568,23 +572,35 @@ class eishk : MainAPI() {
                                 )
                             }
                         } 
+                        // 3. معالجة Streamtape مع سجلات الطباعة المفصلة
                         else if (directLinkJson.get("ticket_response")?.asBoolean() == true) {
                             val fileId = directLinkJson.get("fileId")?.asText() ?: ""
                             val ticket = directLinkJson.get("ticket")?.asText() ?: ""
                             val waitTimeSeconds = directLinkJson.get("wait_time")?.asLong() ?: 5L
 
+                            android.util.Log.d(name, "⏳ [Streamtape] تذكرة للملف: $fileId | الوقت المطلوب للانتظار: $waitTimeSeconds ثوانٍ")
+
                             if (fileId.isNotEmpty() && ticket.isNotEmpty()) {
                                 kotlinx.coroutines.delay((waitTimeSeconds * 1000) + 500)
 
                                 val tapeApiUrl = "https://api.streamtape.com/file/dl?file=$fileId&ticket=$ticket"
-                                var tapeRes = app.get(tapeApiUrl).parsed<JsonNode>()
+                                android.util.Log.d(name, "🚀 [Streamtape] جاري إرسال طلب التحميل -> $tapeApiUrl")
 
-                                if (tapeRes.get("status")?.asInt() != 200) {
+                                var tapeRes = app.get(tapeApiUrl).parsed<JsonNode>()
+                                val status = tapeRes.get("status")?.asInt()
+                                val msg = tapeRes.get("msg")?.asText()
+
+                                android.util.Log.d(name, "📥 [Streamtape] رد السيرفر -> الحالة: $status | الرسالة: $msg | الرد الكامل: $tapeRes")
+
+                                if (status != 200) {
+                                    android.util.Log.d(name, "⚠️ [Streamtape] الحالة ليست 200، جاري الانتظار ثانيتين وإعادة المحاولة...")
                                     kotlinx.coroutines.delay(2000)
                                     tapeRes = app.get(tapeApiUrl).parsed<JsonNode>()
+                                    android.util.Log.d(name, "📥 [Streamtape] رد المحاولة الثانية -> الحالة: ${tapeRes.get("status")?.asInt()} | الرد: $tapeRes")
                                 }
 
                                 val tapeDirectUrl = tapeRes.get("result")?.get("url")?.asText()
+                                android.util.Log.d(name, "✅ [Streamtape] رابط الفيديو المستخرج: $tapeDirectUrl")
 
                                 if (!tapeDirectUrl.isNullOrEmpty()) {
                                     callback.invoke(
@@ -604,13 +620,13 @@ class eishk : MainAPI() {
                             }
                         }
                     } catch (e: Exception) {
-                        e.printStackTrace()
+                        android.util.Log.e(name, "❌ [LoadLinks Error] حدث خطأ في السيرفر: ${e.message}")
                     }
                 }
             }
             return@withContext true
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.e(name, "❌ [LoadLinks Fatal] فشل عام في جلب الروابط: ${e.message}")
             return@withContext false
         }
     }
