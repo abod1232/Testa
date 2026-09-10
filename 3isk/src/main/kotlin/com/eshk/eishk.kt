@@ -21,7 +21,6 @@ class eishk : MainAPI() {
     override var name = "أنمي ريفت"
     override var lang = "ar"
     override val hasMainPage = true
-    override val hasSearch = true
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Anime)
 
