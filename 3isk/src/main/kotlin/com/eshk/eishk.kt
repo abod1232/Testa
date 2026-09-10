@@ -14,10 +14,14 @@ import java.util.*
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
-class eishk : MainAPI() { override var mainUrl =
-"https://gateway.anime-rift.com" override var name = "أنمي ريفت" override var
-lang = "ar" override val hasMainPage = true override val hasDownloadSupport =
-true override val supportedTypes = setOf(TvType.Anime)
+class eishk : MainAPI() {
+
+    override var mainUrl = "https://gateway.anime-rift.com"
+    override var name = "أنمي ريفت"
+    override var lang = "ar"
+    override val hasMainPage = true
+    override val hasDownloadSupport = true
+    override val supportedTypes = setOf(TvType.Anime)
 
 private val JWT_SECRET = "e6c9e1af5c6e3e1f0664947361d954e7446d56dc9a7aa9ae4a62df8d7b919cd1"
 private val FIREBASE_API_KEY = "AIzaSyBiLkiGEm7ruugny3tDFHEZvqli8yv1k7I"
