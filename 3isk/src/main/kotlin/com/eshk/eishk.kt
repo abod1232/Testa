@@ -16,7 +16,6 @@ class eishk : MainAPI() {
     override var lang = "it"
     override val hasQuickSearch = false
     override val supportedTypes = setOf(TvType.Anime)
-    //Movie, AnimeMovie, TvSeries, Cartoon, Anime, OVA, Torrent, Documentary, AsianDrama, Live, NSFW, Others, Music, AudioBook, CustomMedia, Audio, Podcast,
 
     override val mainPage = mainPageOf(
         "${mainUrl}/updated" to "Nuovi Episodi",
