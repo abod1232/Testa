@@ -14,7 +14,6 @@ class eishk : MainAPI() {
     override var name = "AnimeWorld"
     override val hasMainPage = true
     override var lang = "it"
-    override val hasQuickSearch = false
     override val supportedTypes = setOf(TvType.Anime)
 
     override val mainPage = mainPageOf(
