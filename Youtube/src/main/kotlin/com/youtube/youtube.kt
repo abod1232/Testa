@@ -572,13 +572,9 @@ class YoutubeProvider(
 
         val requestData = request.data
         val isPlaylist = requestData.contains("list=") || requestData.startsWith("playlist_")
-
-        // دالة استخراج فيديوهات قوائم التشغيل (تدعم الجديد والقديم)
         fun extractPlaylistVideos(items: List<*>) {
             items.forEach { item ->
                 val map = item as? Map<*, *> ?: return@forEach
-
-                // 1. الهيكل الجديد (lockupViewModel)
                 val lockup = map["lockupViewModel"] as? Map<*, *>
                 if (lockup != null) {
                     val vId = lockup.getString("contentId")
@@ -600,8 +596,6 @@ class YoutubeProvider(
                         return@forEach
                     }
                 }
-
-                // 2. الهيكل التقليدي (playlistVideoRenderer / videoRenderer)
                 val renderer = (map["playlistVideoRenderer"] ?: map["videoRenderer"] ?: map["gridVideoRenderer"]) as? Map<*, *>
                 if (renderer != null) {
                     val vId = renderer.getString("videoId")
@@ -620,8 +614,6 @@ class YoutubeProvider(
                 }
             }
         }
-
-        // استخراج توكن التمرير الخاص بقوائم التشغيل
         fun findPlaylistToken(items: List<*>?): String? {
             if (items == null) return null
             for (it in items) {
@@ -675,13 +667,11 @@ class YoutubeProvider(
                             nextContinuation = findPlaylistToken(conts)
                         }
                     } else {
-                        // معالجة القنوات والصفحة الرئيسية
                         processRecursive(initialData, results, seenIds, playlistMode = false)
                         nextContinuation = findTokenRecursive(initialData)
                     }
                 }
             } else {
-                // الصفحات التالية (Pagination)
                 val tokenToUse = continuationTokens[requestData]
                 if (!tokenToUse.isNullOrBlank() && !savedApiKey.isNullOrBlank()) {
                     val decodedToken = java.net.URLDecoder.decode(tokenToUse, "UTF-8")
@@ -736,10 +726,6 @@ class YoutubeProvider(
 
         return newHomePageResponse(request, results, hasNext = !nextContinuation.isNullOrBlank())
     }
-
-    // ==========================================
-    // 3. الدوال المساعدة للبحث والتمرير العودي (Recursion)
-    // ==========================================
     fun findContinuationItemsRecursive(obj: Any?): List<*>? {
         when (obj) {
             is Map<*, *> -> {
@@ -895,9 +881,6 @@ class YoutubeProvider(
 
 
     override suspend fun load(url: String): LoadResponse {
-        // ==========================================
-        // 1. معالجة مقاطع الشورتس كمسلسل (Shorts Series)
-        // ==========================================
         if (url.contains("/shorts/")) {
             val videoId = url.substringAfter("/shorts/").substringBefore("&").substringBefore("?")
             val isSearch = url.contains("ctx=search")
@@ -906,7 +889,6 @@ class YoutubeProvider(
             val episodes = if (targetList.isNotEmpty()) {
                 targetList.toList()
             } else {
-                // في حال فتح الرابط مباشرة أو كانت القائمة فارغة
                 listOf(
                     newEpisode("$mainUrl/watch?v=$videoId") {
                         this.name = "Shorts Clip"
@@ -915,8 +897,6 @@ class YoutubeProvider(
                     }
                 )
             }
-
-            // تحديد الصورة والعنوان
             val currentEpisode = episodes.firstOrNull { it.data.contains(videoId) } ?: episodes.firstOrNull()
             val poster = currentEpisode?.posterUrl ?: "https://i.ytimg.com/vi/$videoId/oar2.jpg"
             val title = if (isSearch) "Shorts (Search Results)" else "YouTube Shorts"
@@ -927,10 +907,6 @@ class YoutubeProvider(
                 this.plot = "YouTube Shorts Player"
             }
         }
-
-        // ==========================================
-        // 2. معالجة القنوات (Channels)
-        // ==========================================
         if (url.contains("/@") || url.contains("/channel/") || url.contains("/c/") || url.contains("/user/")) {
             try {
                 val channelUrl = if (url.endsWith("/videos")) url else "$url/videos"
@@ -1093,10 +1069,6 @@ class YoutubeProvider(
                 throw ErrorLoadingException("Failed to load channel: ${e.message}")
             }
         }
-
-        // ==========================================
-        // 3. معالجة قوائم التشغيل (Playlists)
-        // ==========================================
         if (url.contains("list=")) {
             try {
                 val response = app.get(url, interceptor = ytInterceptor)
@@ -1168,10 +1140,6 @@ class YoutubeProvider(
                 throw ErrorLoadingException("Failed to load playlist: ${e.message}")
             }
         }
-
-        // ==========================================
-        // 4. معالجة الفيديو الفردي (Single Video)
-        // ==========================================
         val videoId = when {
             url.contains("v=") -> url.substringAfter("v=").substringBefore("&")
             url.contains("youtu.be/") -> url.substringAfter("youtu.be/").substringBefore("?")
