@@ -571,9 +571,13 @@ class YoutubeProvider(
 
         val requestData = request.data
         val isPlaylist = requestData.contains("list=") || requestData.startsWith("playlist_")
+
+        // دالة استخراج فيديوهات قوائم التشغيل (تدعم الجديد والقديم)
         fun extractPlaylistVideos(items: List<*>) {
             items.forEach { item ->
                 val map = item as? Map<*, *> ?: return@forEach
+
+                // 1. الهيكل الجديد (lockupViewModel)
                 val lockup = map["lockupViewModel"] as? Map<*, *>
                 if (lockup != null) {
                     val vId = lockup.getString("contentId")
@@ -595,6 +599,8 @@ class YoutubeProvider(
                         return@forEach
                     }
                 }
+
+                // 2. الهيكل التقليدي (playlistVideoRenderer / videoRenderer)
                 val renderer = (map["playlistVideoRenderer"] ?: map["videoRenderer"] ?: map["gridVideoRenderer"]) as? Map<*, *>
                 if (renderer != null) {
                     val vId = renderer.getString("videoId")
@@ -613,6 +619,8 @@ class YoutubeProvider(
                 }
             }
         }
+
+        // استخراج توكن التمرير الخاص بقوائم التشغيل
         fun findPlaylistToken(items: List<*>?): String? {
             if (items == null) return null
             for (it in items) {
@@ -666,11 +674,13 @@ class YoutubeProvider(
                             nextContinuation = findPlaylistToken(conts)
                         }
                     } else {
+                        // معالجة القنوات والصفحة الرئيسية
                         processRecursive(initialData, results, seenIds, playlistMode = false)
                         nextContinuation = findTokenRecursive(initialData)
                     }
                 }
             } else {
+                // الصفحات التالية (Pagination)
                 val tokenToUse = continuationTokens[requestData]
                 if (!tokenToUse.isNullOrBlank() && !savedApiKey.isNullOrBlank()) {
                     val decodedToken = java.net.URLDecoder.decode(tokenToUse, "UTF-8")
@@ -725,6 +735,10 @@ class YoutubeProvider(
 
         return newHomePageResponse(request, results, hasNext = !nextContinuation.isNullOrBlank())
     }
+
+    // ==========================================
+    // 3. الدوال المساعدة للبحث والتمرير العودي (Recursion)
+    // ==========================================
     fun findContinuationItemsRecursive(obj: Any?): List<*>? {
         when (obj) {
             is Map<*, *> -> {
@@ -856,70 +870,70 @@ class YoutubeProvider(
     }
 
 
+override suspend fun load(url: String): LoadResponse {
+        Log.d(name, "load called for url=$url")
 
-    override suspend fun load(url: String): LoadResponse {
+        // ==========================================
+        // 1. معالجة مقاطع الشورتس كمسلسل (Shorts Feed)
+        // ==========================================
         if (url.contains("/shorts/")) {
-            val videoId = url.substringAfter("/shorts/").substringBefore("&").substringBefore("?")
-            val isSearch = url.contains("ctx=search")
-            val targetList = if (isSearch) searchShorts else homeShorts
+            val videoId = url.extractYoutubeId() ?: "video"
+            val useSearchList = url.contains("&ctx=search")
+            val sourceList = if (useSearchList) searchShorts else homeShorts
+            val targetEpisodes = sourceList.toMutableList()
+            var currentEp = targetEpisodes.find { it.data.extractYoutubeId() == videoId }
 
-            val episodes = if (targetList.isNotEmpty()) {
-                targetList.toList()
-            } else {
-                listOf(
-                    newEpisode("$mainUrl/watch?v=$videoId") {
-                        this.name = "Shorts Clip"
-                        this.episode = 1
-                        this.posterUrl = "https://i.ytimg.com/vi/$videoId/oar2.jpg"
-                    }
-                )
+            if (currentEp == null) {
+                val fallbackEp = newEpisode(url) {
+                    this.name = "Shorts Video"
+                    this.posterUrl = buildThumbnailFromId(videoId)
+                    this.episode = targetEpisodes.size + 1
+                }
+                targetEpisodes.add(0, fallbackEp)
+                currentEp = fallbackEp
             }
-            val currentEpisode = episodes.firstOrNull { it.data.contains(videoId) } ?: episodes.firstOrNull()
-            val poster = currentEpisode?.posterUrl ?: "https://i.ytimg.com/vi/$videoId/oar2.jpg"
-            val title = if (isSearch) "Shorts (Search Results)" else "YouTube Shorts"
 
-            return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
+            val poster = currentEp?.posterUrl ?: buildThumbnailFromId(videoId)
+
+            return newTvSeriesLoadResponse("Shorts Feed", url, TvType.TvSeries, targetEpisodes) {
                 this.posterUrl = poster
-                this.backgroundPosterUrl = poster
-                this.plot = "YouTube Shorts Player"
+                this.plot = "قائمة تشغيل تلقائية من الشورتس (${targetEpisodes.size} فيديو)"
+                this.tags = listOf("Shorts", "Feed")
             }
         }
+
+        // ==========================================
+        // 2. معالجة القنوات (Channels)
+        // ==========================================
         if (url.contains("/@") || url.contains("/channel/") || url.contains("/c/") || url.contains("/user/")) {
             try {
                 val channelUrl = if (url.endsWith("/videos")) url else "$url/videos"
                 val response = app.get(channelUrl, interceptor = ytInterceptor)
                 val html = response.text
-                val data = extractYtInitialData(html) ?: throw ErrorLoadingException("Failed to extract channel data")
-                val apiKey = Regex(""""INNERTUBE_API_KEY":\s*"([^"]+)"""").find(html)?.groupValues?.get(1)
+                val data = extractYtInitialData(html)
+                    ?: throw ErrorLoadingException("Failed to extract channel data")
 
+                val apiKey = findConfig(html, "INNERTUBE_API_KEY")
+                val clientVersion = findConfig(html, "INNERTUBE_CLIENT_VERSION") ?: "2.20240725.01.00"
+                val visitorData = findConfig(html, "VISITOR_DATA")
+
+                val header = safeGet(data, "header", "c4TabbedHeaderRenderer")
+                    ?: safeGet(data, "header", "pageHeaderRenderer")
                 val channelMeta = safeGet(data, "metadata", "channelMetadataRenderer") as? Map<*, *>
-                val pageHeader = safeGet(data, "header", "pageHeaderRenderer") as? Map<*, *>
-                val c4Header = safeGet(data, "header", "c4TabbedHeaderRenderer") as? Map<*, *>
 
                 val title = channelMeta?.getString("title")
-                    ?: pageHeader?.getString("pageTitle")
-                    ?: getText(c4Header?.get("title"))
+                    ?: extractTitle(safeGet(header, "title") as? Map<*, *>)
+                    ?: extractTitle(safeGet(header, "pageTitle") as? Map<*, *>)
                     ?: response.document.selectFirst("meta[property=og:title]")?.attr("content")
                     ?: "YouTube Channel"
 
                 val poster = getBestThumbnail(channelMeta?.get("avatar"))
-                    ?: getBestThumbnail(c4Header?.get("avatar"))
+                    ?: getBestThumbnail(safeGet(header, "avatar"))
+                    ?: getBestThumbnail(safeGet(header, "content", "pageHeaderViewModel", "image", "decoratedAvatarViewModel", "avatar", "avatarViewModel", "image"))
                     ?: response.document.selectFirst("meta[property=og:image]")?.attr("content")
 
-                val background = getBestThumbnail(c4Header?.get("banner"))
-                    ?: getBestThumbnail(c4Header?.get("tvBanner"))
-
-                val description = channelMeta?.getString("description")
-                    ?: response.document.selectFirst("meta[name=description]")?.attr("content")
-
-                val tabs = safeGet(data, "contents", "twoColumnBrowseResultsRenderer", "tabs") as? List<*>
-                val videosTab = tabs?.firstOrNull { tab ->
-                    val tabR = (tab as? Map<*, *>)?.get("tabRenderer") as? Map<*, *>
-                    tabR?.get("selected") == true || tabR?.getString("title")?.equals("Videos", ignoreCase = true) == true
-                } as? Map<*, *>
-
-                val richGridContents = safeGet(videosTab, "tabRenderer", "content", "richGridRenderer", "contents") as? List<*>
-                    ?: safeGet(data, "contents", "twoColumnBrowseResultsRenderer", "tabs", 0, "tabRenderer", "content", "sectionListRenderer", "contents", 0, "itemSectionRenderer", "contents") as? List<*>
+                val subscriberCount = extractTitle(safeGet(header, "subscriberCountText") as? Map<*, *>)
+                    ?: safeGet(header, "metadata", "pageHeaderViewModel", "metadata", "contentMetadataViewModel", "metadataRows", 1, "metadataParts", 0, "text", "content") as? String
 
                 val allEpisodes = mutableListOf<Episode>()
 
@@ -929,13 +943,13 @@ class YoutubeProvider(
                         val richContent = safeGet(map, "richItemRenderer", "content") as? Map<*, *>
                         val lockup = (map["lockupViewModel"] ?: richContent?.get("lockupViewModel")) as? Map<*, *>
 
+                        // دعم الهيكل الجديد
                         if (lockup != null) {
                             val vId = lockup.getString("contentId")
                                 ?: safeGet(lockup, "content", "videoId") as? String
 
                             if (!vId.isNullOrBlank()) {
-                                val vidTitle = getText(safeGet(lockup, "metadata", "lockupMetadataViewModel", "title"))
-                                    .ifBlank { "YouTube Video" }
+                                val vidTitle = getText(safeGet(lockup, "metadata", "lockupMetadataViewModel", "title")).ifBlank { "YouTube Video" }
                                 val sources = safeGet(lockup, "contentImage", "thumbnailViewModel", "image", "sources") as? List<*>
                                 val thumb = getBestThumbnail(sources) ?: buildThumbnailFromId(vId)
                                 val (_, views) = extractLockupMetadata(lockup)
@@ -949,11 +963,16 @@ class YoutubeProvider(
                             }
                         }
 
+                        // دعم الهيكل القديم
                         val videoRenderer = when {
                             map.containsKey("videoRenderer") -> map["videoRenderer"] as? Map<*, *>
                             map.containsKey("gridVideoRenderer") -> map["gridVideoRenderer"] as? Map<*, *>
                             map.containsKey("compactVideoRenderer") -> map["compactVideoRenderer"] as? Map<*, *>
                             map.containsKey("shortsVideoRenderer") -> map["shortsVideoRenderer"] as? Map<*, *>
+                            map.containsKey("reelItemRenderer") -> {
+                                val content = safeGet(map, "reelItemRenderer", "content") as? Map<*, *>
+                                content?.get("reelItemRenderer") as? Map<*, *>
+                            }
                             else -> richContent?.get("videoRenderer") as? Map<*, *>
                                 ?: richContent?.get("gridVideoRenderer") as? Map<*, *>
                         }
@@ -976,61 +995,70 @@ class YoutubeProvider(
                     }
                 }
 
-                if (richGridContents != null) {
-                    extractVideosFromItems(richGridContents, allEpisodes)
-                }
-
-                fun findToken(contentsList: List<*>?): String? {
-                    if (contentsList == null) return null
-                    for (c in contentsList) {
-                        val cMap = c as? Map<*, *> ?: continue
-                        val token = safeGet(cMap, "continuationItemRenderer", "continuationEndpoint", "continuationCommand", "token") as? String
-                            ?: safeGet(cMap, "continuationItemViewModel", "continuationCommand", "continuationCommand", "token") as? String
-                            ?: safeGet(cMap, "continuationItemViewModel", "continuationCommand", "token") as? String
+                fun findContinuationTokenFromItems(items: List<*>?): String? {
+                    if (items == null) return null
+                    for (it in items) {
+                        val m = it as? Map<*, *> ?: continue
+                        val token = safeGet(m, "continuationItemRenderer", "continuationEndpoint", "continuationCommand", "token") as? String
+                            ?: safeGet(m, "continuationItemViewModel", "continuationCommand", "continuationCommand", "token") as? String
+                            ?: safeGet(m, "continuationItemViewModel", "continuationCommand", "token") as? String
                         if (!token.isNullOrBlank()) return token
                     }
                     return null
                 }
 
-                var currentToken = findToken(richGridContents)
+                var initialItems: List<*>? = null
+                val tabs = safeGet(data, "contents", "twoColumnBrowseResultsRenderer", "tabs") as? List<*>
+                if (tabs != null) {
+                    for (tab in tabs) {
+                        val tabMap = tab as? Map<*, *>
+                        val tabRenderer = tabMap?.get("tabRenderer") as? Map<*, *>
+                        val content = tabRenderer?.get("content") as? Map<*, *>
+                        if (content?.containsKey("richGridRenderer") == true) {
+                            initialItems = safeGet(content, "richGridRenderer", "contents") as? List<*>
+                            break
+                        }
+                        if (content?.containsKey("gridRenderer") == true) {
+                            initialItems = safeGet(content, "gridRenderer", "items") as? List<*>
+                            break
+                        }
+                    }
+                }
+
+                if (initialItems != null) {
+                    extractVideosFromItems(initialItems, allEpisodes)
+                }
+
+                var currentToken: String? = findContinuationTokenFromItems(initialItems)
+                if (currentToken.isNullOrBlank()) {
+                    val conts = findContinuationItemsRecursive(data)
+                    currentToken = findContinuationTokenFromItems(conts)
+                }
+
                 var pagesFetchedLocal = 1
-                val maxPages = sharedPref?.getString("channel_max_pages", "10")?.toIntOrNull() ?: 10
+                val maxPages = sharedPref?.getString("channel_max_pages", "6")?.toIntOrNull() ?: 6
 
                 while (!currentToken.isNullOrBlank() && pagesFetchedLocal < maxPages && !apiKey.isNullOrBlank()) {
                     try {
-                        val body = mapOf(
+                        pagesFetchedLocal += 1
+                        val apiUrl = "https://www.youtube.com/youtubei/v1/browse?key=$apiKey"
+                        val payload = mapOf(
                             "context" to mapOf(
                                 "client" to mapOf(
                                     "clientName" to "WEB",
-                                    "clientVersion" to "2.20231201.00.00",
-                                    "hl" to "en"
+                                    "clientVersion" to clientVersion,
+                                    "visitorData" to (visitorData ?: ""),
+                                    "platform" to "DESKTOP"
                                 )
                             ),
                             "continuation" to currentToken
                         )
-
-                        val contRes = app.post(
-                            "https://www.youtube.com/youtubei/v1/browse?key=$apiKey",
-                            json = body,
-                            interceptor = ytInterceptor
-                        )
-                        val contJson = parseJson<Map<*, *>>(contRes.text)
-                        val actions = contJson["onResponseReceivedActions"] as? List<*> ?: break
-                        var foundAny = false
-
-                        for (action in actions) {
-                            val actionMap = action as? Map<*, *> ?: continue
-                            val appendItems = (safeGet(actionMap, "appendContinuationItemsAction", "continuationItems") as? List<*>)
-                                ?: (safeGet(actionMap, "reloadContinuationItemsCommand", "continuationItems") as? List<*>)
-                                ?: continue
-
-                            extractVideosFromItems(appendItems, allEpisodes)
-                            currentToken = findToken(appendItems)
-                            foundAny = true
-                        }
-
-                        if (!foundAny) break
-                        pagesFetchedLocal++
+                        val headers = mapOf("X-Youtube-Client-Name" to "WEB", "X-Youtube-Client-Version" to clientVersion)
+                        val jsonResponse = app.post(apiUrl, json = payload, headers = headers, interceptor = ytInterceptor).parsedSafe<Map<String, Any>>() ?: break
+                        val continuationItems = findContinuationItemsRecursive(jsonResponse) ?: break
+                        extractVideosFromItems(continuationItems, allEpisodes)
+                        currentToken = findContinuationTokenFromItems(continuationItems)
+                        kotlinx.coroutines.delay((SLEEP_BETWEEN * 10).toLong())
                     } catch (e: Exception) {
                         break
                     }
@@ -1038,14 +1066,18 @@ class YoutubeProvider(
 
                 return newTvSeriesLoadResponse(title, url, TvType.TvSeries, allEpisodes) {
                     this.posterUrl = poster
-                    this.backgroundPosterUrl = background
-                    this.plot = description
+                    this.plot = "Channel: $title\nSubscribers: ${subscriberCount ?: "N/A"}\nVideos Fetched: ${allEpisodes.size}"
+                    this.tags = listOf(title, "Channel")
                 }
+
             } catch (e: Exception) {
-                logError(e)
-                throw ErrorLoadingException("Failed to load channel: ${e.message}")
+                Log.e(name, "Error parsing channel", e)
             }
         }
+
+        // ==========================================
+        // 3. معالجة قوائم التشغيل (Playlists)
+        // ==========================================
         if (url.contains("list=")) {
             try {
                 val response = app.get(url, interceptor = ytInterceptor)
@@ -1062,6 +1094,14 @@ class YoutubeProvider(
                     ?: extractTitle(safeGet(playlistHeader, "title") as? Map<*, *>)
                     ?: response.document.selectFirst("meta[property=og:title]")?.attr("content")
                     ?: "YouTube Playlist"
+
+                val ownerObj = safeGet(playlistHeader, "ownerText") as? Map<*, *>
+                val author = extractTitle(ownerObj)
+                    ?: safeGet(pageHeader, "content", "pageHeaderViewModel", "metadata", "contentMetadataViewModel", "metadataRows", 0, "metadataParts", 0, "avatarStack", "avatarStackViewModel", "text", "content") as? String
+                    ?: "Unknown Channel"
+
+                val description = extractTitle(safeGet(playlistHeader, "description") as? Map<*, *>)
+                    ?: response.document.selectFirst("meta[name=description]")?.attr("content")
 
                 val poster = getBestThumbnail(safeGet(pageHeader, "content", "pageHeaderViewModel", "heroImage", "contentPreviewImageViewModel", "image", "sources") as? List<*>)
                     ?: getBestThumbnail(safeGet(playlistHeader, "playlistHeaderBanner", "heroPlaylistThumbnailRenderer", "thumbnail"))
@@ -1081,10 +1121,12 @@ class YoutubeProvider(
 
                 contents?.forEachIndexed { index, item ->
                     val map = item as? Map<*, *> ?: return@forEachIndexed
+
+                    // الهيكل الحديث
                     val lockup = map["lockupViewModel"] as? Map<*, *>
                     if (lockup != null) {
                         val vId = lockup.getString("contentId") ?: return@forEachIndexed
-                        val vidTitle = getText(safeGet(lockup, "metadata", "lockupMetadataViewModel", "title")).ifBlank { "Video ${index + 1}" }
+                        val vidTitle = getText(safeGet(lockup, "metadata", "lockupMetadataViewModel", "title")).ifBlank { "Episode ${index + 1}" }
                         val sources = safeGet(lockup, "contentImage", "thumbnailViewModel", "image", "sources") as? List<*>
                         val thumb = getBestThumbnail(sources) ?: buildThumbnailFromId(vId)
 
@@ -1095,103 +1137,131 @@ class YoutubeProvider(
                         })
                         return@forEachIndexed
                     }
+
+                    // الهيكل التقليدي
                     val videoRenderer = (map["playlistVideoRenderer"] ?: map["videoRenderer"]) as? Map<*, *>
                     if (videoRenderer != null) {
                         val vId = videoRenderer.getString("videoId") ?: return@forEachIndexed
-                        val vidTitle = extractTitle(videoRenderer.getMapKey("title")) ?: "Video ${index + 1}"
+                        val vidTitle = extractTitle(videoRenderer.getMapKey("title")) ?: "Episode ${index + 1}"
                         val thumb = getBestThumbnail(videoRenderer["thumbnail"]) ?: buildThumbnailFromId(vId)
+                        val durationText = extractTitle(safeGet(videoRenderer, "lengthText") as? Map<*, *>)
 
                         episodes.add(newEpisode("$mainUrl/watch?v=$vId") {
                             this.name = vidTitle
                             this.episode = index + 1
                             this.posterUrl = thumb
+                            this.description = if (durationText != null) "Duration: $durationText" else null
                         })
                     }
                 }
 
+                val playlistPoster = poster ?: episodes.firstOrNull()?.posterUrl
+
                 return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
-                    this.posterUrl = poster
+                    this.posterUrl = playlistPoster
+                    val finalDescription = if (description.isNullOrBlank()) "Channel: $author" else "Channel: $author\n\n$description"
+                    this.plot = finalDescription
+                    this.tags = listOf(author)
                 }
             } catch (e: Exception) {
-                logError(e)
-                throw ErrorLoadingException("Failed to load playlist: ${e.message}")
+                Log.e(name, "Error parsing playlist", e)
             }
         }
-        val videoId = when {
-            url.contains("v=") -> url.substringAfter("v=").substringBefore("&")
-            url.contains("youtu.be/") -> url.substringAfter("youtu.be/").substringBefore("?")
-            else -> url.substringAfterLast("/")
-        }
 
-        val fullUrl = "$mainUrl/watch?v=$videoId"
-        val response = app.get(fullUrl, interceptor = ytInterceptor)
+        // ==========================================
+        // 4. معالجة الفيديو الفردي مع الاقتراحات (Single Video & Recs)
+        // ==========================================
+        val videoId = url.extractYoutubeId() ?: throw ErrorLoadingException("Invalid YouTube URL")
+
+        val response = app.get(url, interceptor = ytInterceptor)
         val html = response.text
+        val data = extractYtInitialData(html)
 
-        val data = extractYtInitialData(html) ?: throw ErrorLoadingException("Failed to extract video data")
-        val prJsonStr = Regex("""ytInitialPlayerResponse\s*=\s*(\{.+?\});(?:\s*var\s|\s*</script>|\s*\n)""").find(html)?.groupValues?.get(1)
-            ?: Regex("""var\s+ytInitialPlayerResponse\s*=\s*(\{.+?\});""").find(html)?.groupValues?.get(1)
-        val pr = if (!prJsonStr.isNullOrBlank()) parseJson<Map<*, *>>(prJsonStr) else null
+        var title = "YouTube Video"
+        var plot = ""
+        var poster = buildThumbnailFromId(videoId)
 
-        val vr = safeGet(pr, "videoDetails") as? Map<*, *>
-        val title = vr?.getString("title")
-            ?: response.document.selectFirst("meta[name=title]")?.attr("content")
-            ?: "YouTube Video"
+        var channelName = ""
+        var channelId = ""
+        var channelAvatar = ""
 
-        val description = vr?.getString("shortDescription")
-            ?: response.document.selectFirst("meta[name=description]")?.attr("content")
+        val recommendations = mutableListOf<SearchResponse>()
+        val seenRecIds = mutableSetOf<String>()
 
-        val author = vr?.getString("author")
-        val lengthSec = vr?.getString("lengthSeconds")?.toIntOrNull()
-        val duration = if (lengthSec != null) lengthSec / 60 else null
-        val year = response.document.selectFirst("meta[itemprop=uploadDate]")
-            ?.attr("content")?.take(4)?.toIntOrNull()
+        if (data != null) {
+            val resultsContents = safeGet(data, "contents", "twoColumnWatchNextResults", "results", "results", "contents") as? List<*>
 
-        val poster = getBestThumbnail(vr?.get("thumbnail"))
-            ?: buildThumbnailFromId(videoId)
+            resultsContents?.forEach { item ->
+                val m = item as? Map<*, *>
 
-        val tags = (vr?.get("keywords") as? List<*>)?.filterIsInstance<String>()
-        val recs = mutableListOf<SearchResponse>()
-        val seenRecIds = mutableSetOf(videoId)
+                val primary = m?.get("videoPrimaryInfoRenderer") as? Map<*, *>
+                if (primary != null) {
+                    val t = extractTitle(primary["title"] as? Map<*, *>)
+                    if (!t.isNullOrBlank()) title = t
 
-        val secondary = safeGet(
-            data, "contents", "twoColumnWatchNextResults", "secondaryResults",
-            "secondaryResults", "results"
-        ) as? List<*>
+                    val dateText = extractTitle(primary["dateText"] as? Map<*, *>)
+                    if (!dateText.isNullOrBlank()) plot += "$dateText\n\n"
+                }
 
-        secondary?.forEach { secItem ->
-            val secMap = secItem as? Map<*, *> ?: return@forEach
-            val owner = safeGet(secMap, "compactVideoRenderer", "ownerText")
-                ?: safeGet(secMap, "compactVideoRenderer", "shortBylineText")
-            val runs = (owner as? Map<*, *>)?.get("runs") as? List<*>
-            val nav = (runs?.getOrNull(0) as? Map<*, *>)?.get("navigationEndpoint") as? Map<*, *>
-            val browseId = safeGet(nav, "browseEndpoint", "browseId") as? String
-            val chTitle = (runs?.getOrNull(0) as? Map<*, *>)?.get("text") as? String
+                val secondary = m?.get("videoSecondaryInfoRenderer") as? Map<*, *>
+                if (secondary != null) {
+                    val owner = safeGet(secondary, "owner", "videoOwnerRenderer") as? Map<*, *>
+                    if (owner != null) {
+                        channelName = extractTitle(owner["title"] as? Map<*, *>) ?: ""
+                        channelAvatar = getBestThumbnail(owner["thumbnail"]) ?: ""
+                        channelId = safeGet(owner, "navigationEndpoint", "browseEndpoint", "browseId") as? String ?: ""
+                        if (channelId.isEmpty()) {
+                            val curl = safeGet(owner, "navigationEndpoint", "commandMetadata", "webCommandMetadata", "url") as? String
+                            if (!curl.isNullOrBlank()) channelId = curl.substringAfterLast("/")
+                        }
+                    }
 
-            if (!browseId.isNullOrBlank() && !chTitle.isNullOrBlank() && seenRecIds.add(browseId)) {
-                val chPoster = getBestThumbnail(safeGet(secMap, "compactVideoRenderer", "channelThumbnail"))
-                recs.add(newMovieSearchResponse("[Channel] $chTitle", "$mainUrl/channel/$browseId", TvType.Live) {
-                    this.posterUrl = chPoster
-                })
+                    val descObj = secondary["attributedDescription"] as? Map<*, *>
+                        ?: secondary["description"] as? Map<*, *>
+                    val fullDesc = getText(descObj)
+                    if (fullDesc.isNotBlank()) {
+                        plot += fullDesc
+                    }
+                }
             }
 
-            collectFromRenderer(secMap, seenRecIds)?.let {
-                recs.add(it)
+            // جلب الاقتراحات عودياً عبر processRecursive
+            val secondaryResults = safeGet(data, "contents", "twoColumnWatchNextResults", "secondaryResults", "secondaryResults", "results")
+            if (secondaryResults != null) {
+                processRecursive(secondaryResults, recommendations, seenRecIds, false)
             }
+        } else {
+            val doc = response.document
+            title = doc.selectFirst("meta[property=og:title]")?.attr("content") ?: title
+            poster = doc.selectFirst("meta[property=og:image]")?.attr("content") ?: poster
+            plot = doc.selectFirst("meta[property=og:description]")?.attr("content") ?: plot
         }
 
-        return newMovieLoadResponse(title, fullUrl, TvType.Movie, videoId) {
-            this.posterUrl = poster
-            this.backgroundPosterUrl = poster
-            this.plot = description
-            this.year = year
-            this.duration = duration
-            this.tags = tags
-            this.recommendations = recs
-            if (!author.isNullOrBlank()) {
-                this.actors = listOf(ActorData(Actor(author, null)))
+        // إضافة بطاقة القناة في أعلى الاقتراحات
+        if (channelName.isNotBlank() && channelId.isNotBlank()) {
+            val channelUrlFull = if (channelId.startsWith("UC") || channelId.startsWith("@")) "$mainUrl/channel/$channelId" else "$mainUrl/$channelId"
+            val channelCard = newMovieSearchResponse(
+                "Channel: $channelName",
+                channelUrlFull,
+                TvType.Live
+            ) {
+                this.posterUrl = channelAvatar
             }
+            recommendations.add(0, channelCard)
+        }
+
+        val filteredRecs = recommendations.filter { !it.url.contains("/shorts/") }
+
+        return newMovieLoadResponse(title, url, TvType.Movie, videoId) {
+            this.posterUrl = poster
+            this.plot = plot
+            if (channelName.isNotBlank()) {
+                this.tags = listOf(channelName)
+            }
+            this.recommendations = filteredRecs
         }
     }
+    
     private fun sha1(input: String): String {
         val md = java.security.MessageDigest.getInstance("SHA-1")
         val bytes = md.digest(input.toByteArray())
