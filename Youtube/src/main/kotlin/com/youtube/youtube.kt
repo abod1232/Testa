@@ -32,7 +32,7 @@ class YoutubeProvider(
         const val SLEEP_BETWEEN = 1
     }
     override var mainUrl = "https://www.youtube.com"
-    override var name = "YouTube"
+    override var name = "YouTube2"
     override val hasMainPage = true
     override var lang = "ar"
     override val supportedTypes = setOf(TvType.Movie, TvType.Live)
