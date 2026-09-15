@@ -32,7 +32,7 @@ class YoutubeProvider(
         const val SLEEP_BETWEEN = 1
     }
     override var mainUrl = "https://www.youtube.com"
-    override var name = "YouTube2"
+    override var name = "YouTube"
     override val hasMainPage = true
     override var lang = "ar"
     override val supportedTypes = setOf(TvType.Movie, TvType.Live)
@@ -823,6 +823,42 @@ class YoutubeProvider(
 
 
     override suspend fun load(url: String): LoadResponse {
+        // ==========================================
+        // 1. معالجة مقاطع الشورتس كمسلسل (Shorts Series)
+        // ==========================================
+        if (url.contains("/shorts/")) {
+            val videoId = url.substringAfter("/shorts/").substringBefore("&").substringBefore("?")
+            val isSearch = url.contains("ctx=search")
+            val targetList = if (isSearch) searchShorts else homeShorts
+
+            val episodes = if (targetList.isNotEmpty()) {
+                targetList.toList()
+            } else {
+                // في حال فتح الرابط مباشرة أو كانت القائمة فارغة
+                listOf(
+                    newEpisode("$mainUrl/watch?v=$videoId") {
+                        this.name = "Shorts Clip"
+                        this.episode = 1
+                        this.posterUrl = "https://i.ytimg.com/vi/$videoId/oar2.jpg"
+                    }
+                )
+            }
+
+            // تحديد الصورة والعنوان
+            val currentEpisode = episodes.firstOrNull { it.data.contains(videoId) } ?: episodes.firstOrNull()
+            val poster = currentEpisode?.posterUrl ?: "https://i.ytimg.com/vi/$videoId/oar2.jpg"
+            val title = if (isSearch) "Shorts (Search Results)" else "YouTube Shorts"
+
+            return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
+                this.posterUrl = poster
+                this.backgroundPosterUrl = poster
+                this.plot = "YouTube Shorts Player"
+            }
+        }
+
+        // ==========================================
+        // 2. معالجة القنوات (Channels)
+        // ==========================================
         if (url.contains("/@") || url.contains("/channel/") || url.contains("/c/") || url.contains("/user/")) {
             try {
                 val channelUrl = if (url.endsWith("/videos")) url else "$url/videos"
@@ -830,6 +866,7 @@ class YoutubeProvider(
                 val html = response.text
                 val data = extractYtInitialData(html) ?: throw ErrorLoadingException("Failed to extract channel data")
                 val apiKey = Regex(""""INNERTUBE_API_KEY":\s*"([^"]+)"""").find(html)?.groupValues?.get(1)
+
                 val channelMeta = safeGet(data, "metadata", "channelMetadataRenderer") as? Map<*, *>
                 val pageHeader = safeGet(data, "header", "pageHeaderRenderer") as? Map<*, *>
                 val c4Header = safeGet(data, "header", "c4TabbedHeaderRenderer") as? Map<*, *>
@@ -849,6 +886,7 @@ class YoutubeProvider(
 
                 val description = channelMeta?.getString("description")
                     ?: response.document.selectFirst("meta[name=description]")?.attr("content")
+
                 val tabs = safeGet(data, "contents", "twoColumnBrowseResultsRenderer", "tabs") as? List<*>
                 val videosTab = tabs?.firstOrNull { tab ->
                     val tabR = (tab as? Map<*, *>)?.get("tabRenderer") as? Map<*, *>
@@ -859,11 +897,13 @@ class YoutubeProvider(
                     ?: safeGet(data, "contents", "twoColumnBrowseResultsRenderer", "tabs", 0, "tabRenderer", "content", "sectionListRenderer", "contents", 0, "itemSectionRenderer", "contents") as? List<*>
 
                 val allEpisodes = mutableListOf<Episode>()
+
                 fun extractVideosFromItems(items: List<*>, collectTo: MutableList<Episode>) {
                     items.forEach { item ->
                         val map = item as? Map<*, *> ?: return@forEach
                         val richContent = safeGet(map, "richItemRenderer", "content") as? Map<*, *>
                         val lockup = (map["lockupViewModel"] ?: richContent?.get("lockupViewModel")) as? Map<*, *>
+
                         if (lockup != null) {
                             val vId = lockup.getString("contentId")
                                 ?: safeGet(lockup, "content", "videoId") as? String
@@ -883,6 +923,7 @@ class YoutubeProvider(
                                 return@forEach
                             }
                         }
+
                         val videoRenderer = when {
                             map.containsKey("videoRenderer") -> map["videoRenderer"] as? Map<*, *>
                             map.containsKey("gridVideoRenderer") -> map["gridVideoRenderer"] as? Map<*, *>
@@ -913,6 +954,7 @@ class YoutubeProvider(
                 if (richGridContents != null) {
                     extractVideosFromItems(richGridContents, allEpisodes)
                 }
+
                 fun findToken(contentsList: List<*>?): String? {
                     if (contentsList == null) return null
                     for (c in contentsList) {
@@ -928,6 +970,7 @@ class YoutubeProvider(
                 var currentToken = findToken(richGridContents)
                 var pagesFetchedLocal = 1
                 val maxPages = sharedPref?.getString("channel_max_pages", "10")?.toIntOrNull() ?: 10
+
                 while (!currentToken.isNullOrBlank() && pagesFetchedLocal < maxPages && !apiKey.isNullOrBlank()) {
                     try {
                         val body = mapOf(
@@ -978,6 +1021,10 @@ class YoutubeProvider(
                 throw ErrorLoadingException("Failed to load channel: ${e.message}")
             }
         }
+
+        // ==========================================
+        // 3. معالجة قوائم التشغيل (Playlists)
+        // ==========================================
         if (url.contains("list=")) {
             try {
                 val response = app.get(url, interceptor = ytInterceptor)
@@ -1049,10 +1096,13 @@ class YoutubeProvider(
                 throw ErrorLoadingException("Failed to load playlist: ${e.message}")
             }
         }
+
+        // ==========================================
+        // 4. معالجة الفيديو الفردي (Single Video)
+        // ==========================================
         val videoId = when {
             url.contains("v=") -> url.substringAfter("v=").substringBefore("&")
             url.contains("youtu.be/") -> url.substringAfter("youtu.be/").substringBefore("?")
-            url.contains("/shorts/") -> url.substringAfter("/shorts/").substringBefore("?")
             else -> url.substringAfterLast("/")
         }
 
