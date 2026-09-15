@@ -571,13 +571,9 @@ class YoutubeProvider(
 
         val requestData = request.data
         val isPlaylist = requestData.contains("list=") || requestData.startsWith("playlist_")
-
-        // دالة استخراج فيديوهات قوائم التشغيل (تدعم الجديد والقديم)
         fun extractPlaylistVideos(items: List<*>) {
             items.forEach { item ->
                 val map = item as? Map<*, *> ?: return@forEach
-
-                // 1. الهيكل الجديد (lockupViewModel)
                 val lockup = map["lockupViewModel"] as? Map<*, *>
                 if (lockup != null) {
                     val vId = lockup.getString("contentId")
@@ -599,8 +595,6 @@ class YoutubeProvider(
                         return@forEach
                     }
                 }
-
-                // 2. الهيكل التقليدي (playlistVideoRenderer / videoRenderer)
                 val renderer = (map["playlistVideoRenderer"] ?: map["videoRenderer"] ?: map["gridVideoRenderer"]) as? Map<*, *>
                 if (renderer != null) {
                     val vId = renderer.getString("videoId")
@@ -619,8 +613,6 @@ class YoutubeProvider(
                 }
             }
         }
-
-        // استخراج توكن التمرير الخاص بقوائم التشغيل
         fun findPlaylistToken(items: List<*>?): String? {
             if (items == null) return null
             for (it in items) {
@@ -674,13 +666,11 @@ class YoutubeProvider(
                             nextContinuation = findPlaylistToken(conts)
                         }
                     } else {
-                        // معالجة القنوات والصفحة الرئيسية
                         processRecursive(initialData, results, seenIds, playlistMode = false)
                         nextContinuation = findTokenRecursive(initialData)
                     }
                 }
             } else {
-                // الصفحات التالية (Pagination)
                 val tokenToUse = continuationTokens[requestData]
                 if (!tokenToUse.isNullOrBlank() && !savedApiKey.isNullOrBlank()) {
                     val decodedToken = java.net.URLDecoder.decode(tokenToUse, "UTF-8")
@@ -735,10 +725,6 @@ class YoutubeProvider(
 
         return newHomePageResponse(request, results, hasNext = !nextContinuation.isNullOrBlank())
     }
-
-    // ==========================================
-    // 3. الدوال المساعدة للبحث والتمرير العودي (Recursion)
-    // ==========================================
     fun findContinuationItemsRecursive(obj: Any?): List<*>? {
         when (obj) {
             is Map<*, *> -> {
@@ -872,10 +858,6 @@ class YoutubeProvider(
 
 override suspend fun load(url: String): LoadResponse {
         Log.d(name, "load called for url=$url")
-
-        // ==========================================
-        // 1. معالجة مقاطع الشورتس كمسلسل (Shorts Feed)
-        // ==========================================
         if (url.contains("/shorts/")) {
             val videoId = url.extractYoutubeId() ?: "video"
             val useSearchList = url.contains("&ctx=search")
@@ -901,10 +883,6 @@ override suspend fun load(url: String): LoadResponse {
                 this.tags = listOf("Shorts", "Feed")
             }
         }
-
-        // ==========================================
-        // 2. معالجة القنوات (Channels)
-        // ==========================================
         if (url.contains("/@") || url.contains("/channel/") || url.contains("/c/") || url.contains("/user/")) {
             try {
                 val channelUrl = if (url.endsWith("/videos")) url else "$url/videos"
@@ -942,8 +920,6 @@ override suspend fun load(url: String): LoadResponse {
                         val map = item as? Map<*, *> ?: return@forEach
                         val richContent = safeGet(map, "richItemRenderer", "content") as? Map<*, *>
                         val lockup = (map["lockupViewModel"] ?: richContent?.get("lockupViewModel")) as? Map<*, *>
-
-                        // دعم الهيكل الجديد
                         if (lockup != null) {
                             val vId = lockup.getString("contentId")
                                 ?: safeGet(lockup, "content", "videoId") as? String
@@ -962,8 +938,6 @@ override suspend fun load(url: String): LoadResponse {
                                 return@forEach
                             }
                         }
-
-                        // دعم الهيكل القديم
                         val videoRenderer = when {
                             map.containsKey("videoRenderer") -> map["videoRenderer"] as? Map<*, *>
                             map.containsKey("gridVideoRenderer") -> map["gridVideoRenderer"] as? Map<*, *>
@@ -1074,10 +1048,6 @@ override suspend fun load(url: String): LoadResponse {
                 Log.e(name, "Error parsing channel", e)
             }
         }
-
-        // ==========================================
-        // 3. معالجة قوائم التشغيل (Playlists)
-        // ==========================================
         if (url.contains("list=")) {
             try {
                 val response = app.get(url, interceptor = ytInterceptor)
@@ -1121,8 +1091,6 @@ override suspend fun load(url: String): LoadResponse {
 
                 contents?.forEachIndexed { index, item ->
                     val map = item as? Map<*, *> ?: return@forEachIndexed
-
-                    // الهيكل الحديث
                     val lockup = map["lockupViewModel"] as? Map<*, *>
                     if (lockup != null) {
                         val vId = lockup.getString("contentId") ?: return@forEachIndexed
@@ -1137,8 +1105,6 @@ override suspend fun load(url: String): LoadResponse {
                         })
                         return@forEachIndexed
                     }
-
-                    // الهيكل التقليدي
                     val videoRenderer = (map["playlistVideoRenderer"] ?: map["videoRenderer"]) as? Map<*, *>
                     if (videoRenderer != null) {
                         val vId = videoRenderer.getString("videoId") ?: return@forEachIndexed
@@ -1167,10 +1133,6 @@ override suspend fun load(url: String): LoadResponse {
                 Log.e(name, "Error parsing playlist", e)
             }
         }
-
-        // ==========================================
-        // 4. معالجة الفيديو الفردي مع الاقتراحات (Single Video & Recs)
-        // ==========================================
         val videoId = url.extractYoutubeId() ?: throw ErrorLoadingException("Invalid YouTube URL")
 
         val response = app.get(url, interceptor = ytInterceptor)
@@ -1224,8 +1186,6 @@ override suspend fun load(url: String): LoadResponse {
                     }
                 }
             }
-
-            // جلب الاقتراحات عودياً عبر processRecursive
             val secondaryResults = safeGet(data, "contents", "twoColumnWatchNextResults", "secondaryResults", "secondaryResults", "results")
             if (secondaryResults != null) {
                 processRecursive(secondaryResults, recommendations, seenRecIds, false)
@@ -1236,8 +1196,6 @@ override suspend fun load(url: String): LoadResponse {
             poster = doc.selectFirst("meta[property=og:image]")?.attr("content") ?: poster
             plot = doc.selectFirst("meta[property=og:description]")?.attr("content") ?: plot
         }
-
-        // إضافة بطاقة القناة في أعلى الاقتراحات
         if (channelName.isNotBlank() && channelId.isNotBlank()) {
             val channelUrlFull = if (channelId.startsWith("UC") || channelId.startsWith("@")) "$mainUrl/channel/$channelId" else "$mainUrl/$channelId"
             val channelCard = newMovieSearchResponse(
