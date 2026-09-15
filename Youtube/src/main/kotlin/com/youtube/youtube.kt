@@ -822,9 +822,6 @@ class YoutubeProvider(
 
 
 override suspend fun load(url: String): LoadResponse {
-        // ==========================================
-        // 1. معالجة القنوات (Channels)
-        // ==========================================
         if (url.contains("/@") || url.contains("/channel/") || url.contains("/c/") || url.contains("/user/")) {
             try {
                 val channelUrl = if (url.endsWith("/videos")) url else "$url/videos"
@@ -832,8 +829,6 @@ override suspend fun load(url: String): LoadResponse {
                 val html = response.text
                 val data = extractYtInitialData(html) ?: throw ErrorLoadingException("Failed to extract channel data")
                 val apiKey = extractInnertubeApiKey(html)
-
-                // استخراج معلومات القناة الأساسية
                 val channelMeta = safeGet(data, "metadata", "channelMetadataRenderer") as? Map<*, *>
                 val pageHeader = safeGet(data, "header", "pageHeaderRenderer") as? Map<*, *>
                 val c4Header = safeGet(data, "header", "c4TabbedHeaderRenderer") as? Map<*, *>
@@ -853,8 +848,6 @@ override suspend fun load(url: String): LoadResponse {
 
                 val description = channelMeta?.getString("description")
                     ?: response.document.selectFirst("meta[name=description]")?.attr("content")
-
-                // البحث عن تبويب الفيديوهات
                 val tabs = safeGet(data, "contents", "twoColumnBrowseResultsRenderer", "tabs") as? List<*>
                 val videosTab = tabs?.firstOrNull { tab ->
                     val tabR = (tab as? Map<*, *>)?.get("tabRenderer") as? Map<*, *>
@@ -865,15 +858,11 @@ override suspend fun load(url: String): LoadResponse {
                     ?: safeGet(data, "contents", "twoColumnBrowseResultsRenderer", "tabs", 0, "tabRenderer", "content", "sectionListRenderer", "contents", 0, "itemSectionRenderer", "contents") as? List<*>
 
                 val allEpisodes = mutableListOf<Episode>()
-
-                // دالة استخراج الفيديوهات (تدعم lockupViewModel الجديد و videoRenderer القديم)
                 fun extractVideosFromItems(items: List<*>, collectTo: MutableList<Episode>) {
                     items.forEach { item ->
                         val map = item as? Map<*, *> ?: return@forEach
                         val richContent = safeGet(map, "richItemRenderer", "content") as? Map<*, *>
                         val lockup = (map["lockupViewModel"] ?: richContent?.get("lockupViewModel")) as? Map<*, *>
-
-                        // 1. الهيكل الحديث (lockupViewModel)
                         if (lockup != null) {
                             val vId = lockup.getString("contentId")
                                 ?: safeGet(lockup, "content", "videoId") as? String
@@ -893,8 +882,6 @@ override suspend fun load(url: String): LoadResponse {
                                 return@forEach
                             }
                         }
-
-                        // 2. الهيكل التقليدي القديم
                         val videoRenderer = when {
                             map.containsKey("videoRenderer") -> map["videoRenderer"] as? Map<*, *>
                             map.containsKey("gridVideoRenderer") -> map["gridVideoRenderer"] as? Map<*, *>
@@ -925,8 +912,6 @@ override suspend fun load(url: String): LoadResponse {
                 if (richGridContents != null) {
                     extractVideosFromItems(richGridContents, allEpisodes)
                 }
-
-                // استخراج الـ Token لجلب المزيد من الصفحات
                 fun findToken(contentsList: List<*>?): String? {
                     if (contentsList == null) return null
                     for (c in contentsList) {
@@ -942,8 +927,6 @@ override suspend fun load(url: String): LoadResponse {
                 var currentToken = findToken(richGridContents)
                 var pagesFetchedLocal = 1
                 val maxPages = sharedPref?.getString("channel_max_pages", "10")?.toIntOrNull() ?: 10
-
-                // التمرير عبر الصفحات
                 while (!currentToken.isNullOrBlank() && pagesFetchedLocal < maxPages && !apiKey.isNullOrBlank()) {
                     try {
                         val body = mapOf(
@@ -994,10 +977,6 @@ override suspend fun load(url: String): LoadResponse {
                 throw ErrorLoadingException("Failed to load channel: ${e.message}")
             }
         }
-
-        // ==========================================
-        // 2. معالجة قوائم التشغيل (Playlists)
-        // ==========================================
         if (url.contains("list=")) {
             try {
                 val response = app.get(url, interceptor = ytInterceptor)
@@ -1033,8 +1012,6 @@ override suspend fun load(url: String): LoadResponse {
 
                 contents?.forEachIndexed { index, item ->
                     val map = item as? Map<*, *> ?: return@forEachIndexed
-
-                    // الهيكل الحديث (lockupViewModel)
                     val lockup = map["lockupViewModel"] as? Map<*, *>
                     if (lockup != null) {
                         val vId = lockup.getString("contentId") ?: return@forEachIndexed
@@ -1049,8 +1026,6 @@ override suspend fun load(url: String): LoadResponse {
                         })
                         return@forEachIndexed
                     }
-
-                    // الهيكل التقليدي (playlistVideoRenderer)
                     val videoRenderer = (map["playlistVideoRenderer"] ?: map["videoRenderer"]) as? Map<*, *>
                     if (videoRenderer != null) {
                         val vId = videoRenderer.getString("videoId") ?: return@forEachIndexed
@@ -1073,10 +1048,6 @@ override suspend fun load(url: String): LoadResponse {
                 throw ErrorLoadingException("Failed to load playlist: ${e.message}")
             }
         }
-
-        // ==========================================
-        // 3. معالجة الفيديو الفردي (Single Video)
-        // ==========================================
         val videoId = when {
             url.contains("v=") -> url.substringAfter("v=").substringBefore("&")
             url.contains("youtu.be/") -> url.substringAfter("youtu.be/").substringBefore("?")
@@ -1109,8 +1080,6 @@ override suspend fun load(url: String): LoadResponse {
             ?: buildThumbnailFromId(videoId)
 
         val tags = (vr?.get("keywords") as? List<*>)?.filterIsInstance<String>()
-
-        // استخراج الفيديوهات المقترحة (Recommendations)
         val recs = mutableListOf<SearchResponse>()
         val seenRecIds = mutableSetOf(videoId)
 
@@ -1121,8 +1090,6 @@ override suspend fun load(url: String): LoadResponse {
 
         secondary?.forEach { secItem ->
             val secMap = secItem as? Map<*, *> ?: return@forEach
-
-            // بطاقة القناة
             val owner = safeGet(secMap, "compactVideoRenderer", "ownerText")
                 ?: safeGet(secMap, "compactVideoRenderer", "shortBylineText")
             val runs = (owner as? Map<*, *>)?.get("runs") as? List<*>
