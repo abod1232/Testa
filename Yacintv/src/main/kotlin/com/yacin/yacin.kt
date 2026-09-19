@@ -115,17 +115,16 @@ class YacineTVProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val data = parseJson<LinkData>(url)
-        return newLiveStreamLoadResponse(
-            data.name,
-            url,
-            TvType.Live,
-            url
-        ) {
-            this.posterUrl = data.poster
-            this.plot = "بث مباشر لقناة ${data.name}"
-        }
+    val data = parseJson<LinkData>(url)
+    return newLiveStreamLoadResponse(
+        data.name,
+        url,
+        url
+    ) {
+        this.posterUrl = data.poster
+        this.plot = "بث مباشر لقناة ${data.name}"
     }
+}
 
     override suspend fun loadLinks(
     data: String,
