@@ -5,8 +5,8 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
-import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.Qualities
+import com.lagradost.cloudstream3.utils.newExtractorLink
 import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -71,8 +71,8 @@ class YacineTVProvider : MainAPI() {
                     val decryptedJson = decrypt(body, tHeader)
                     return@withContext parseJson<YacineResponse>(decryptedJson)
                 }
-            } catch (e: Exception) { 
-                continue 
+            } catch (e: Exception) {
+                continue
             }
         }
         null
@@ -80,6 +80,7 @@ class YacineTVProvider : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse = withContext(Dispatchers.IO) {
         val categories = fetchYacine("categories")?.data ?: emptyList()
+
         val homePageLists = categories.map { cat ->
             async {
                 val channels = fetchYacine("categories/${cat.id}/channels")?.data ?: emptyList()
@@ -115,53 +116,54 @@ class YacineTVProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-    val data = parseJson<LinkData>(url)
-    return newLiveStreamLoadResponse(
-        data.name,
-        url,
-        url
-    ) {
-        this.posterUrl = data.poster
-        this.plot = "بث مباشر لقناة ${data.name}"
-    }
-}
-
-    override suspend fun loadLinks(
-    data: String,
-    isCasting: Boolean,
-    subtitleCallback: (SubtitleFile) -> Unit,
-    callback: (ExtractorLink) -> Unit
-): Boolean = withContext(Dispatchers.IO) {
-    val linkData = parseJson<LinkData>(data)
-    val responseData = fetchYacine("channel/${linkData.id}")
-    val streams = responseData?.data ?: return@withContext false
-
-    streams.forEach { stream ->
-        val finalUrl = stream.url?.replace("www.elahmad.coo", "www.elahmad.com") ?: ""
-        if (finalUrl.isNotEmpty()) {
-            val streamHeaders = mutableMapOf<String, String>()
-            stream.headers?.forEach { (key, value) ->
-                if (value is String) streamHeaders[key] = value
-            }
-            if (!streamHeaders.containsKey("User-Agent")) {
-                streamHeaders["User-Agent"] = "okhttp/4.12.0"
-            }
-
-            callback.invoke(
-                newExtractorLink(
-                    this@YacineTVProvider.name,
-                    stream.name ?: "بث مباشر",
-                    finalUrl
-                ) {
-                    this.headers = streamHeaders
-                    this.quality = Qualities.Unknown.value
-                    this.referer = streamHeaders["Referer"] ?: ""
-                }
-            )
+        val data = parseJson<LinkData>(url)
+        return newMovieLoadResponse(
+            data.name,
+            url,
+            TvType.Live,
+            url
+        ) {
+            this.posterUrl = data.poster
+            this.plot = "شاهد بث مباشر لقناة ${data.name}"
         }
     }
-    true
-}
+
+    override suspend fun loadLinks(
+        data: String,
+        isCasting: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean = withContext(Dispatchers.IO) {
+        val linkData = parseJson<LinkData>(data)
+        val responseData = fetchYacine("channel/${linkData.id}")
+        val streams = responseData?.data ?: return@withContext false
+
+        streams.forEach { stream ->
+            val finalUrl = stream.url?.replace("www.elahmad.coo", "www.elahmad.com") ?: ""
+            if (finalUrl.isNotEmpty()) {
+                val streamHeaders = mutableMapOf<String, String>()
+                stream.headers?.forEach { (key, value) ->
+                    if (value is String) streamHeaders[key] = value
+                }
+                if (!streamHeaders.containsKey("User-Agent")) {
+                    streamHeaders["User-Agent"] = "okhttp/4.12.0"
+                }
+
+                callback.invoke(
+                    newExtractorLink(
+                        this@YacineTVProvider.name,
+                        stream.name ?: "Server",
+                        finalUrl
+                    ) {
+                        this.headers = streamHeaders
+                        this.quality = Qualities.Unknown.value
+                        this.referer = streamHeaders["Referer"] ?: ""
+                    }
+                )
+            }
+        }
+        true
+    }
 
     data class YacineResponse(
         @JsonProperty("data") val data: List<YacineData>? = null
