@@ -112,25 +112,64 @@ class Shahid4u : MainAPI() {
         }
     }
 
-    private suspend fun httpGet(url: String, referer: String? = null): org.jsoup.nodes.Document {
-        val headers = buildMergedHeaders(url, referer)
-        val safeRef = encodeUri(referer ?: mainUrl) // <-- تنظيف الرابط هنا
+    private suspend fun httpGet(
+    url: String,
+    referer: String? = null
+): org.jsoup.nodes.Document {
 
-        val response = app.get(
-            url,
-            referer = safeRef, // <-- استخدام الرابط الآمن
-            headers = headers,
-            interceptor = cfInterceptor
-        )
-        if (resolvedReferer == null) {
-            val finalUrl = response.url
-            val match = Regex("^(https?://[^/]+/)").find(finalUrl)
-            resolvedReferer = match?.value ?: mainUrl
-            Log.d(logTag, "تم التقاط الرابط النهائي للصور (Referer): $resolvedReferer")
+    val headers = buildMergedHeaders(url, referer)
+    val safeRef = encodeUri(referer ?: mainUrl)
+
+    val response = app.get(
+        url,
+        referer = safeRef,
+        headers = headers,
+        interceptor = cfInterceptor
+    )
+
+    val finalUrl = response.url
+
+    try {
+        val requestedUri = URI(url)
+        val finalUri = URI(finalUrl)
+        val currentMainUri = URI(mainUrl)
+
+        val requestedHost = requestedUri.host
+        val finalHost = finalUri.host
+        val mainHost = currentMainUri.host
+
+        /*
+         * نغير mainUrl فقط إذا:
+         *
+         * 1. الرابط المطلوب كان على نفس دومين mainUrl الحالي
+         * 2. حصل redirect إلى دومين مختلف
+         */
+        if (
+            !requestedHost.isNullOrBlank() &&
+            !finalHost.isNullOrBlank() &&
+            !mainHost.isNullOrBlank() &&
+            requestedHost.equals(mainHost, ignoreCase = true) &&
+            !finalHost.equals(requestedHost, ignoreCase = true)
+        ) {
+            val newMainUrl = "${finalUri.scheme}://${finalUri.authority}/"
+
+            mainUrl = newMainUrl
+
+            Log.d(
+                logTag,
+                "mainUrl changed بسبب redirect: $mainUrl"
+            )
         }
 
-        return response.document
+    } catch (e: Exception) {
+        Log.w(
+            logTag,
+            "Failed to process redirect: ${e.message}"
+        )
     }
+
+    return response.document
+}
 
     private fun parseCard(element: Element): SearchResponse? {
         val linkElement = element.selectFirst("a.show.card, a.glide_post, a")
