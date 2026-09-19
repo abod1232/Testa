@@ -285,73 +285,143 @@ class Shahid4u : MainAPI() {
 
 
     override suspend fun load(url: String): LoadResponse {
-        val document = httpGet(url)
+    val document = httpGet(url)
 
-        val title = document.selectFirst("span.title")?.text()?.trim() ?: "غير متوفر"
-        val poster = document.selectFirst("div.poster-side img")?.attr("src")
-            ?: document.selectFirst("meta[property='og:image']")?.attr("content")
-        val plot = document.selectFirst("span.description")?.text()?.trim()
-        val tags = document.select("div.qualities span.q-tag a").map { it.text() }
+    val title = document.selectFirst("span.title")?.text()?.trim() ?: "غير متوفر"
 
-        val seasons = document.select("div.w-100.bg-main.rounded.my-4 a.epss[href*='/season/']")
-        val episodes = ArrayList<Episode>()
+    val poster = document.selectFirst("div.poster-side img")?.attr("src")
+        ?: document.selectFirst("meta[property='og:image']")?.attr("content")
 
-        if (seasons.isNotEmpty()) {
-            seasons.amap { seasonElement ->
+    val plot = document.selectFirst("span.description")?.text()?.trim()
+
+    val tags = document
+        .select("div.qualities span.q-tag a")
+        .map { it.text() }
+
+    val seasons = document.select(
+        "div.w-100.bg-main.rounded.my-4 a.epss[href*='/season/']"
+    )
+
+    val episodes = ArrayList<Episode>()
+
+    if (seasons.isNotEmpty()) {
+
+        // تقسيم المواسم إلى مجموعات، كل مجموعة تحتوي على 3 طلبات كحد أقصى
+        seasons.chunked(3).forEach { seasonBatch ->
+
+            seasonBatch.amap { seasonElement ->
+
                 val seasonUrl = seasonElement.attr("href")
-                val seasonDoc = httpGet(seasonUrl, referer = url)
 
-                seasonDoc.select("div.w-100.bg-main.rounded.my-4 a.epss:not([href*='/season/'])")
-                    .forEach { episodeElement ->
-                        val epName = episodeElement.text().trim()
-                        val epUrl = episodeElement.attr("href")
-                        val episodeNumber = Regex("""\d+""").find(epName)?.value?.toIntOrNull()
-                        val seasonNumber =
-                            Regex("""الموسم\s*(\d+)""").find(seasonElement.text())?.groupValues?.get(
-                                1
-                            )?.toIntOrNull()
+                try {
+                    val seasonDoc = httpGet(
+                        seasonUrl,
+                        referer = url
+                    )
 
-                        episodes.add(newEpisode(epUrl) {
-                            this.name = epName
-                            episode = episodeNumber
-                            season = seasonNumber
-                            posterUrl = poster
-                        })
-                    }
+                    seasonDoc
+                        .select(
+                            "div.w-100.bg-main.rounded.my-4 a.epss:not([href*='/season/'])"
+                        )
+                        .forEach { episodeElement ->
+
+                            val epName = episodeElement.text().trim()
+
+                            val epUrl = episodeElement.attr("href")
+
+                            val episodeNumber = Regex("""\d+""")
+                                .find(epName)
+                                ?.value
+                                ?.toIntOrNull()
+
+                            val seasonNumber = Regex("""الموسم\s*(\d+)""")
+                                .find(seasonElement.text())
+                                ?.groupValues
+                                ?.get(1)
+                                ?.toIntOrNull()
+
+                            episodes.add(
+                                newEpisode(epUrl) {
+                                    this.name = epName
+                                    this.episode = episodeNumber
+                                    this.season = seasonNumber
+                                    this.posterUrl = poster
+                                }
+                            )
+                        }
+
+                } catch (e: Exception) {
+                    Log.e(
+                        logTag,
+                        "Failed to load season: $seasonUrl -> ${e.message}"
+                    )
+                }
             }
-        } else {
-            document.select("div.w-100.bg-main.rounded.my-4 a.epss:not([href*='/season/'])")
-                .forEach { episodeElement ->
-                    val epName = episodeElement.text().trim()
-                    val epUrl = episodeElement.attr("href")
-                    val episodeNumber = Regex("""\d+""").find(epName)?.value?.toIntOrNull()
+        }
 
-                    episodes.add(newEpisode(epUrl) {
+    } else {
+
+        document
+            .select(
+                "div.w-100.bg-main.rounded.my-4 a.epss:not([href*='/season/'])"
+            )
+            .forEach { episodeElement ->
+
+                val epName = episodeElement.text().trim()
+
+                val epUrl = episodeElement.attr("href")
+
+                val episodeNumber = Regex("""\d+""")
+                    .find(epName)
+                    ?.value
+                    ?.toIntOrNull()
+
+                episodes.add(
+                    newEpisode(epUrl) {
                         this.name = epName
                         this.episode = episodeNumber
                         this.posterUrl = poster
-                    })
-                }
+                    }
+                )
+            }
+    }
+
+    val sortedEpisodes = episodes.sortedWith(
+        compareBy(
+            { it.season },
+            { it.episode }
+        )
+    )
+
+    return if (sortedEpisodes.isNotEmpty()) {
+
+        newTvSeriesLoadResponse(
+            title,
+            url,
+            TvType.TvSeries,
+            sortedEpisodes
+        ) {
+            this.posterUrl = poster
+            this.posterHeaders = posterheader()
+            this.plot = plot
+            this.tags = tags
         }
 
-        val sortedEpisodes = episodes.sortedWith(compareBy({ it.season }, { it.episode }))
+    } else {
 
-        return if (sortedEpisodes.isNotEmpty()) {
-            newTvSeriesLoadResponse(title, url, TvType.TvSeries, sortedEpisodes) {
-                this.posterUrl = poster
-                this.posterHeaders = posterheader()
-                this.plot = plot
-                this.tags = tags
-            }
-        } else {
-            newMovieLoadResponse(title, url, TvType.Movie, url) {
-                this.posterUrl = poster
-                this.posterHeaders = posterheader()
-                this.plot = plot
-                this.tags = tags
-            }
+        newMovieLoadResponse(
+            title,
+            url,
+            TvType.Movie,
+            url
+        ) {
+            this.posterUrl = poster
+            this.posterHeaders = posterheader()
+            this.plot = plot
+            this.tags = tags
         }
     }
+}
 
     override suspend fun loadLinks(
         data: String,
