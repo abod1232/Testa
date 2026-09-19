@@ -309,8 +309,6 @@ class Shahid4u : MainAPI() {
         var requestCount = 0
 
         for ((index, seasonElement) in seasons.withIndex()) {
-
-            // بعد كل 5 طلبات، انتظر 4 ثوانٍ
             if (requestCount > 0 && requestCount % 5 == 0) {
                 Log.d(
                     logTag,
@@ -327,8 +325,6 @@ class Shahid4u : MainAPI() {
                     logTag,
                     "Loading season ${index + 1}/${seasons.size}: $seasonUrl"
                 )
-
-                // طلب واحد فقط في كل مرة
                 val seasonDoc = httpGet(
                     seasonUrl,
                     referer = url
@@ -368,8 +364,6 @@ class Shahid4u : MainAPI() {
                 requestCount++
 
             } catch (e: Exception) {
-
-                // حتى الطلب الفاشل يحسب ضمن الـ 5 طلبات
                 requestCount++
 
                 Log.e(
