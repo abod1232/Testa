@@ -305,55 +305,77 @@ class Shahid4u : MainAPI() {
     val episodes = ArrayList<Episode>()
 
     if (seasons.isNotEmpty()) {
-        seasons.chunked(1).forEach { seasonBatch ->
 
-            seasonBatch.amap { seasonElement ->
+        var requestCount = 0
 
-                val seasonUrl = seasonElement.attr("href")
+        for ((index, seasonElement) in seasons.withIndex()) {
 
-                try {
-                    val seasonDoc = httpGet(
-                        seasonUrl,
-                        referer = url
+            // بعد كل 5 طلبات، انتظر 4 ثوانٍ
+            if (requestCount > 0 && requestCount % 5 == 0) {
+                Log.d(
+                    logTag,
+                    "تم تنفيذ 5 طلبات، انتظار 4 ثوانٍ قبل المتابعة..."
+                )
+
+                kotlinx.coroutines.delay(4000L)
+            }
+
+            val seasonUrl = seasonElement.attr("href")
+
+            try {
+                Log.d(
+                    logTag,
+                    "Loading season ${index + 1}/${seasons.size}: $seasonUrl"
+                )
+
+                // طلب واحد فقط في كل مرة
+                val seasonDoc = httpGet(
+                    seasonUrl,
+                    referer = url
+                )
+
+                seasonDoc
+                    .select(
+                        "div.w-100.bg-main.rounded.my-4 a.epss:not([href*='/season/'])"
                     )
+                    .forEach { episodeElement ->
 
-                    seasonDoc
-                        .select(
-                            "div.w-100.bg-main.rounded.my-4 a.epss:not([href*='/season/'])"
+                        val epName = episodeElement.text().trim()
+
+                        val epUrl = episodeElement.attr("href")
+
+                        val episodeNumber = Regex("""\d+""")
+                            .find(epName)
+                            ?.value
+                            ?.toIntOrNull()
+
+                        val seasonNumber = Regex("""الموسم\s*(\d+)""")
+                            .find(seasonElement.text())
+                            ?.groupValues
+                            ?.get(1)
+                            ?.toIntOrNull()
+
+                        episodes.add(
+                            newEpisode(epUrl) {
+                                this.name = epName
+                                this.episode = episodeNumber
+                                this.season = seasonNumber
+                                this.posterUrl = poster
+                            }
                         )
-                        .forEach { episodeElement ->
+                    }
 
-                            val epName = episodeElement.text().trim()
+                requestCount++
 
-                            val epUrl = episodeElement.attr("href")
+            } catch (e: Exception) {
 
-                            val episodeNumber = Regex("""\d+""")
-                                .find(epName)
-                                ?.value
-                                ?.toIntOrNull()
+                // حتى الطلب الفاشل يحسب ضمن الـ 5 طلبات
+                requestCount++
 
-                            val seasonNumber = Regex("""الموسم\s*(\d+)""")
-                                .find(seasonElement.text())
-                                ?.groupValues
-                                ?.get(1)
-                                ?.toIntOrNull()
-
-                            episodes.add(
-                                newEpisode(epUrl) {
-                                    this.name = epName
-                                    this.episode = episodeNumber
-                                    this.season = seasonNumber
-                                    this.posterUrl = poster
-                                }
-                            )
-                        }
-
-                } catch (e: Exception) {
-                    Log.e(
-                        logTag,
-                        "Failed to load season: $seasonUrl -> ${e.message}"
-                    )
-                }
+                Log.e(
+                    logTag,
+                    "Failed to load season $seasonUrl: ${e.message}"
+                )
             }
         }
 
