@@ -14,7 +14,7 @@ import java.net.URLEncoder
 
 class Shahid4u : MainAPI() {
     override var mainUrl = "https://shhahhid4u.com/"
-    override var name = "Shahid4u"
+    override var name = "Shahid4u1"
     override val hasMainPage = true
     override var lang = "ar"
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
@@ -305,7 +305,7 @@ class Shahid4u : MainAPI() {
     val episodes = ArrayList<Episode>()
 
     if (seasons.isNotEmpty()) {
-        seasons.chunked(3).forEach { seasonBatch ->
+        seasons.chunked(1).forEach { seasonBatch ->
 
             seasonBatch.amap { seasonElement ->
 
