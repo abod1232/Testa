@@ -128,41 +128,41 @@ class YacineTVProvider : MainAPI() {
     }
 
     override suspend fun loadLinks(
-        data: String,
-        isCasting: Boolean,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean = withContext(Dispatchers.IO) {
-        val linkData = parseJson<LinkData>(data)
-        val responseData = fetchYacine("channel/${linkData.id}")
-        val streams = responseData?.data ?: return@withContext false
+    data: String,
+    isCasting: Boolean,
+    subtitleCallback: (SubtitleFile) -> Unit,
+    callback: (ExtractorLink) -> Unit
+): Boolean = withContext(Dispatchers.IO) {
+    val linkData = parseJson<LinkData>(data)
+    val responseData = fetchYacine("channel/${linkData.id}")
+    val streams = responseData?.data ?: return@withContext false
 
-        streams.forEach { stream ->
-            val finalUrl = stream.url?.replace("www.elahmad.coo", "www.elahmad.com") ?: ""
-            if (finalUrl.isNotEmpty()) {
-                val streamHeaders = mutableMapOf<String, String>()
-                stream.headers?.forEach { (key, value) ->
-                    if (value is String) streamHeaders[key] = value
-                }
-                if (!streamHeaders.containsKey("User-Agent")) {
-                    streamHeaders["User-Agent"] = "okhttp/4.12.0"
-                }
-
-                callback.invoke(
-                    ExtractorLink(
-                        source = this@YacineTVProvider.name,
-                        name = stream.name ?: "بث مباشر",
-                        url = finalUrl,
-                        referer = streamHeaders["Referer"] ?: "",
-                        quality = Qualities.Unknown.value,
-                        type = ExtractorLinkType.M3U8,
-                        headers = streamHeaders
-                    )
-                )
+    streams.forEach { stream ->
+        val finalUrl = stream.url?.replace("www.elahmad.coo", "www.elahmad.com") ?: ""
+        if (finalUrl.isNotEmpty()) {
+            val streamHeaders = mutableMapOf<String, String>()
+            stream.headers?.forEach { (key, value) ->
+                if (value is String) streamHeaders[key] = value
             }
+            if (!streamHeaders.containsKey("User-Agent")) {
+                streamHeaders["User-Agent"] = "okhttp/4.12.0"
+            }
+
+            callback.invoke(
+                newExtractorLink(
+                    this@YacineTVProvider.name,
+                    stream.name ?: "بث مباشر",
+                    finalUrl
+                ) {
+                    this.headers = streamHeaders
+                    this.quality = Qualities.Unknown.value
+                    this.referer = streamHeaders["Referer"] ?: ""
+                }
+            )
         }
-        true
     }
+    true
+}
 
     data class YacineResponse(
         @JsonProperty("data") val data: List<YacineData>? = null
