@@ -26,11 +26,49 @@ jobs:
           path: "src"
           fetch-depth: 0
 
-      - name: Checkout Builds Branch
-        uses: actions/checkout@v4
-        with:
-          ref: "builds"
-          path: "builds"
+      - name: Checkout or Create Builds Branch
+        working-directory: ${{ github.workspace }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+
+          BUILDS_URL="https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+
+          echo "Checking if builds branch exists..."
+
+          if git ls-remote --exit-code --heads "$BUILDS_URL" builds >/dev/null 2>&1; then
+            echo "builds branch exists."
+
+            git clone \
+              --branch builds \
+              --single-branch \
+              "$BUILDS_URL" \
+              builds
+
+          else
+            echo "builds branch does not exist."
+            echo "Creating builds branch..."
+
+            mkdir -p builds
+            cd builds
+
+            git init
+            git config user.email "actions@github.com"
+            git config user.name "GitHub Actions"
+
+            git remote add origin "$BUILDS_URL"
+
+            git checkout --orphan builds
+
+            touch .gitkeep
+            git add .gitkeep
+            git commit -m "Initialize builds branch"
+
+            git push origin builds
+
+            echo "builds branch created successfully."
+          fi
 
       - name: Setup JDK 17
         uses: actions/setup-java@v5.2.0
@@ -67,7 +105,9 @@ jobs:
                           if cleaned_content != content:
                               with open(file_path, 'w', encoding='utf-8') as f:
                                   f.write(cleaned_content)
+
                               print(f"Removed comments from: {file_path}")
+
                       except Exception as e:
                           print(f"Error processing {file_path}: {e}")
 
@@ -76,7 +116,9 @@ jobs:
         run: |
           git config --local user.email "actions@github.com"
           git config --local user.name "GitHub Actions"
+
           git add -u
+
           if ! git diff --cached --quiet; then
             git commit -m "Strip comments [skip ci]"
             git push origin HEAD:${{ github.ref_name }}
@@ -99,9 +141,7 @@ jobs:
           replacements = {
               "RIFT_JWT_SECRET_PLACEHOLDER": os.getenv("RIFT_JWT_SECRET", ""),
               "RIFT_FIREBASE_API_KEY_PLACEHOLDER": os.getenv("RIFT_FIREBASE_API_KEY", ""),
-              "RIFT_FIREBASE_APP_ID_PLACEHOLDER": os.getenv("RIFT_FIREBASE_APP_ID", ""),
-              "RIFT_ANDROID_PACKAGE_PLACEHOLDER": os.getenv("RIFT_ANDROID_PACKAGE", ""),
-              "RIFT_ANDROID_CERT_PLACEHOLDER": os.getenv("RIFT_ANDROID_CERT", "")
+              "RIFT_FIREBASE_APP_ID_PLACEHOLDER": os.getenv("RIFT_FIREBASE_APP_ID", "")
           }
 
           for root, dirs, files in os.walk('.'):
@@ -122,7 +162,9 @@ jobs:
                           if modified:
                               with open(file_path, 'w', encoding='utf-8') as f:
                                   f.write(content)
+
                               print(f"Injected secrets into: {file_path}")
+
                       except Exception as e:
                           print(f"Error processing {file_path}: {e}")
 
@@ -147,16 +189,25 @@ jobs:
           import json, urllib.request, os, urllib.parse
 
           generated_path = 'build/plugins.json'
-          existing_builds_path = os.path.join(os.environ.get('GITHUB_WORKSPACE', ''), 'builds', 'plugins.json')
+
+          existing_builds_path = os.path.join(
+              os.environ.get('GITHUB_WORKSPACE', ''),
+              'builds',
+              'plugins.json'
+          )
+
           url = 'https://raw.githubusercontent.com/${{ github.repository }}/builds/plugins.json'
 
           def get_cs3_filename(url_str):
               if not url_str:
                   return ''
+
               parts = url_str.split('/')
               unquoted = urllib.parse.unquote(parts[-1])
+
               if unquoted.endswith('.cs3'):
                   return unquoted[:-4]
+
               return unquoted
 
           builds_name_map = {}
@@ -168,8 +219,10 @@ jobs:
 
                   for item in builds_data:
                       cs3_name = get_cs3_filename(item.get('url'))
+
                       if cs3_name:
                           builds_name_map[cs3_name] = item.get('name')
+
           except Exception as e:
               print(f'Error reading local builds: {e}')
 
@@ -177,12 +230,17 @@ jobs:
 
           try:
               response = urllib.request.urlopen(url)
-              remote_data = json.loads(response.read().decode('utf-8'))
+
+              remote_data = json.loads(
+                  response.read().decode('utf-8')
+              )
 
               for item in remote_data:
                   cs3_name = get_cs3_filename(item.get('url'))
+
                   if cs3_name:
                       remote_name_map[cs3_name] = item.get('name')
+
           except Exception as e:
               print(f'Error reading remote: {e}')
 
@@ -196,13 +254,28 @@ jobs:
 
                       if int_name in builds_name_map:
                           item['name'] = builds_name_map[int_name]
-                          print(f'Preserved existing builds name for {int_name} -> {builds_name_map[int_name]}')
+
+                          print(
+                              f'Preserved existing builds name for '
+                              f'{int_name} -> {builds_name_map[int_name]}'
+                          )
+
                       elif int_name in remote_name_map:
                           item['name'] = remote_name_map[int_name]
-                          print(f'Set name for new plugin {int_name} from main branch -> {remote_name_map[int_name]}')
+
+                          print(
+                              f'Set name for new plugin {int_name} '
+                              f'from main branch -> {remote_name_map[int_name]}'
+                          )
 
                   with open(generated_path, 'w', encoding='utf-8') as f:
-                      json.dump(gen_data, f, indent=4, ensure_ascii=False)
+                      json.dump(
+                          gen_data,
+                          f,
+                          indent=4,
+                          ensure_ascii=False
+                      )
+
           except Exception as e:
               print(f'Error merging names: {e}')
           "
@@ -214,27 +287,46 @@ jobs:
               'name': '3rabi عربي',
               'description': 'مشاهدة الافلام والمسلسلات تجربة خالية من الاعلانات',
               'manifestVersion': 1,
-              'pluginLists': ['https://raw.githubusercontent.com/${{ github.repository }}/builds/plugins.json']
+              'pluginLists': [
+                  'https://raw.githubusercontent.com/${{ github.repository }}/builds/plugins.json'
+              ]
           }
 
-          repo_path = os.path.join(os.environ.get('GITHUB_WORKSPACE', ''), 'builds', 'repo.json')
+          repo_path = os.path.join(
+              os.environ.get('GITHUB_WORKSPACE', ''),
+              'builds',
+              'repo.json'
+          )
 
           with open(repo_path, 'w', encoding='utf-8') as f:
-              json.dump(repo_data, f, indent=4, ensure_ascii=False)
+              json.dump(
+                  repo_data,
+                  f,
+                  indent=4,
+                  ensure_ascii=False
+              )
           "
 
-          cp build/plugins.json $GITHUB_WORKSPACE/builds/plugins.json || echo "No plugins.json found in build"
-          find . -type f -name "*.cs3" -exec cp {} $GITHUB_WORKSPACE/builds/ \; || echo "No .cs3 files found"
+          cp build/plugins.json \
+            $GITHUB_WORKSPACE/builds/plugins.json \
+            || echo "No plugins.json found in build"
+
+          find . -type f -name "*.cs3" \
+            -exec cp {} $GITHUB_WORKSPACE/builds/ \; \
+            || echo "No .cs3 files found"
 
       - name: Push builds
         working-directory: "builds"
         run: |
           git config --local user.email "actions@github.com"
           git config --local user.name "GitHub Actions"
+
           git add .
 
           if ! git diff --cached --quiet; then
-            git commit --amend -m "Build $GITHUB_SHA" || git commit -m "Build $GITHUB_SHA"
+            git commit --amend -m "Build $GITHUB_SHA" \
+              || git commit -m "Build $GITHUB_SHA"
+
             git push --force origin HEAD:builds
           else
             echo "No changes to push"
