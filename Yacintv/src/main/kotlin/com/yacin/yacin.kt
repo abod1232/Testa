@@ -14,13 +14,30 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.security.SecureRandom
 import java.util.concurrent.TimeUnit
 
 class YacineTVProvider : MainAPI() {
     companion object {
         private const val TAG = "YacineTVProvider"
+
+        // ثوابت Firebase
+        private const val FB_PROJECT_ID = "ycntv-7a08e"
+        private const val FB_PROJECT_NUMBER = "692330584196"
+        private const val FB_APP_ID = "1:692330584196:android:68ea9f0c920aa17904cad1"
+        private const val FB_API_KEY = "AIzaSyDRKL14PPiXzk7qNUNLgV2IsjasxNpWLeU"
+        private const val FB_PKG = "ver3.ycntivi.off"
+        private const val FB_CERT = "E404353443FB03A54702D53E2C7563D791D92559"
+
+        // مفاتيح التخزين الدائم داخل CloudStream
+        private const val KEY_CACHE_URL = "yacine_api_url"
+        private const val KEY_CACHE_ETAG = "yacine_api_etag"
+        private const val KEY_CACHE_FID = "yacine_api_fid"
+        private const val KEY_CACHE_TOKEN = "yacine_api_token"
     }
 
     override var mainUrl = "https://def11.ycnapi.com/api"
@@ -44,6 +61,111 @@ class YacineTVProvider : MainAPI() {
         val poster: String?
     )
 
+    // --- قسم Firebase لجلب وتحديث الرابط تلقائياً ---
+
+    private fun generateFid(): String {
+        val randomBytes = ByteArray(17)
+        SecureRandom().nextBytes(randomBytes)
+        randomBytes[0] = ((randomBytes[0].toInt() and 0x0F) or 0x70).toByte()
+        return Base64.encodeToString(randomBytes, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING).take(22)
+    }
+
+    private fun getFirebaseToken(fid: String): String? {
+        val url = "https://firebaseinstallations.googleapis.com/v1/projects/$FB_PROJECT_ID/installations"
+        val jsonBody = """
+            {"fid":"$fid","appId":"$FB_APP_ID","authVersion":"FIS_v2","sdkVersion":"a:18.0.0"}
+        """.trimIndent()
+
+        val request = Request.Builder()
+            .url(url)
+            .header("Content-Type", "application/json")
+            .header("X-Android-Package", FB_PKG)
+            .header("X-Android-Cert", FB_CERT)
+            .header("x-goog-api-key", FB_API_KEY)
+            .header("x-firebase-client", "H4sIAAAAAAAA_6tWykhNLCpJSk0sKVayio7VUSpLLSrOzM9TslIyUqoFAFyivEQfAAAA")
+            .header("User-Agent", "Dalvik/2.1.0 (Linux; U; Android 16; RMX5061 Build/BP2A.250605.015)")
+            .post(jsonBody.toRequestBody("application/json".toMediaType()))
+            .build()
+
+        return try {
+            client.newCall(request).execute().use { res ->
+                if (res.isSuccessful) {
+                    val body = res.body?.string() ?: ""
+                    parseJson<FirebaseInstallationResponse>(body).authToken?.token
+                } else null
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "[Firebase] خطأ جلب Token", e)
+            null
+        }
+    }
+
+    private suspend fun syncDynamicApiUrl(): String = withContext(Dispatchers.IO) {
+        var cachedUrl = getKey<String>(KEY_CACHE_URL) ?: mainUrl
+        val cachedEtag = getKey<String>(KEY_CACHE_ETAG)
+        var fid = getKey<String>(KEY_CACHE_FID)
+        var token = getKey<String>(KEY_CACHE_TOKEN)
+
+        if (fid.isNullOrEmpty() || token.isNullOrEmpty()) {
+            fid = generateFid()
+            token = getFirebaseToken(fid)
+            if (token != null) {
+                setKey(KEY_CACHE_FID, fid)
+                setKey(KEY_CACHE_TOKEN, token)
+            }
+        }
+
+        if (token.isNullOrEmpty() || fid.isNullOrEmpty()) return@withContext cachedUrl
+
+        val url = "https://firebaseremoteconfig.googleapis.com/v1/projects/$FB_PROJECT_NUMBER/namespaces/firebase:fetch"
+        val jsonPayload = """
+            {"appVersion":"3.1","firstOpenTime":"2026-09-19T20:00:00.000Z","timeZone":"Asia/Baghdad","appInstanceIdToken":"$token","languageCode":"ar-IQ","appBuild":"4","appInstanceId":"$fid","countryCode":"IQ","analyticsUserProperties":{},"appId":"$FB_APP_ID","platformVersion":"36","sdkVersion":"22.0.0","packageName":"$FB_PKG"}
+        """.trimIndent()
+
+        val reqBuilder = Request.Builder()
+            .url(url)
+            .header("Content-Type", "application/json")
+            .header("X-Goog-Api-Key", FB_API_KEY)
+            .header("X-Android-Package", FB_PKG)
+            .header("X-Android-Cert", FB_CERT)
+            .header("X-Goog-Firebase-Installations-Auth", token)
+            .header("X-Firebase-RC-Fetch-Type", "BASE/1")
+            .header("User-Agent", "Dalvik/2.1.0 (Linux; U; Android 16; RMX5061 Build/BP2A.250605.015)")
+            .post(jsonPayload.toRequestBody("application/json".toMediaType()))
+
+        if (!cachedEtag.isNullOrEmpty()) {
+            reqBuilder.header("If-None-Match", cachedEtag)
+        }
+
+        try {
+            client.newCall(reqBuilder.build()).execute().use { res ->
+                val newEtag = res.header("ETag") ?: cachedEtag
+                if (res.isSuccessful) {
+                    val body = res.body?.string() ?: ""
+                    val config = parseJson<RemoteConfigResponse>(body)
+
+                    if (config.state == "NO_CHANGE") {
+                        Log.i(TAG, "[Firebase] الرابط الحالي محدث من الكاش: $cachedUrl")
+                        return@withContext cachedUrl
+                    } else if (config.state == "UPDATE") {
+                        val newDomain = config.entries?.get("defaults")
+                        if (!newDomain.isNullOrEmpty()) {
+                            cachedUrl = "https://$newDomain/api"
+                            setKey(KEY_CACHE_URL, cachedUrl)
+                            if (newEtag != null) setKey(KEY_CACHE_ETAG, newEtag)
+                            Log.i(TAG, "[Firebase] تم تحديث الدومين بنجاح: $cachedUrl")
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "[Firebase] خطأ أثناء استعلام Remote Config", e)
+        }
+        cachedUrl
+    }
+
+    // --- فك التشفير وطلب البيانات ---
+
     private fun decrypt(encryptedText: String, tHeader: String): String {
         return try {
             val fullKey = (baseKey + tHeader).toByteArray(Charsets.UTF_8)
@@ -54,19 +176,18 @@ class YacineTVProvider : MainAPI() {
             }
             String(result, Charsets.UTF_8)
         } catch (e: Exception) {
-            Log.e(TAG, "[Decrypt] فشل فك التشفير", e)
             ""
         }
     }
 
     private suspend fun fetchYacine(path: String): YacineResponse? = withContext(Dispatchers.IO) {
-        val endpoints = listOf(mainUrl, fallbackUrl)
+        val dynamicUrl = syncDynamicApiUrl()
+        val endpoints = listOf(dynamicUrl, fallbackUrl)
+
         for (baseUrl in endpoints) {
             val cleanBase = baseUrl.trimEnd('/')
             val cleanPath = path.trimStart('/')
             val fullUrl = "$cleanBase/$cleanPath"
-
-            Log.i(TAG, "[Fetch] طلب: $fullUrl")
 
             try {
                 val request = Request.Builder()
@@ -76,7 +197,6 @@ class YacineTVProvider : MainAPI() {
                     .build()
 
                 client.newCall(request).execute().use { response ->
-                    val statusCode = response.code
                     if (response.isSuccessful) {
                         val body = response.body?.string() ?: ""
                         val tHeader = response.header("t") ?: ""
@@ -85,25 +205,19 @@ class YacineTVProvider : MainAPI() {
 
                         val decryptedJson = decrypt(body, tHeader)
                         if (decryptedJson.isNotEmpty()) {
-                            val parsed = parseJson<YacineResponse>(decryptedJson)
-                            Log.i(TAG, "[Fetch] تم جلب (${parsed.data?.size ?: 0}) عنصر بنجاح من: $fullUrl")
-                            return@withContext parsed
+                            return@withContext parseJson<YacineResponse>(decryptedJson)
                         }
-                    } else {
-                        Log.w(TAG, "[Fetch] فشل الطلب للرابط $fullUrl بكود: $statusCode")
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "[Fetch] خطأ أثناء جلب الرابط ($fullUrl): ${e.message}", e)
+                continue
             }
         }
         null
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse = withContext(Dispatchers.IO) {
-        Log.i(TAG, "=== [getMainPage] بدء التحميل ===")
         val categories = fetchYacine("categories")?.data ?: emptyList()
-        Log.d(TAG, "[getMainPage] تم العثور على (${categories.size}) قسم")
 
         val homePageLists = categories.map { cat ->
             async {
@@ -194,6 +308,25 @@ class YacineTVProvider : MainAPI() {
         true
     }
 
+    // --- نماذج البيانات (Data Models) ---
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    data class FirebaseInstallationResponse(
+        @JsonProperty("authToken") val authToken: AuthToken? = null
+    ) {
+        @JsonIgnoreProperties(ignoreUnknown = true)
+        data class AuthToken(
+            @JsonProperty("token") val token: String? = null
+        )
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    data class RemoteConfigResponse(
+        @JsonProperty("state") val state: String? = null,
+        @JsonProperty("entries") val entries: Map<String, String>? = null,
+        @JsonProperty("templateVersion") val templateVersion: String? = null
+    )
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class YacineResponse(
         @JsonProperty("data") val data: List<YacineData>? = null
@@ -201,7 +334,7 @@ class YacineTVProvider : MainAPI() {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class YacineData(
-        @JsonProperty("id") val id: String? = null, // تم تغييره إلى String لحل الـ Overflow
+        @JsonProperty("id") val id: String? = null,
         @JsonProperty("name") val name: String? = null,
         @JsonProperty("logo") val logo: String? = null,
         @JsonProperty("url") val url: String? = null,
