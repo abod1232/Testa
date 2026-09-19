@@ -24,16 +24,12 @@ import java.util.concurrent.TimeUnit
 class YacineTVProvider : MainAPI() {
     companion object {
         private const val TAG = "YacineTVProvider"
-
-        // ثوابت Firebase
         private const val FB_PROJECT_ID = "ycntv-7a08e"
         private const val FB_PROJECT_NUMBER = "692330584196"
         private const val FB_APP_ID = "1:692330584196:android:68ea9f0c920aa17904cad1"
         private const val FB_API_KEY = "AIzaSyDRKL14PPiXzk7qNUNLgV2IsjasxNpWLeU"
         private const val FB_PKG = "ver3.ycntivi.off"
         private const val FB_CERT = "E404353443FB03A54702D53E2C7563D791D92559"
-
-        // كاش في الذاكرة لتجنب أخطاء دوال التخزين في الـ SDK
         @Volatile private var cachedUrl: String = "https://def11.ycnapi.com/api"
         @Volatile private var cachedEtag: String? = null
         @Volatile private var cachedFid: String? = null
@@ -60,8 +56,6 @@ class YacineTVProvider : MainAPI() {
         val name: String,
         val poster: String?
     )
-
-    // --- قسم Firebase لجلب وتحديث الرابط تلقائياً ---
 
     private fun generateFid(): String {
         val randomBytes = ByteArray(17)
@@ -161,8 +155,6 @@ class YacineTVProvider : MainAPI() {
         }
         cachedUrl
     }
-
-    // --- فك التشفير وطلب البيانات ---
 
     private fun decrypt(encryptedText: String, tHeader: String): String {
         return try {
@@ -305,8 +297,6 @@ class YacineTVProvider : MainAPI() {
         }
         true
     }
-
-    // --- نماذج البيانات (Data Models) ---
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class FirebaseInstallationResponse(
