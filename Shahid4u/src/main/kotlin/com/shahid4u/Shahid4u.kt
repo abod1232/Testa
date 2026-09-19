@@ -240,9 +240,6 @@ class Shahid4u : MainAPI() {
 
         val categories = listOf(
             "مسلسلات أجنبي" to "${mainUrl}category/مسلسلات-اجنبي",
-            "مسلسلات عربي" to "${mainUrl}category/مسلسلات-عربي",
-            "مسلسلات تركية" to "${mainUrl}category/مسلسلات-تركية",
-            "مسلسلات انمي" to "${mainUrl}category/مسلسلات-انمي",
         )
 
         for ((title, url) in categories) {
@@ -309,13 +306,13 @@ class Shahid4u : MainAPI() {
         var requestCount = 0
 
         for ((index, seasonElement) in seasons.withIndex()) {
-            if (requestCount > 0 && requestCount % 5 == 0) {
+            if (requestCount > 0 && requestCount % 3 == 0) {
                 Log.d(
                     logTag,
                     "تم تنفيذ 5 طلبات، انتظار 4 ثوانٍ قبل المتابعة..."
                 )
 
-                kotlinx.coroutines.delay(4000L)
+                kotlinx.coroutines.delay(10000L)
             }
 
             val seasonUrl = seasonElement.attr("href")
