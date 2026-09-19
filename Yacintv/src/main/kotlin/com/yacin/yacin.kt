@@ -5,10 +5,13 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.Qualities
-import com.lagradost.cloudstream3.utils.newExtractorLink
 import android.util.Base64
-import android.util.Log
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
@@ -23,9 +26,10 @@ class YacineTVProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Live)
 
     private val baseKey = "c!xZj+N9&G@Ev@vw"
+
     private val client = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
         .build()
 
     data class LinkData(
@@ -36,25 +40,28 @@ class YacineTVProvider : MainAPI() {
 
     private fun decrypt(encryptedText: String, tHeader: String): String {
         return try {
-            val fullKey = baseKey + tHeader
+            val fullKey = (baseKey + tHeader).toByteArray(Charsets.UTF_8)
             val decodedBytes = Base64.decode(encryptedText.trim(), Base64.DEFAULT)
             val result = ByteArray(decodedBytes.size)
             for (i in decodedBytes.indices) {
-                result[i] = (decodedBytes[i].toInt() xor fullKey[i % fullKey.length].code).toByte()
+                result[i] = (decodedBytes[i].toInt() xor fullKey[i % fullKey.size].toInt()).toByte()
             }
-            String(result)
+            String(result, Charsets.UTF_8)
         } catch (e: Exception) { "" }
     }
 
-    private suspend fun fetchYacine(path: String): YacineResponse? {
+    private suspend fun fetchYacine(path: String): YacineResponse? = withContext(Dispatchers.IO) {
         val endpoints = listOf(mainUrl, fallbackUrl)
         for (baseUrl in endpoints) {
             try {
-                val fullUrl = "$baseUrl/$path".replace("//", "/").replace("https:/", "https://")
-                
+                val cleanBase = baseUrl.trimEnd('/')
+                val cleanPath = path.trimStart('/')
+                val fullUrl = "$cleanBase/$cleanPath"
+
                 val request = Request.Builder()
                     .url(fullUrl)
                     .header("User-Agent", "okhttp/4.12.0")
+                    .header("Accept", "application/json")
                     .build()
 
                 val response = client.newCall(request).execute()
@@ -62,59 +69,64 @@ class YacineTVProvider : MainAPI() {
                     val body = response.body?.string() ?: ""
                     val tHeader = response.header("t") ?: ""
                     val decryptedJson = decrypt(body, tHeader)
-                    return parseJson<YacineResponse>(decryptedJson)
+                    return@withContext parseJson<YacineResponse>(decryptedJson)
                 }
-            } catch (e: Exception) { continue }
-        }
-        return null
-    }
-
-    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val categories = fetchYacine("categories")?.data ?: emptyList()
-        val homePageLists = categories.mapNotNull { cat ->
-            val channels = fetchYacine("categories/${cat.id}/channels")?.data ?: emptyList()
-            if (channels.isEmpty()) return@mapNotNull null
-
-            val channelItems = channels.map { chan ->
-                val data = LinkData(chan.id.toString(), chan.name ?: "", chan.logo).toJson()
-                newLiveSearchResponse(chan.name ?: "Unknown", data, TvType.Live) {
-                    this.posterUrl = chan.logo
-                }
-            }
-            HomePageList(cat.name ?: "Category", channelItems)
-        }
-        return newHomePageResponse(homePageLists)
-    }
-
-    override suspend fun search(query: String): List<SearchResponse> {
-        val categories = fetchYacine("categories")?.data ?: emptyList()
-        val results = mutableListOf<SearchResponse>()
-        categories.forEach { cat ->
-            val channels = fetchYacine("categories/${cat.id}/channels")?.data ?: emptyList()
-            channels.forEach { chan ->
-                if (chan.name?.contains(query, ignoreCase = true) == true) {
-                    val data = LinkData(chan.id.toString(), chan.name ?: "", chan.logo).toJson()
-                    results.add(
-                        newLiveSearchResponse(chan.name, data, TvType.Live) {
-                            this.posterUrl = chan.logo
-                        }
-                    )
-                }
+            } catch (e: Exception) { 
+                continue 
             }
         }
-        return results
+        null
+    }
+
+    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse = withContext(Dispatchers.IO) {
+        val categories = fetchYacine("categories")?.data ?: emptyList()
+
+        // جلب قنوات الأقسام بالتوازي لتفادي الـ Timeout
+        val homePageLists = categories.map { cat ->
+            async {
+                val channels = fetchYacine("categories/${cat.id}/channels")?.data ?: emptyList()
+                if (channels.isEmpty()) return@async null
+
+                val channelItems = channels.map { chan ->
+                    val data = LinkData(chan.id.toString(), chan.name ?: "Unknown", chan.logo).toJson()
+                    newLiveSearchResponse(chan.name ?: "Unknown", data, TvType.Live) {
+                        this.posterUrl = chan.logo
+                    }
+                }
+                HomePageList(cat.name ?: "Category", channelItems)
+            }
+        }.awaitAll().filterNotNull()
+
+        newHomePageResponse(homePageLists)
+    }
+
+    override suspend fun search(query: String): List<SearchResponse> = withContext(Dispatchers.IO) {
+        val categories = fetchYacine("categories")?.data ?: emptyList()
+        val deferredList = categories.map { cat ->
+            async {
+                val channels = fetchYacine("categories/${cat.id}/channels")?.data ?: emptyList()
+                channels.filter { it.name?.contains(query, ignoreCase = true) == true }.map { chan ->
+                    val data = LinkData(chan.id.toString(), chan.name ?: "Unknown", chan.logo).toJson()
+                    newLiveSearchResponse(chan.name ?: "Unknown", data, TvType.Live) {
+                        this.posterUrl = chan.logo
+                    }
+                }
+            }
+        }
+        deferredList.awaitAll().flatten()
     }
 
     override suspend fun load(url: String): LoadResponse {
         val data = parseJson<LinkData>(url)
-        return newMovieLoadResponse(
+        // استخدام دالة البث المباشر بدلاً من Movie
+        return newLiveStreamLoadResponse(
             data.name,
             url,
             TvType.Live,
             url
         ) {
             this.posterUrl = data.poster
-            this.plot = "شاهد بث مباشر لقناة ${data.name}"
+            this.plot = "بث مباشر لقناة ${data.name}"
         }
     }
 
@@ -123,10 +135,10 @@ class YacineTVProvider : MainAPI() {
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
-    ): Boolean {
+    ): Boolean = withContext(Dispatchers.IO) {
         val linkData = parseJson<LinkData>(data)
         val responseData = fetchYacine("channel/${linkData.id}")
-        val streams = responseData?.data ?: return false
+        val streams = responseData?.data ?: return@withContext false
 
         streams.forEach { stream ->
             val finalUrl = stream.url?.replace("www.elahmad.coo", "www.elahmad.com") ?: ""
@@ -140,18 +152,19 @@ class YacineTVProvider : MainAPI() {
                 }
 
                 callback.invoke(
-                    newExtractorLink(
-                        this.name,
-                        stream.name ?: "Server",
-                        finalUrl
-                    ) {
-                        this.headers = streamHeaders
-                        this.quality = Qualities.Unknown.value
-                    }
+                    ExtractorLink(
+                        source = this@YacineTVProvider.name,
+                        name = stream.name ?: "بث مباشر",
+                        url = finalUrl,
+                        referer = streamHeaders["Referer"] ?: "",
+                        quality = Qualities.Unknown.value,
+                        type = ExtractorLinkType.M3U8,
+                        headers = streamHeaders
+                    )
                 )
             }
         }
-        return true
+        true
     }
 
     data class YacineResponse(
