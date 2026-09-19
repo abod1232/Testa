@@ -1,5 +1,6 @@
 package com.yacin
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
@@ -45,18 +46,15 @@ class YacineTVProvider : MainAPI() {
 
     private fun decrypt(encryptedText: String, tHeader: String): String {
         return try {
-            Log.d(TAG, "[Decrypt] بدء فك التشفير | النص المشفر (أول 30 حرف): ${encryptedText.take(30)}... | tHeader: $tHeader")
             val fullKey = (baseKey + tHeader).toByteArray(Charsets.UTF_8)
             val decodedBytes = Base64.decode(encryptedText.trim(), Base64.DEFAULT)
             val result = ByteArray(decodedBytes.size)
             for (i in decodedBytes.indices) {
                 result[i] = (decodedBytes[i].toInt() xor fullKey[i % fullKey.size].toInt()).toByte()
             }
-            val decryptedString = String(result, Charsets.UTF_8)
-            Log.d(TAG, "[Decrypt] نجح فك التشفير | الناتج (أول 60 حرف): ${decryptedString.take(60)}...")
-            decryptedString
+            String(result, Charsets.UTF_8)
         } catch (e: Exception) {
-            Log.e(TAG, "[Decrypt] فشل فك التشفير!", e)
+            Log.e(TAG, "[Decrypt] فشل فك التشفير", e)
             ""
         }
     }
@@ -68,7 +66,7 @@ class YacineTVProvider : MainAPI() {
             val cleanPath = path.trimStart('/')
             val fullUrl = "$cleanBase/$cleanPath"
 
-            Log.i(TAG, "[Fetch] إرسال طلب إلى: $fullUrl")
+            Log.i(TAG, "[Fetch] طلب: $fullUrl")
 
             try {
                 val request = Request.Builder()
@@ -77,56 +75,43 @@ class YacineTVProvider : MainAPI() {
                     .header("Accept", "application/json")
                     .build()
 
-                val response = client.newCall(request).execute()
-                val statusCode = response.code
-                Log.d(TAG, "[Fetch] كود الاستجابة: $statusCode للرابط: $fullUrl")
+                client.newCall(request).execute().use { response ->
+                    val statusCode = response.code
+                    if (response.isSuccessful) {
+                        val body = response.body?.string() ?: ""
+                        val tHeader = response.header("t") ?: ""
 
-                if (response.isSuccessful) {
-                    val body = response.body?.string() ?: ""
-                    val tHeader = response.header("t") ?: ""
-                    
-                    if (body.isEmpty()) {
-                        Log.w(TAG, "[Fetch] محتوى الاستجابة فارغ من: $fullUrl")
-                        continue
-                    }
+                        if (body.isEmpty()) return@use null
 
-                    val decryptedJson = decrypt(body, tHeader)
-                    if (decryptedJson.isNotEmpty()) {
-                        val parsed = parseJson<YacineResponse>(decryptedJson)
-                        Log.i(TAG, "[Fetch] تم جلب وتحليل البيانات بنجاح | عدد العناصر: ${parsed.data?.size ?: 0}")
-                        return@withContext parsed
+                        val decryptedJson = decrypt(body, tHeader)
+                        if (decryptedJson.isNotEmpty()) {
+                            val parsed = parseJson<YacineResponse>(decryptedJson)
+                            Log.i(TAG, "[Fetch] تم جلب (${parsed.data?.size ?: 0}) عنصر بنجاح من: $fullUrl")
+                            return@withContext parsed
+                        }
                     } else {
-                        Log.e(TAG, "[Fetch] فشل تحويل النص بعد فك التشفير إلى JSON")
+                        Log.w(TAG, "[Fetch] فشل الطلب للرابط $fullUrl بكود: $statusCode")
                     }
-                } else {
-                    Log.w(TAG, "[Fetch] فشل الطلب بكود: $statusCode | رسالة: ${response.message}")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "[Fetch] خطأ أثناء جلب الرابط ($fullUrl): ${e.message}", e)
             }
         }
-        Log.e(TAG, "[Fetch] فشلت جميع المحاولات لطلب المسار: $path")
         null
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse = withContext(Dispatchers.IO) {
-        Log.i(TAG, "=== [getMainPage] بدء تحميل الصفحة الرئيسية ===")
+        Log.i(TAG, "=== [getMainPage] بدء التحميل ===")
         val categories = fetchYacine("categories")?.data ?: emptyList()
-        Log.d(TAG, "[getMainPage] عدد الأقسام المستلمة: ${categories.size}")
+        Log.d(TAG, "[getMainPage] تم العثور على (${categories.size}) قسم")
 
         val homePageLists = categories.map { cat ->
             async {
-                Log.d(TAG, "[getMainPage] جلب قنوات القسم: ${cat.name} (ID: ${cat.id})")
                 val channels = fetchYacine("categories/${cat.id}/channels")?.data ?: emptyList()
-                
-                if (channels.isEmpty()) {
-                    Log.w(TAG, "[getMainPage] لا توجد قنوات في القسم: ${cat.name}")
-                    return@async null
-                }
+                if (channels.isEmpty()) return@async null
 
-                Log.d(TAG, "[getMainPage] تم العثور على (${channels.size}) قناة في قسم [${cat.name}]")
                 val channelItems = channels.map { chan ->
-                    val data = LinkData(chan.id.toString(), chan.name ?: "Unknown", chan.logo).toJson()
+                    val data = LinkData(chan.id ?: "", chan.name ?: "Unknown", chan.logo).toJson()
                     newLiveSearchResponse(chan.name ?: "Unknown", data, TvType.Live) {
                         this.posterUrl = chan.logo
                     }
@@ -135,35 +120,27 @@ class YacineTVProvider : MainAPI() {
             }
         }.awaitAll().filterNotNull()
 
-        Log.i(TAG, "=== [getMainPage] اكتمل تجهيز الصفحة الرئيسية بإجمالي (${homePageLists.size}) قسم ===")
         newHomePageResponse(homePageLists)
     }
 
     override suspend fun search(query: String): List<SearchResponse> = withContext(Dispatchers.IO) {
-        Log.i(TAG, "=== [Search] بدء البحث عن: '$query' ===")
         val categories = fetchYacine("categories")?.data ?: emptyList()
-
         val deferredList = categories.map { cat ->
             async {
                 val channels = fetchYacine("categories/${cat.id}/channels")?.data ?: emptyList()
                 channels.filter { it.name?.contains(query, ignoreCase = true) == true }.map { chan ->
-                    Log.d(TAG, "[Search] تم العثور على قناة مطابقة: ${chan.name}")
-                    val data = LinkData(chan.id.toString(), chan.name ?: "Unknown", chan.logo).toJson()
+                    val data = LinkData(chan.id ?: "", chan.name ?: "Unknown", chan.logo).toJson()
                     newLiveSearchResponse(chan.name ?: "Unknown", data, TvType.Live) {
                         this.posterUrl = chan.logo
                     }
                 }
             }
         }
-        val results = deferredList.awaitAll().flatten()
-        Log.i(TAG, "=== [Search] اكتمل البحث: تم العثور على (${results.size}) نتيجة ===")
-        results
+        deferredList.awaitAll().flatten()
     }
 
     override suspend fun load(url: String): LoadResponse {
-        Log.i(TAG, "[Load] بدء تجهيز تفاصيل القناة للبيانات: $url")
         val data = parseJson<LinkData>(url)
-        Log.d(TAG, "[Load] اسم القناة: ${data.name} | ID: ${data.id}")
         return newMovieLoadResponse(
             data.name,
             url,
@@ -181,24 +158,14 @@ class YacineTVProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean = withContext(Dispatchers.IO) {
-        Log.i(TAG, "=== [loadLinks] بدء استخراج روابط البث ===")
         val linkData = try {
             parseJson<LinkData>(data)
         } catch (e: Exception) {
-            Log.e(TAG, "[loadLinks] فشل تحليل LinkData من: $data", e)
             return@withContext false
         }
 
-        Log.d(TAG, "[loadLinks] جلب سيرفرات القناة: ${linkData.name} (ID: ${linkData.id})")
         val responseData = fetchYacine("channel/${linkData.id}")
-        val streams = responseData?.data
-
-        if (streams.isNullOrEmpty()) {
-            Log.w(TAG, "[loadLinks] لم يتم العثور على أي سيرفر بث لهذه القناة!")
-            return@withContext false
-        }
-
-        Log.i(TAG, "[loadLinks] تم استلام (${streams.size}) سيرفر بث للقناة")
+        val streams = responseData?.data ?: return@withContext false
 
         streams.forEachIndexed { index, stream ->
             val finalUrl = stream.url?.replace("www.elahmad.coo", "www.elahmad.com") ?: ""
@@ -211,8 +178,6 @@ class YacineTVProvider : MainAPI() {
                     streamHeaders["User-Agent"] = "okhttp/4.12.0"
                 }
 
-                Log.d(TAG, "[loadLinks] إرسال رابط السيرفر [$index]: ${stream.name ?: "Server"} | URL: $finalUrl | Headers: $streamHeaders")
-
                 callback.invoke(
                     newExtractorLink(
                         this@YacineTVProvider.name,
@@ -224,20 +189,19 @@ class YacineTVProvider : MainAPI() {
                         this.referer = streamHeaders["Referer"] ?: ""
                     }
                 )
-            } else {
-                Log.w(TAG, "[loadLinks] تم تخطي السيرفر [$index] لأن الرابط فارغ!")
             }
         }
-        Log.i(TAG, "=== [loadLinks] اكتمل استخراج الروابط بنجاح ===")
         true
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class YacineResponse(
         @JsonProperty("data") val data: List<YacineData>? = null
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class YacineData(
-        @JsonProperty("id") val id: Int? = null,
+        @JsonProperty("id") val id: String? = null, // تم تغييره إلى String لحل الـ Overflow
         @JsonProperty("name") val name: String? = null,
         @JsonProperty("logo") val logo: String? = null,
         @JsonProperty("url") val url: String? = null,
