@@ -80,8 +80,6 @@ class YacineTVProvider : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse = withContext(Dispatchers.IO) {
         val categories = fetchYacine("categories")?.data ?: emptyList()
-
-        // جلب قنوات الأقسام بالتوازي لتفادي الـ Timeout
         val homePageLists = categories.map { cat ->
             async {
                 val channels = fetchYacine("categories/${cat.id}/channels")?.data ?: emptyList()
@@ -118,7 +116,6 @@ class YacineTVProvider : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse {
         val data = parseJson<LinkData>(url)
-        // استخدام دالة البث المباشر بدلاً من Movie
         return newLiveStreamLoadResponse(
             data.name,
             url,
