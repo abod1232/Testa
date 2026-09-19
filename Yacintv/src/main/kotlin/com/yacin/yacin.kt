@@ -9,9 +9,12 @@ import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import android.util.Base64
 import android.util.Log
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.util.concurrent.TimeUnit
 
 class YacineTVProvider : MainAPI() {
-    override var mainUrl = "https://deft.yacinelive.com/api"
+    override var mainUrl = "https://def11.ycnapi.com/api"
     private val fallbackUrl = "https://deft.yacinelive.com/api"
 
     override var name = "Yacine TV"
@@ -20,6 +23,12 @@ class YacineTVProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Live)
 
     private val baseKey = "c!xZj+N9&G@Ev@vw"
+
+    // OkHttpClient مخصص بدون تدخل كلاود ستريم
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
+        .build()
 
     data class LinkData(
         val id: String,
@@ -44,10 +53,17 @@ class YacineTVProvider : MainAPI() {
         for (baseUrl in endpoints) {
             try {
                 val fullUrl = "$baseUrl/$path".replace("//", "/").replace("https:/", "https://")
-                val response = app.get(fullUrl, headers = mapOf("User-Agent" to "okhttp/4.12.0"), timeout = 10)
-                if (response.code == 200) {
-                    val tHeader = response.headers["t"] ?: ""
-                    val decryptedJson = decrypt(response.text, tHeader)
+                
+                val request = Request.Builder()
+                    .url(fullUrl)
+                    .header("User-Agent", "okhttp/4.12.0")
+                    .build()
+
+                val response = client.newCall(request).execute()
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: ""
+                    val tHeader = response.header("t") ?: ""
+                    val decryptedJson = decrypt(body, tHeader)
                     return parseJson<YacineResponse>(decryptedJson)
                 }
             } catch (e: Exception) { continue }
