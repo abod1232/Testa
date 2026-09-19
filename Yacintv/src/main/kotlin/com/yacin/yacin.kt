@@ -9,7 +9,6 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import android.util.Base64
-import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -19,17 +18,21 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.security.SecureRandom
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 
 class YacineTVProvider : MainAPI() {
     companion object {
-        private const val TAG = "YacineTVProvider"
         private const val FB_PROJECT_ID = "ycntv-7a08e"
         private const val FB_PROJECT_NUMBER = "692330584196"
         private const val FB_APP_ID = "1:692330584196:android:68ea9f0c920aa17904cad1"
         private const val FB_API_KEY = "AIzaSyDRKL14PPiXzk7qNUNLgV2IsjasxNpWLeU"
         private const val FB_PKG = "ver3.ycntivi.off"
         private const val FB_CERT = "E404353443FB03A54702D53E2C7563D791D92559"
+
         @Volatile private var cachedUrl: String = "https://def11.ycnapi.com/api"
         @Volatile private var cachedEtag: String? = null
         @Volatile private var cachedFid: String? = null
@@ -89,7 +92,6 @@ class YacineTVProvider : MainAPI() {
                 } else null
             }
         } catch (e: Exception) {
-            Log.e(TAG, "[Firebase] خطأ جلب Token", e)
             null
         }
     }
@@ -109,9 +111,14 @@ class YacineTVProvider : MainAPI() {
 
         if (token.isNullOrEmpty() || fid.isNullOrEmpty()) return@withContext cachedUrl
 
+        val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
+        val currentTimeIso = isoFormat.format(Date())
+
         val url = "https://firebaseremoteconfig.googleapis.com/v1/projects/$FB_PROJECT_NUMBER/namespaces/firebase:fetch"
         val jsonPayload = """
-            {"appVersion":"3.1","firstOpenTime":"2026-09-19T20:00:00.000Z","timeZone":"Asia/Baghdad","appInstanceIdToken":"$token","languageCode":"ar-IQ","appBuild":"4","appInstanceId":"$fid","countryCode":"IQ","analyticsUserProperties":{},"appId":"$FB_APP_ID","platformVersion":"36","sdkVersion":"22.0.0","packageName":"$FB_PKG"}
+            {"appVersion":"3.1","firstOpenTime":"$currentTimeIso","timeZone":"Asia/Baghdad","appInstanceIdToken":"$token","languageCode":"ar-IQ","appBuild":"4","appInstanceId":"$fid","countryCode":"IQ","analyticsUserProperties":{},"appId":"$FB_APP_ID","platformVersion":"36","sdkVersion":"22.0.0","packageName":"$FB_PKG"}
         """.trimIndent()
 
         val reqBuilder = Request.Builder()
@@ -139,20 +146,16 @@ class YacineTVProvider : MainAPI() {
                     val config = parseJson<RemoteConfigResponse>(body)
 
                     if (config.state == "NO_CHANGE") {
-                        Log.i(TAG, "[Firebase] الرابط الحالي محدث من الكاش: $cachedUrl")
                         return@withContext cachedUrl
                     } else if (config.state == "UPDATE") {
                         val newDomain = config.entries?.get("defaults")
                         if (!newDomain.isNullOrEmpty()) {
                             cachedUrl = "https://$newDomain/api"
-                            Log.i(TAG, "[Firebase] تم تحديث الدومين بنجاح: $cachedUrl")
                         }
                     }
                 }
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "[Firebase] خطأ أثناء استعلام Remote Config", e)
-        }
+        } catch (e: Exception) { }
         cachedUrl
     }
 
