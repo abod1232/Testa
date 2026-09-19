@@ -305,8 +305,6 @@ class Shahid4u : MainAPI() {
     val episodes = ArrayList<Episode>()
 
     if (seasons.isNotEmpty()) {
-
-        // تقسيم المواسم إلى مجموعات، كل مجموعة تحتوي على 3 طلبات كحد أقصى
         seasons.chunked(3).forEach { seasonBatch ->
 
             seasonBatch.amap { seasonElement ->
