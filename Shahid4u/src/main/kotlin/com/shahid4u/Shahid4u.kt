@@ -299,14 +299,10 @@ class Shahid4u : MainAPI() {
         if (seasons.isNotEmpty()) {
             val chunkSize = 5 // عدد المواسم التي تُجلب بالتوازي في نفس اللحظة
             val delayBetweenChunks = 15000L // 13.5 ثانية انتظار بين كل دفعة وأخرى لتفادي الحظر
-
-            // تقسيم المواسم إلى مجموعات للجلب بالتوازي
             val seasonChunks = seasons.chunked(chunkSize)
 
             seasonChunks.forEachIndexed { chunkIndex, chunk ->
                 Log.d(logTag, "جلب الدفعة ${chunkIndex + 1}/${seasonChunks.size} بالتوازي (${chunk.size} مواسم)...")
-
-                // جلب مواسم الدفعة الحالية بالتوازي عبر amap
                 chunk.amap { seasonElement ->
                     val seasonUrl = seasonElement.attr("href")
                     val seasonText = seasonElement.text().trim()
@@ -344,8 +340,6 @@ class Shahid4u : MainAPI() {
                         Log.e(logTag, "Failed to load season $seasonUrl: ${e.message}")
                     }
                 }
-
-                // تأخير بين الدفعات ما عدا الدفعة الأخيرة
                 if (chunkIndex < seasonChunks.size - 1) {
                     Log.d(logTag, "انتظار $delayBetweenChunks ملي ثانية قبل الدفعة القادمة...")
                     kotlinx.coroutines.delay(delayBetweenChunks)
@@ -370,8 +364,6 @@ class Shahid4u : MainAPI() {
                     )
                 }
         }
-
-        // ترتيب الحلقات تصاعدياً بحسب الموسم ورقم الحلقة
         val sortedEpisodes = episodes.sortedWith(
             compareBy(
                 { it.season ?: 0 },
