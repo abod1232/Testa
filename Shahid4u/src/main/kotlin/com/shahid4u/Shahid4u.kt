@@ -292,19 +292,13 @@ class Shahid4u : MainAPI() {
 
         if (seasons.isNotEmpty()) {
             val cooldown = 15000L // 13.5 ثانية
-
-            // تقسيم المواسم إلى دفعات من 5
             seasons.chunked(5).forEach { chunk ->
-
-                // ⚡ فحص بسيط: هل مر 13.5 ثانية منذ آخر دفعة طلبات في التطبيق؟
                 val timePassed = System.currentTimeMillis() - lastRequestTime
                 if (globalCount > 0 && timePassed < cooldown) {
                     val waitTime = cooldown - timePassed
                     Log.d(logTag, "⏳ انتظار متبقي لتفادي الحظر: ${waitTime}ms")
                     kotlinx.coroutines.delay(waitTime)
                 }
-
-                // جلب الـ 5 مواسم بالتوازي
                 chunk.amap { seasonElement ->
                     val seasonUrl = seasonElement.attr("href")
                     val seasonText = seasonElement.text().trim()
@@ -328,8 +322,6 @@ class Shahid4u : MainAPI() {
                         Log.e(logTag, "Failed to load season $seasonUrl: ${e.message}")
                     }
                 }
-
-                // تحديث وقت آخر دفعة وزيادة العداد
                 lastRequestTime = System.currentTimeMillis()
                 globalCount += chunk.size
             }
