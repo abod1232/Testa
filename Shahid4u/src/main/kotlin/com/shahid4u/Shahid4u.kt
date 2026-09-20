@@ -279,80 +279,95 @@ class Shahid4u : MainAPI() {
             emptyList()
         }
     }
+
     override suspend fun load(url: String): LoadResponse {
         val document = httpGet(url)
 
         val title = document.selectFirst("span.title")?.text()?.trim() ?: "غير متوفر"
+
         val poster = document.selectFirst("div.poster-side img")?.attr("src")
             ?: document.selectFirst("meta[property='og:image']")?.attr("content")
-        val plot = document.selectFirst("span.description")?.text()?.trim()
-        val tags = document.select("div.qualities span.q-tag a").map { it.text() }
 
-        val seasons = document.select("div.w-100.bg-main.rounded.my-4 a.epss[href*='/season/']")
+        val plot = document.selectFirst("span.description")?.text()?.trim()
+
+        val tags = document
+            .select("div.qualities span.q-tag a")
+            .map { it.text() }
+
+        val seasons = document.select(
+            "div.w-100.bg-main.rounded.my-4 a.epss[href*='/season/']"
+        )
+
         val episodes = ArrayList<Episode>()
 
         if (seasons.isNotEmpty()) {
-            val pendingSeasons = ArrayList(seasons)
+            val batchSize = 5           // 5 طلبات كحد أقصى صارم بالتوازي
+            val delayDuration = 15000L   // 15 ثانية بالضبط
 
-            while (pendingSeasons.isNotEmpty()) {
-                val now = System.currentTimeMillis()
-                synchronized(requestTimestamps) {
-                    requestTimestamps.removeAll { now - it >= WINDOW_DURATION_MS }
-                }
-                val currentUsage = synchronized(requestTimestamps) { requestTimestamps.size }
-                val availableSlots = MAX_REQUESTS_IN_WINDOW - currentUsage
-                if (availableSlots <= 0) {
-                    val oldestRequestTime = synchronized(requestTimestamps) { requestTimestamps.firstOrNull() ?: now }
-                    val waitTime = WINDOW_DURATION_MS - (now - oldestRequestTime)
+            // تقسيم الـ 8 أو الـ 10 مواسم إلى مجموعات من 5 (مثلاً: 5 ثم 3)
+            val seasonBatches = seasons.chunked(batchSize)
 
-                    if (waitTime > 0) {
-                        Log.d(logTag, "⏳ تم استهلاك 5 طلبات في آخر 15 ثانية، انتظار ${waitTime}ms...")
-                        kotlinx.coroutines.delay(waitTime)
-                    }
-                    continue // إعادة فحص النافذة بعد انتهاء الانتظار
-                }
-                val takeCount = minOf(pendingSeasons.size, availableSlots)
-                val chunk = pendingSeasons.take(takeCount)
-                pendingSeasons.subList(0, takeCount).clear()
-                synchronized(requestTimestamps) {
-                    val sendTime = System.currentTimeMillis()
-                    repeat(chunk.size) { requestTimestamps.add(sendTime) }
-                }
+            seasonBatches.forEachIndexed { index, batch ->
+                Log.d(logTag, "🚀 إرسال الدفعة ${index + 1}/${seasonBatches.size} بالتوازي (العدد: ${batch.size} مواسم)...")
 
-                Log.d(logTag, "🚀 إرسال $takeCount مواسم فورا بالتوازي | النشط حالياً في الـ 15 ثانية: ${synchronized(requestTimestamps) { requestTimestamps.size }}")
-                chunk.amap { seasonElement ->
+                // جلب الـ 5 مواسم فقط بالتوازي في هذه اللحظة
+                batch.amap { seasonElement ->
                     val seasonUrl = seasonElement.attr("href")
                     val seasonText = seasonElement.text().trim()
-                    val seasonNumber = Regex("""الموسم\s*(\d+)""").find(seasonText)?.groupValues?.get(1)?.toIntOrNull()
+
+                    val seasonNumber = Regex("""الموسم\s*(\d+)""")
+                        .find(seasonText)
+                        ?.groupValues
+                        ?.get(1)
+                        ?.toIntOrNull()
                         ?: Regex("""\d+""").find(seasonText)?.value?.toIntOrNull()
 
                     try {
                         val seasonDoc = httpGet(seasonUrl, referer = url)
-                        val eps = seasonDoc.select("div.w-100.bg-main.rounded.my-4 a.epss:not([href*='/season/'])")
-                            .mapNotNull { epEl ->
-                                val epName = epEl.text().trim()
-                                newEpisode(epEl.attr("href")) {
+
+                        val seasonEps = seasonDoc
+                            .select("div.w-100.bg-main.rounded.my-4 a.epss:not([href*='/season/'])")
+                            .mapNotNull { episodeElement ->
+                                val epName = episodeElement.text().trim()
+                                val epUrl = episodeElement.attr("href")
+                                val episodeNumber = Regex("""\d+""").find(epName)?.value?.toIntOrNull()
+
+                                newEpisode(epUrl) {
                                     this.name = epName
-                                    this.episode = Regex("""\d+""").find(epName)?.value?.toIntOrNull()
+                                    this.episode = episodeNumber
                                     this.season = seasonNumber
                                     this.posterUrl = poster
                                 }
                             }
-                        synchronized(episodes) { episodes.addAll(eps) }
+
+                        synchronized(episodes) {
+                            episodes.addAll(seasonEps)
+                        }
+
                     } catch (e: Exception) {
                         Log.e(logTag, "Failed to load season $seasonUrl: ${e.message}")
                     }
                 }
+
+                // إذا كان هناك دفعة قادمة (مثلاً متبقي 3 مواسم)، ننتظر 15 ثانية إجبارياً
+                if (index < seasonBatches.size - 1) {
+                    Log.d(logTag, "⏳ تم إرسال 5 طلبات.. انتظار 15 ثانية قبل إرسال باقي المواسم...")
+                    kotlinx.coroutines.delay(delayDuration)
+                }
             }
 
         } else {
-            document.select("div.w-100.bg-main.rounded.my-4 a.epss:not([href*='/season/'])")
-                .forEach { epEl ->
-                    val epName = epEl.text().trim()
+            document
+                .select("div.w-100.bg-main.rounded.my-4 a.epss:not([href*='/season/'])")
+                .forEach { episodeElement ->
+                    val epName = episodeElement.text().trim()
+                    val epUrl = episodeElement.attr("href")
+                    val episodeNumber = Regex("""\d+""").find(epName)?.value?.toIntOrNull()
+
                     episodes.add(
-                        newEpisode(epEl.attr("href")) {
+                        newEpisode(epUrl) {
                             this.name = epName
-                            this.episode = Regex("""\d+""").find(epName)?.value?.toIntOrNull()
+                            this.episode = episodeNumber
                             this.season = 1
                             this.posterUrl = poster
                         }
@@ -361,18 +376,31 @@ class Shahid4u : MainAPI() {
         }
 
         val sortedEpisodes = episodes.sortedWith(
-            compareBy({ it.season ?: 0 }, { it.episode ?: 0 })
+            compareBy(
+                { it.season ?: 0 },
+                { it.episode ?: 0 }
+            )
         )
 
         return if (sortedEpisodes.isNotEmpty()) {
-            newTvSeriesLoadResponse(title, url, TvType.TvSeries, sortedEpisodes) {
+            newTvSeriesLoadResponse(
+                title,
+                url,
+                TvType.TvSeries,
+                sortedEpisodes
+            ) {
                 this.posterUrl = poster
                 this.posterHeaders = posterheader()
                 this.plot = plot
                 this.tags = tags
             }
         } else {
-            newMovieLoadResponse(title, url, TvType.Movie, url) {
+            newMovieLoadResponse(
+                title,
+                url,
+                TvType.Movie,
+                url
+            ) {
                 this.posterUrl = poster
                 this.posterHeaders = posterheader()
                 this.plot = plot
