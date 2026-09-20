@@ -27,8 +27,10 @@ class Shahid4u : MainAPI() {
         @JsonProperty("url") val url: String
     )
     companion object {
-        private var lastRequestTime = 0L
-        private var globalCount = 0
+        // قائمة تحفظ أوقات الطلبات لآخر 15 ثانية
+        private val requestTimestamps = mutableListOf<Long>()
+        private const val WINDOW_DURATION_MS = 15000L // 15 ثانية بالضبط
+        private const val MAX_REQUESTS_IN_WINDOW = 5  // الحد الأقصى 5 طلبات في النافذة
     }
 
     private data class PlayerResponse(
@@ -291,14 +293,46 @@ class Shahid4u : MainAPI() {
         val episodes = ArrayList<Episode>()
 
         if (seasons.isNotEmpty()) {
-            val cooldown = 15000L // 13.5 ثانية
-            seasons.chunked(5).forEach { chunk ->
-                val timePassed = System.currentTimeMillis() - lastRequestTime
-                if (globalCount > 0 && timePassed < cooldown) {
-                    val waitTime = cooldown - timePassed
-                    Log.d(logTag, "⏳ انتظار متبقي لتفادي الحظر: ${waitTime}ms")
-                    kotlinx.coroutines.delay(waitTime)
+            val pendingSeasons = ArrayList(seasons)
+
+            while (pendingSeasons.isNotEmpty()) {
+                val now = System.currentTimeMillis()
+
+                // 1. مسح أي طلبات قديمة مضى عليها أكثر من 15 ثانية (استعادة الرصيد تلقائياً)
+                synchronized(requestTimestamps) {
+                    requestTimestamps.removeAll { now - it >= WINDOW_DURATION_MS }
                 }
+
+                // 2. حساب المساحة المتاحة من الـ 5 طلبات
+                val currentUsage = synchronized(requestTimestamps) { requestTimestamps.size }
+                val availableSlots = MAX_REQUESTS_IN_WINDOW - currentUsage
+
+                // 3. إذا استُهلكت الـ 5 طلبات بالكامل، انتظر فقط حتى يسقط أقدم طلب
+                if (availableSlots <= 0) {
+                    val oldestRequestTime = synchronized(requestTimestamps) { requestTimestamps.firstOrNull() ?: now }
+                    val waitTime = WINDOW_DURATION_MS - (now - oldestRequestTime)
+
+                    if (waitTime > 0) {
+                        Log.d(logTag, "⏳ تم استهلاك 5 طلبات في آخر 15 ثانية، انتظار ${waitTime}ms...")
+                        kotlinx.coroutines.delay(waitTime)
+                    }
+                    continue // إعادة فحص النافذة بعد انتهاء الانتظار
+                }
+
+                // 4. سحب المواسم المسموح بها فوراً (بالتوازي)
+                val takeCount = minOf(pendingSeasons.size, availableSlots)
+                val chunk = pendingSeasons.take(takeCount)
+                pendingSeasons.subList(0, takeCount).clear()
+
+                // تسجيل وقت إرسال هذه الطلبات في النافذة
+                synchronized(requestTimestamps) {
+                    val sendTime = System.currentTimeMillis()
+                    repeat(chunk.size) { requestTimestamps.add(sendTime) }
+                }
+
+                Log.d(logTag, "🚀 إرسال $takeCount مواسم فورا بالتوازي | النشط حالياً في الـ 15 ثانية: ${synchronized(requestTimestamps) { requestTimestamps.size }}")
+
+                // جلب المواسم المتاحة بالتوازي
                 chunk.amap { seasonElement ->
                     val seasonUrl = seasonElement.attr("href")
                     val seasonText = seasonElement.text().trim()
@@ -322,8 +356,6 @@ class Shahid4u : MainAPI() {
                         Log.e(logTag, "Failed to load season $seasonUrl: ${e.message}")
                     }
                 }
-                lastRequestTime = System.currentTimeMillis()
-                globalCount += chunk.size
             }
 
         } else {
@@ -361,7 +393,6 @@ class Shahid4u : MainAPI() {
             }
         }
     }
-
 
         override suspend fun loadLinks(
         data: String,
