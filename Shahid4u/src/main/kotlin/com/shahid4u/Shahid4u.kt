@@ -303,14 +303,10 @@ class Shahid4u : MainAPI() {
         if (seasons.isNotEmpty()) {
             val batchSize = 5           // 5 طلبات كحد أقصى صارم بالتوازي
             val delayDuration = 15000L   // 15 ثانية بالضبط
-
-            // تقسيم الـ 8 أو الـ 10 مواسم إلى مجموعات من 5 (مثلاً: 5 ثم 3)
             val seasonBatches = seasons.chunked(batchSize)
 
             seasonBatches.forEachIndexed { index, batch ->
                 Log.d(logTag, "🚀 إرسال الدفعة ${index + 1}/${seasonBatches.size} بالتوازي (العدد: ${batch.size} مواسم)...")
-
-                // جلب الـ 5 مواسم فقط بالتوازي في هذه اللحظة
                 batch.amap { seasonElement ->
                     val seasonUrl = seasonElement.attr("href")
                     val seasonText = seasonElement.text().trim()
@@ -348,8 +344,6 @@ class Shahid4u : MainAPI() {
                         Log.e(logTag, "Failed to load season $seasonUrl: ${e.message}")
                     }
                 }
-
-                // إذا كان هناك دفعة قادمة (مثلاً متبقي 3 مواسم)، ننتظر 15 ثانية إجبارياً
                 if (index < seasonBatches.size - 1) {
                     Log.d(logTag, "⏳ تم إرسال 5 طلبات.. انتظار 15 ثانية قبل إرسال باقي المواسم...")
                     kotlinx.coroutines.delay(delayDuration)
