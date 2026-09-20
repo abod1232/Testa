@@ -138,12 +138,7 @@ class Shahid4u : MainAPI() {
         val finalHost = finalUri.host
         val mainHost = currentMainUri.host
 
-        /*
-         * نغير mainUrl فقط إذا:
-         *
-         * 1. الرابط المطلوب كان على نفس دومين mainUrl الحالي
-         * 2. حصل redirect إلى دومين مختلف
-         */
+    
         if (
             !requestedHost.isNullOrBlank() &&
             !finalHost.isNullOrBlank() &&
@@ -282,157 +277,134 @@ class Shahid4u : MainAPI() {
 
 
     override suspend fun load(url: String): LoadResponse {
-    val document = httpGet(url)
+        val document = httpGet(url)
 
-    val title = document.selectFirst("span.title")?.text()?.trim() ?: "غير متوفر"
+        val title = document.selectFirst("span.title")?.text()?.trim() ?: "غير متوفر"
 
-    val poster = document.selectFirst("div.poster-side img")?.attr("src")
-        ?: document.selectFirst("meta[property='og:image']")?.attr("content")
+        val poster = document.selectFirst("div.poster-side img")?.attr("src")
+            ?: document.selectFirst("meta[property='og:image']")?.attr("content")
 
-    val plot = document.selectFirst("span.description")?.text()?.trim()
+        val plot = document.selectFirst("span.description")?.text()?.trim()
 
-    val tags = document
-        .select("div.qualities span.q-tag a")
-        .map { it.text() }
+        val tags = document
+            .select("div.qualities span.q-tag a")
+            .map { it.text() }
 
-    val seasons = document.select(
-        "div.w-100.bg-main.rounded.my-4 a.epss[href*='/season/']"
-    )
-
-    val episodes = ArrayList<Episode>()
-
-    if (seasons.isNotEmpty()) {
-
-        var requestCount = 0
-
-        for ((index, seasonElement) in seasons.withIndex()) {
-            if (requestCount > 0 && requestCount % 4 == 0) {
-                Log.d(
-                    logTag,
-                    "تم تنفيذ 5 طلبات، انتظار 4 ثوانٍ قبل المتابعة..."
-                )
-
-                kotlinx.coroutines.delay(15000L)
-            }
-
-            val seasonUrl = seasonElement.attr("href")
-
-            try {
-                Log.d(
-                    logTag,
-                    "Loading season ${index + 1}/${seasons.size}: $seasonUrl"
-                )
-                val seasonDoc = httpGet(
-                    seasonUrl,
-                    referer = url
-                )
-
-                seasonDoc
-                    .select(
-                        "div.w-100.bg-main.rounded.my-4 a.epss:not([href*='/season/'])"
-                    )
-                    .forEach { episodeElement ->
-
-                        val epName = episodeElement.text().trim()
-
-                        val epUrl = episodeElement.attr("href")
-
-                        val episodeNumber = Regex("""\d+""")
-                            .find(epName)
-                            ?.value
-                            ?.toIntOrNull()
-
-                        val seasonNumber = Regex("""الموسم\s*(\d+)""")
-                            .find(seasonElement.text())
-                            ?.groupValues
-                            ?.get(1)
-                            ?.toIntOrNull()
-
-                        episodes.add(
-                            newEpisode(epUrl) {
-                                this.name = epName
-                                this.episode = episodeNumber
-                                this.season = seasonNumber
-                                this.posterUrl = poster
-                            }
-                        )
-                    }
-
-                requestCount++
-
-            } catch (e: Exception) {
-                requestCount++
-
-                Log.e(
-                    logTag,
-                    "Failed to load season $seasonUrl: ${e.message}"
-                )
-            }
-        }
-
-    } else {
-
-        document
-            .select(
-                "div.w-100.bg-main.rounded.my-4 a.epss:not([href*='/season/'])"
-            )
-            .forEach { episodeElement ->
-
-                val epName = episodeElement.text().trim()
-
-                val epUrl = episodeElement.attr("href")
-
-                val episodeNumber = Regex("""\d+""")
-                    .find(epName)
-                    ?.value
-                    ?.toIntOrNull()
-
-                episodes.add(
-                    newEpisode(epUrl) {
-                        this.name = epName
-                        this.episode = episodeNumber
-                        this.posterUrl = poster
-                    }
-                )
-            }
-    }
-
-    val sortedEpisodes = episodes.sortedWith(
-        compareBy(
-            { it.season },
-            { it.episode }
+        val seasons = document.select(
+            "div.w-100.bg-main.rounded.my-4 a.epss[href*='/season/']"
         )
-    )
 
-    return if (sortedEpisodes.isNotEmpty()) {
+        val episodes = ArrayList<Episode>()
 
-        newTvSeriesLoadResponse(
-            title,
-            url,
-            TvType.TvSeries,
-            sortedEpisodes
-        ) {
-            this.posterUrl = poster
-            this.posterHeaders = posterheader()
-            this.plot = plot
-            this.tags = tags
+        if (seasons.isNotEmpty()) {
+            val chunkSize = 5 // عدد المواسم التي تُجلب بالتوازي في نفس اللحظة
+            val delayBetweenChunks = 15000L // 13.5 ثانية انتظار بين كل دفعة وأخرى لتفادي الحظر
+
+            // تقسيم المواسم إلى مجموعات للجلب بالتوازي
+            val seasonChunks = seasons.chunked(chunkSize)
+
+            seasonChunks.forEachIndexed { chunkIndex, chunk ->
+                Log.d(logTag, "جلب الدفعة ${chunkIndex + 1}/${seasonChunks.size} بالتوازي (${chunk.size} مواسم)...")
+
+                // جلب مواسم الدفعة الحالية بالتوازي عبر amap
+                chunk.amap { seasonElement ->
+                    val seasonUrl = seasonElement.attr("href")
+                    val seasonText = seasonElement.text().trim()
+
+                    val seasonNumber = Regex("""الموسم\s*(\d+)""")
+                        .find(seasonText)
+                        ?.groupValues
+                        ?.get(1)
+                        ?.toIntOrNull()
+                        ?: Regex("""\d+""").find(seasonText)?.value?.toIntOrNull()
+
+                    try {
+                        val seasonDoc = httpGet(seasonUrl, referer = url)
+
+                        val seasonEps = seasonDoc
+                            .select("div.w-100.bg-main.rounded.my-4 a.epss:not([href*='/season/'])")
+                            .mapNotNull { episodeElement ->
+                                val epName = episodeElement.text().trim()
+                                val epUrl = episodeElement.attr("href")
+                                val episodeNumber = Regex("""\d+""").find(epName)?.value?.toIntOrNull()
+
+                                newEpisode(epUrl) {
+                                    this.name = epName
+                                    this.episode = episodeNumber
+                                    this.season = seasonNumber
+                                    this.posterUrl = poster
+                                }
+                            }
+
+                        synchronized(episodes) {
+                            episodes.addAll(seasonEps)
+                        }
+
+                    } catch (e: Exception) {
+                        Log.e(logTag, "Failed to load season $seasonUrl: ${e.message}")
+                    }
+                }
+
+                // تأخير بين الدفعات ما عدا الدفعة الأخيرة
+                if (chunkIndex < seasonChunks.size - 1) {
+                    Log.d(logTag, "انتظار $delayBetweenChunks ملي ثانية قبل الدفعة القادمة...")
+                    kotlinx.coroutines.delay(delayBetweenChunks)
+                }
+            }
+
+        } else {
+            document
+                .select("div.w-100.bg-main.rounded.my-4 a.epss:not([href*='/season/'])")
+                .forEach { episodeElement ->
+                    val epName = episodeElement.text().trim()
+                    val epUrl = episodeElement.attr("href")
+                    val episodeNumber = Regex("""\d+""").find(epName)?.value?.toIntOrNull()
+
+                    episodes.add(
+                        newEpisode(epUrl) {
+                            this.name = epName
+                            this.episode = episodeNumber
+                            this.season = 1
+                            this.posterUrl = poster
+                        }
+                    )
+                }
         }
 
-    } else {
+        // ترتيب الحلقات تصاعدياً بحسب الموسم ورقم الحلقة
+        val sortedEpisodes = episodes.sortedWith(
+            compareBy(
+                { it.season ?: 0 },
+                { it.episode ?: 0 }
+            )
+        )
 
-        newMovieLoadResponse(
-            title,
-            url,
-            TvType.Movie,
-            url
-        ) {
-            this.posterUrl = poster
-            this.posterHeaders = posterheader()
-            this.plot = plot
-            this.tags = tags
+        return if (sortedEpisodes.isNotEmpty()) {
+            newTvSeriesLoadResponse(
+                title,
+                url,
+                TvType.TvSeries,
+                sortedEpisodes
+            ) {
+                this.posterUrl = poster
+                this.posterHeaders = posterheader()
+                this.plot = plot
+                this.tags = tags
+            }
+        } else {
+            newMovieLoadResponse(
+                title,
+                url,
+                TvType.Movie,
+                url
+            ) {
+                this.posterUrl = poster
+                this.posterHeaders = posterheader()
+                this.plot = plot
+                this.tags = tags
+            }
         }
     }
-}
 
     override suspend fun loadLinks(
         data: String,
