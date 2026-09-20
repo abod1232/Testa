@@ -26,6 +26,10 @@ class Shahid4u : MainAPI() {
         @JsonProperty("name") val name: String,
         @JsonProperty("url") val url: String
     )
+    companion object {
+        private var lastRequestTime = 0L
+        private var globalCount = 0
+    }
 
     private data class PlayerResponse(
         @JsonProperty("player_url") val playerUrl: String?
@@ -274,122 +278,90 @@ class Shahid4u : MainAPI() {
             emptyList()
         }
     }
-
-
     override suspend fun load(url: String): LoadResponse {
         val document = httpGet(url)
 
         val title = document.selectFirst("span.title")?.text()?.trim() ?: "غير متوفر"
-
         val poster = document.selectFirst("div.poster-side img")?.attr("src")
             ?: document.selectFirst("meta[property='og:image']")?.attr("content")
-
         val plot = document.selectFirst("span.description")?.text()?.trim()
+        val tags = document.select("div.qualities span.q-tag a").map { it.text() }
 
-        val tags = document
-            .select("div.qualities span.q-tag a")
-            .map { it.text() }
-
-        val seasons = document.select(
-            "div.w-100.bg-main.rounded.my-4 a.epss[href*='/season/']"
-        )
-
+        val seasons = document.select("div.w-100.bg-main.rounded.my-4 a.epss[href*='/season/']")
         val episodes = ArrayList<Episode>()
 
         if (seasons.isNotEmpty()) {
-            val chunkSize = 5 // عدد المواسم التي تُجلب بالتوازي في نفس اللحظة
-            val delayBetweenChunks = 15000L // 13.5 ثانية انتظار بين كل دفعة وأخرى لتفادي الحظر
-            val seasonChunks = seasons.chunked(chunkSize)
+            val cooldown = 15000L // 13.5 ثانية
 
-            seasonChunks.forEachIndexed { chunkIndex, chunk ->
-                Log.d(logTag, "جلب الدفعة ${chunkIndex + 1}/${seasonChunks.size} بالتوازي (${chunk.size} مواسم)...")
+            // تقسيم المواسم إلى دفعات من 5
+            seasons.chunked(5).forEach { chunk ->
+
+                // ⚡ فحص بسيط: هل مر 13.5 ثانية منذ آخر دفعة طلبات في التطبيق؟
+                val timePassed = System.currentTimeMillis() - lastRequestTime
+                if (globalCount > 0 && timePassed < cooldown) {
+                    val waitTime = cooldown - timePassed
+                    Log.d(logTag, "⏳ انتظار متبقي لتفادي الحظر: ${waitTime}ms")
+                    kotlinx.coroutines.delay(waitTime)
+                }
+
+                // جلب الـ 5 مواسم بالتوازي
                 chunk.amap { seasonElement ->
                     val seasonUrl = seasonElement.attr("href")
                     val seasonText = seasonElement.text().trim()
-
-                    val seasonNumber = Regex("""الموسم\s*(\d+)""")
-                        .find(seasonText)
-                        ?.groupValues
-                        ?.get(1)
-                        ?.toIntOrNull()
+                    val seasonNumber = Regex("""الموسم\s*(\d+)""").find(seasonText)?.groupValues?.get(1)?.toIntOrNull()
                         ?: Regex("""\d+""").find(seasonText)?.value?.toIntOrNull()
 
                     try {
                         val seasonDoc = httpGet(seasonUrl, referer = url)
-
-                        val seasonEps = seasonDoc
-                            .select("div.w-100.bg-main.rounded.my-4 a.epss:not([href*='/season/'])")
-                            .mapNotNull { episodeElement ->
-                                val epName = episodeElement.text().trim()
-                                val epUrl = episodeElement.attr("href")
-                                val episodeNumber = Regex("""\d+""").find(epName)?.value?.toIntOrNull()
-
-                                newEpisode(epUrl) {
+                        val eps = seasonDoc.select("div.w-100.bg-main.rounded.my-4 a.epss:not([href*='/season/'])")
+                            .mapNotNull { epEl ->
+                                val epName = epEl.text().trim()
+                                newEpisode(epEl.attr("href")) {
                                     this.name = epName
-                                    this.episode = episodeNumber
+                                    this.episode = Regex("""\d+""").find(epName)?.value?.toIntOrNull()
                                     this.season = seasonNumber
                                     this.posterUrl = poster
                                 }
                             }
-
-                        synchronized(episodes) {
-                            episodes.addAll(seasonEps)
-                        }
-
+                        synchronized(episodes) { episodes.addAll(eps) }
                     } catch (e: Exception) {
                         Log.e(logTag, "Failed to load season $seasonUrl: ${e.message}")
                     }
                 }
-                if (chunkIndex < seasonChunks.size - 1) {
-                    Log.d(logTag, "انتظار $delayBetweenChunks ملي ثانية قبل الدفعة القادمة...")
-                    kotlinx.coroutines.delay(delayBetweenChunks)
-                }
+
+                // تحديث وقت آخر دفعة وزيادة العداد
+                lastRequestTime = System.currentTimeMillis()
+                globalCount += chunk.size
             }
 
         } else {
-            document
-                .select("div.w-100.bg-main.rounded.my-4 a.epss:not([href*='/season/'])")
-                .forEach { episodeElement ->
-                    val epName = episodeElement.text().trim()
-                    val epUrl = episodeElement.attr("href")
-                    val episodeNumber = Regex("""\d+""").find(epName)?.value?.toIntOrNull()
-
+            document.select("div.w-100.bg-main.rounded.my-4 a.epss:not([href*='/season/'])")
+                .forEach { epEl ->
+                    val epName = epEl.text().trim()
                     episodes.add(
-                        newEpisode(epUrl) {
+                        newEpisode(epEl.attr("href")) {
                             this.name = epName
-                            this.episode = episodeNumber
+                            this.episode = Regex("""\d+""").find(epName)?.value?.toIntOrNull()
                             this.season = 1
                             this.posterUrl = poster
                         }
                     )
                 }
         }
+
         val sortedEpisodes = episodes.sortedWith(
-            compareBy(
-                { it.season ?: 0 },
-                { it.episode ?: 0 }
-            )
+            compareBy({ it.season ?: 0 }, { it.episode ?: 0 })
         )
 
         return if (sortedEpisodes.isNotEmpty()) {
-            newTvSeriesLoadResponse(
-                title,
-                url,
-                TvType.TvSeries,
-                sortedEpisodes
-            ) {
+            newTvSeriesLoadResponse(title, url, TvType.TvSeries, sortedEpisodes) {
                 this.posterUrl = poster
                 this.posterHeaders = posterheader()
                 this.plot = plot
                 this.tags = tags
             }
         } else {
-            newMovieLoadResponse(
-                title,
-                url,
-                TvType.Movie,
-                url
-            ) {
+            newMovieLoadResponse(title, url, TvType.Movie, url) {
                 this.posterUrl = poster
                 this.posterHeaders = posterheader()
                 this.plot = plot
@@ -398,7 +370,8 @@ class Shahid4u : MainAPI() {
         }
     }
 
-    override suspend fun loadLinks(
+
+        override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
