@@ -312,7 +312,7 @@ class Shahid4u : MainAPI() {
                     "تم تنفيذ 5 طلبات، انتظار 4 ثوانٍ قبل المتابعة..."
                 )
 
-                kotlinx.coroutines.delay(20000L)
+                kotlinx.coroutines.delay(15000L)
             }
 
             val seasonUrl = seasonElement.attr("href")
