@@ -306,13 +306,13 @@ class Shahid4u : MainAPI() {
         var requestCount = 0
 
         for ((index, seasonElement) in seasons.withIndex()) {
-            if (requestCount > 0 && requestCount % 3 == 0) {
+            if (requestCount > 0 && requestCount % 4 == 0) {
                 Log.d(
                     logTag,
                     "تم تنفيذ 5 طلبات، انتظار 4 ثوانٍ قبل المتابعة..."
                 )
 
-                kotlinx.coroutines.delay(25000L)
+                kotlinx.coroutines.delay(20000L)
             }
 
             val seasonUrl = seasonElement.attr("href")
