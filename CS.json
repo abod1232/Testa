@@ -1,7 +1,7 @@
 {
   "name": "3arabi",
   "description": "h",
-  "iconUrl": "https://raw.githubusercontent.com/abod1232/Testa/refs/heads/main/Apps-Google-Movies-icon.png8339174.jpg",
+  "iconUrl": "https://raw.githubusercontent.com/abod1232/Testa/refs/heads/main/Apps-Google-Movies-icon.png",
   "manifestVersion": 2,
   "pluginLists": [
     "https://raw.githubusercontent.com/abod1232/Testa/refs/heads/builds/plugins.json"
