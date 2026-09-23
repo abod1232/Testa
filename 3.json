@@ -1,0 +1,9 @@
+{
+  "name": "3arabi",
+  "description": "h",
+  "iconUrl": "https://raw.githubusercontent.com/abod1232/Testa/refs/heads/builds/Picsart_26-09-24_01-08-27-164.png",
+  "manifestVersion": 2,
+  "pluginLists": [
+    "https://raw.githubusercontent.com/abod1232/Testa/refs/heads/builds/plugins.json"
+  ]
+}
