@@ -265,8 +265,6 @@ class ElifNewsProvider : MainAPI() {
         val m3u8Match = m3u8Regex.find(text)
         return m3u8Match?.groupValues?.get(1)
     }
-
-    // دالة استخراج مخصصة لـ emturbovid / turbovidhls مثل بايثون
     private fun extractTurbovid(htmlText: String): String? {
         val urlPlayRegex = """var\s+urlPlay\s*=\s*['"]([^'"]+)['"]""".toRegex()
         val dataHashRegex = """id=["']video_player["'][^>]*data-hash=["']([^"']+)["']""".toRegex()
@@ -309,13 +307,9 @@ class ElifNewsProvider : MainAPI() {
                             val uri = URL(serverUrl)
                             val domain = "${uri.protocol}://${uri.host}/"
                             val serverName = uri.host.replace("www.", "").lowercase()
-
-                            // فحص هل السيرفر تابع لـ emturbovid ومشتقاتها
                             val isTurbovid = serverName.contains("turbovid") ||
                                     serverName.contains("emturbovid") ||
                                     serverName.contains("turboviplay")
-
-                            // 1. استخراج مخصص لسيرفرات Turbovid / Emturbovid
                             if (isTurbovid) {
                                 val turbovidPageHeaders = mapOf(
                                     "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Mobile Safari/537.36",
@@ -328,8 +322,6 @@ class ElifNewsProvider : MainAPI() {
 
                                     if (!videoLink.isNullOrEmpty()) {
                                         val finalVideoUrl = fixUrl(videoLink)
-
-                                        // ترويسات التشغيل المخصصة لـ Turbovid
                                         val turbovidStreamHeaders = mapOf(
                                             "sec-ch-ua-platform" to "\"Android\"",
                                             "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Mobile Safari/537.36",
@@ -344,8 +336,6 @@ class ElifNewsProvider : MainAPI() {
                                             "Accept-Language" to "ar-EG,ar;q=0.9,en-US;q=0.8,en;q=0.7",
                                             "Priority" to "u=1, i"
                                         )
-
-                                        // إرسال الرابط مباشرة للمشغل بدون فحص
                                         callback(
                                             newExtractorLink(
                                                 source = "Turbovid",
@@ -362,8 +352,6 @@ class ElifNewsProvider : MainAPI() {
                                 }
                                 return@async
                             }
-
-                            // 2. المعالجة الافتراضية لبقية السيرفرات الأخرى
                             loadExtractor(serverUrl, resolvedXtgoUrl, subtitleCallback, callback)
 
                             val serverResponse = app.get(serverUrl, headers = mapOf("Referer" to resolvedXtgoUrl))
