@@ -6,6 +6,7 @@ import android.util.Log
 import android.webkit.CookieManager
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.Qualities
@@ -234,6 +235,7 @@ class ElifNewsProvider : MainAPI() {
             return ""
         }
     }
+
     private fun extractLogic(htmlText: String): String {
         try {
             val startMarker = "eval(function(p,a,c,k,e,d)"
@@ -253,6 +255,7 @@ class ElifNewsProvider : MainAPI() {
         }
         return htmlText
     }
+
     private fun findM3u8(text: String): String? {
         val fileRegex = """file\s*:\s*["']([^"']+)["']""".toRegex()
         val fileMatch = fileRegex.find(text)
@@ -261,6 +264,16 @@ class ElifNewsProvider : MainAPI() {
         val m3u8Regex = """(https?://[^\s"\'<>]+?\.m3u8[^\s"\'<>?]*(?:\?[^\s"\'<>]*)?)""".toRegex()
         val m3u8Match = m3u8Regex.find(text)
         return m3u8Match?.groupValues?.get(1)
+    }
+
+    // دالة استخراج مخصصة لـ emturbovid / turbovidhls مثل بايثون
+    private fun extractTurbovid(htmlText: String): String? {
+        val urlPlayRegex = """var\s+urlPlay\s*=\s*['"]([^'"]+)['"]""".toRegex()
+        val dataHashRegex = """id=["']video_player["'][^>]*data-hash=["']([^"']+)["']""".toRegex()
+
+        return urlPlayRegex.find(htmlText)?.groupValues?.get(1)
+            ?: dataHashRegex.find(htmlText)?.groupValues?.get(1)
+            ?: findM3u8(htmlText)
     }
 
     override suspend fun loadLinks(
@@ -293,11 +306,66 @@ class ElifNewsProvider : MainAPI() {
 
                         try {
                             val serverUrl = fixUrl(embedSource)
-                            loadExtractor(serverUrl, resolvedXtgoUrl, subtitleCallback, callback)
-
                             val uri = URL(serverUrl)
                             val domain = "${uri.protocol}://${uri.host}/"
                             val serverName = uri.host.replace("www.", "").lowercase()
+
+                            // فحص هل السيرفر تابع لـ emturbovid ومشتقاتها
+                            val isTurbovid = serverName.contains("turbovid") ||
+                                    serverName.contains("emturbovid") ||
+                                    serverName.contains("turboviplay")
+
+                            // 1. استخراج مخصص لسيرفرات Turbovid / Emturbovid
+                            if (isTurbovid) {
+                                val turbovidPageHeaders = mapOf(
+                                    "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Mobile Safari/537.36",
+                                    "Referer" to resolvedXtgoUrl
+                                )
+                                val pageRes = app.get(serverUrl, headers = turbovidPageHeaders)
+
+                                if (pageRes.code == 200) {
+                                    val videoLink = extractTurbovid(pageRes.text)
+
+                                    if (!videoLink.isNullOrEmpty()) {
+                                        val finalVideoUrl = fixUrl(videoLink)
+
+                                        // ترويسات التشغيل المخصصة لـ Turbovid
+                                        val turbovidStreamHeaders = mapOf(
+                                            "sec-ch-ua-platform" to "\"Android\"",
+                                            "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Mobile Safari/537.36",
+                                            "sec-ch-ua" to "\"Chromium\";v=\"152\", \"Not?A_Brand\";v=\"24\", \"Google Chrome\";v=\"152\"",
+                                            "sec-ch-ua-mobile" to "?1",
+                                            "Accept" to "*/*",
+                                            "Origin" to domain.removeSuffix("/"),
+                                            "Referer" to serverUrl,
+                                            "Sec-Fetch-Site" to "cross-site",
+                                            "Sec-Fetch-Mode" to "cors",
+                                            "Sec-Fetch-Dest" to "empty",
+                                            "Accept-Language" to "ar-EG,ar;q=0.9,en-US;q=0.8,en;q=0.7",
+                                            "Priority" to "u=1, i"
+                                        )
+
+                                        // إرسال الرابط مباشرة للمشغل بدون فحص
+                                        callback(
+                                            newExtractorLink(
+                                                source = "Turbovid",
+                                                name = "Turbovid",
+                                                url = finalVideoUrl,
+                                                type = ExtractorLinkType.M3U8
+                                            ) {
+                                                this.referer = serverUrl
+                                                this.quality = Qualities.Unknown.value
+                                                this.headers = turbovidStreamHeaders
+                                            }
+                                        )
+                                    }
+                                }
+                                return@async
+                            }
+
+                            // 2. المعالجة الافتراضية لبقية السيرفرات الأخرى
+                            loadExtractor(serverUrl, resolvedXtgoUrl, subtitleCallback, callback)
+
                             val serverResponse = app.get(serverUrl, headers = mapOf("Referer" to resolvedXtgoUrl))
                             if (serverResponse.code == 200) {
                                 val content = extractLogic(serverResponse.text)
@@ -306,7 +374,7 @@ class ElifNewsProvider : MainAPI() {
                                 if (!videoLink.isNullOrEmpty()) {
                                     val finalVideoUrl = fixUrl(videoLink)
                                     val isVidspeed = serverName.contains("vidspeed")
-                                    val verifyHeaders = if (isVidspeed) {
+                                    val customHeaders = if (isVidspeed) {
                                         mapOf(
                                             "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Mobile Safari/537.36",
                                             "Accept" to "*/*",
@@ -321,33 +389,17 @@ class ElifNewsProvider : MainAPI() {
                                         )
                                     }
 
-                                    val check = app.get(
-                                        url = finalVideoUrl,
-                                        headers = verifyHeaders,
-                                        timeout = 10
+                                    callback(
+                                        newExtractorLink(
+                                            source = name,
+                                            name = serverName,
+                                            url = finalVideoUrl,
+                                        ) {
+                                            this.referer = domain
+                                            this.quality = Qualities.Unknown.value
+                                            this.headers = customHeaders
+                                        }
                                     )
-
-                                    if (check.code == 200) {
-                                        callback(
-                                            newExtractorLink(
-                                                source = name,
-                                                name = serverName,
-                                                url = finalVideoUrl,
-                                            ) {
-                                                referer = domain
-                                                quality = Qualities.Unknown.value
-                                                if (isVidspeed) {
-                                                    headers = mapOf(
-                                                        "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Mobile Safari/537.36",
-                                                        "Accept" to "*/*",
-                                                        "Origin" to domain.removeSuffix("/"),
-                                                        "Referer" to domain,
-                                                        "Accept-Language" to "ar-EG,ar;q=0.9,en-US;q=0.8,en;q=0.7"
-                                                    )
-                                                }
-                                            }
-                                        )
-                                    }
                                 }
                             }
                         } catch (e: Exception) {
