@@ -22,7 +22,7 @@ import java.net.URL
 
 class ElifNewsProvider : MainAPI() {
     override var mainUrl = "https://n.elif.news"
-    override var name = "Elif"
+    override var name = "Elif2"
     override val hasMainPage = true
     override var lang = "ar"
     override val hasQuickSearch = false
@@ -383,7 +383,6 @@ class ElifNewsProvider : MainAPI() {
                                             name = serverName,
                                             url = finalVideoUrl,
                                         ) {
-                                            this.referer = domain
                                             this.quality = Qualities.Unknown.value
                                             this.headers = customHeaders
                                         }
