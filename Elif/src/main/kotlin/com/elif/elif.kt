@@ -324,7 +324,6 @@ class ElifNewsProvider : MainAPI() {
                                         val finalVideoUrl = fixUrl(videoLink)
                                         val turbovidStreamHeaders = mapOf(
                                             "sec-ch-ua-platform" to "\"Android\"",
-                                            "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Mobile Safari/537.36",
                                             "sec-ch-ua" to "\"Chromium\";v=\"152\", \"Not?A_Brand\";v=\"24\", \"Google Chrome\";v=\"152\"",
                                             "sec-ch-ua-mobile" to "?1",
                                             "Accept" to "*/*",
@@ -364,7 +363,6 @@ class ElifNewsProvider : MainAPI() {
                                     val isVidspeed = serverName.contains("vidspeed")
                                     val customHeaders = if (isVidspeed) {
                                         mapOf(
-                                            "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Mobile Safari/537.36",
                                             "Accept" to "*/*",
                                             "Origin" to domain.removeSuffix("/"),
                                             "Referer" to domain,
