@@ -9,7 +9,9 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import java.security.MessageDigest
 
-class eishk : MainAPI() {
+class eishk(
+    private val sharedPref: SharedPreferences
+) : MainAPI()
 
     override var mainUrl = "https://raw.githubusercontent.com/Abodabodd/re-3arabi/refs/heads/builds"
     override var name = "تقييم الإضافات"
