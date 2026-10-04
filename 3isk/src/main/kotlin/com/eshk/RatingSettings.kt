@@ -1,7 +1,6 @@
 package com.eshk
 
 import android.app.Dialog
-import android.content.Context
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
@@ -18,7 +17,6 @@ import androidx.fragment.app.DialogFragment
 import androidx.fragment.app.FragmentManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.lagradost.cloudstream3.AcraApplication.Companion.context
 import com.lagradost.cloudstream3.app
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -681,16 +679,22 @@ object RatingSettings {
                     try {
 
                         val response =
-                            app.get(
-                                item.icon
-                            )
+    app.get(item.icon)
 
-                        val bitmap =
-                            BitmapFactory.decodeByteArray(
-                                response.bytes,
-                                0,
-                                response.bytes.size
-                            )
+val body =
+    response.body
+
+val bytes =
+    body.bytes()
+
+body.close()
+
+val bitmap =
+    BitmapFactory.decodeByteArray(
+        bytes,
+        0,
+        bytes.size
+    )
 
                         withContext(
                             Dispatchers.Main
@@ -714,11 +718,11 @@ object RatingSettings {
                     }
                 }
             }
-            val prefs =
-                context.getSharedPreferences(
-                    PREFS,
-                    Context.MODE_PRIVATE
-                )
+             val prefs =
+    holder.itemView.context.getSharedPreferences(
+        PREFS,
+        android.content.Context.MODE_PRIVATE
+    )
 
             val key =
                 transformUrl(item.url)
