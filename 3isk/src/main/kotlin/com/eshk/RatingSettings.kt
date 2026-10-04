@@ -39,20 +39,12 @@ object RatingSettings {
     private const val PREFS =
         "extension_ratings"
 
-    // ---------------------------------------------------------
-    // فتح الإعدادات
-    // ---------------------------------------------------------
-
     fun show(fragmentManager: FragmentManager) {
         SettingsDialog().show(
             fragmentManager,
             "rating_settings"
         )
     }
-
-    // ---------------------------------------------------------
-    // نافذة الإعدادات
-    // ---------------------------------------------------------
 
     class SettingsDialog : DialogFragment() {
 
@@ -130,10 +122,6 @@ object RatingSettings {
         }
     }
 
-    // ---------------------------------------------------------
-    // قائمة التقييمات
-    // ---------------------------------------------------------
-
     class RatingListDialog : DialogFragment() {
 
         override fun onCreateDialog(
@@ -156,8 +144,6 @@ object RatingSettings {
                     Color.rgb(8, 13, 25)
                 )
             }
-
-            // العنوان
             val header = LinearLayout(requireContext()).apply {
 
                 orientation =
@@ -214,8 +200,6 @@ object RatingSettings {
             header.addView(close)
 
             root.addView(header)
-
-            // تحميل
             val progress =
                 ProgressBar(requireContext()).apply {
                     visibility = View.VISIBLE
@@ -228,8 +212,6 @@ object RatingSettings {
                     4
                 )
             )
-
-            // القائمة
             val recycler =
                 RecyclerView(requireContext()).apply {
 
@@ -268,10 +250,6 @@ object RatingSettings {
             return dialog
         }
 
-        // -----------------------------------------------------
-        // تحميل الإضافات
-        // -----------------------------------------------------
-
         private fun loadRatings(
             recycler: RecyclerView,
             progress: ProgressBar
@@ -302,8 +280,6 @@ object RatingSettings {
 
                         val url =
                             obj.optString("url")
-
-                        // ندعم أكثر من اسم للصورة
                         val icon =
                             when {
                                 obj.optString("iconUrl")
@@ -316,8 +292,6 @@ object RatingSettings {
 
                                 else -> ""
                             }
-
-                        // الوصف / النوع
                         val description =
                             when {
                                 obj.optString("description")
@@ -384,10 +358,6 @@ object RatingSettings {
             }
         }
 
-        // -----------------------------------------------------
-        // جلب الأصوات
-        // -----------------------------------------------------
-
         private suspend fun getVotes(
             pluginUrl: String
         ): Int {
@@ -422,10 +392,6 @@ object RatingSettings {
         }
     }
 
-    // ---------------------------------------------------------
-    // بيانات الإضافة
-    // ---------------------------------------------------------
-
     data class PluginRating(
         val name: String,
         val url: String,
@@ -433,10 +399,6 @@ object RatingSettings {
         val description: String,
         val votes: Int
     )
-
-    // ---------------------------------------------------------
-    // Adapter
-    // ---------------------------------------------------------
 
     class RatingAdapter(
         private val items: List<PluginRating>
@@ -459,10 +421,6 @@ object RatingSettings {
 
             val ctx =
                 parent.context
-
-            // -------------------------------------------------
-            // الكرت الرئيسي
-            // -------------------------------------------------
 
             val card =
                 LinearLayout(ctx).apply {
@@ -505,10 +463,6 @@ object RatingSettings {
                         }
                 }
 
-            // -------------------------------------------------
-            // صورة الإضافة
-            // -------------------------------------------------
-
             val icon =
                 ImageView(ctx).apply {
 
@@ -534,10 +488,6 @@ object RatingSettings {
                             marginEnd = 15
                         }
                 }
-
-            // -------------------------------------------------
-            // المعلومات
-            // -------------------------------------------------
 
             val info =
                 LinearLayout(ctx).apply {
@@ -611,10 +561,6 @@ object RatingSettings {
             info.addView(description)
             info.addView(votes)
 
-            // -------------------------------------------------
-            // رقم الترتيب
-            // -------------------------------------------------
-
             val rank =
                 TextView(ctx).apply {
 
@@ -640,10 +586,6 @@ object RatingSettings {
                         0
                     )
                 }
-
-            // -------------------------------------------------
-            // زر القلب
-            // -------------------------------------------------
 
             val heart =
                 TextView(ctx).apply {
@@ -682,10 +624,6 @@ object RatingSettings {
                             marginStart = 10
                         }
                 }
-
-            // -------------------------------------------------
-            // ترتيب العناصر
-            // -------------------------------------------------
 
             card.addView(icon)
             card.addView(info)
@@ -734,8 +672,6 @@ object RatingSettings {
 
                     else -> rank.toString()
                 }
-
-            // تحميل الصورة
             if (item.icon.isNotBlank()) {
 
                 CoroutineScope(
@@ -775,12 +711,9 @@ object RatingSettings {
                     } catch (
                         e: Exception
                     ) {
-                        // تجاهل خطأ الصورة
                     }
                 }
             }
-
-            // حالة التصويت المحلي
             val prefs =
                 context.getSharedPreferences(
                     PREFS,
@@ -800,10 +733,6 @@ object RatingSettings {
                 holder.heart,
                 hasVoted
             )
-
-            // -------------------------------------------------
-            // التصويت
-            // -------------------------------------------------
 
             holder.heart.setOnClickListener {
 
@@ -879,10 +808,6 @@ object RatingSettings {
             items.size
     }
 
-    // ---------------------------------------------------------
-    // إرسال التصويت
-    // ---------------------------------------------------------
-
     private suspend fun vote(
         pluginUrl: String
     ): Boolean {
@@ -912,10 +837,6 @@ object RatingSettings {
             false
         }
     }
-
-    // ---------------------------------------------------------
-    // شكل القلب
-    // ---------------------------------------------------------
 
     private fun updateHeart(
         heart: TextView,
@@ -968,10 +889,6 @@ object RatingSettings {
         }
     }
 
-    // ---------------------------------------------------------
-    // Repository
-    // ---------------------------------------------------------
-
     private fun getRepository(
         pluginUrl: String
     ): String {
@@ -982,10 +899,6 @@ object RatingSettings {
             .take(3)
             .joinToString("-")
     }
-
-    // ---------------------------------------------------------
-    // SHA-256
-    // ---------------------------------------------------------
 
     private fun transformUrl(
         url: String
@@ -1001,10 +914,6 @@ object RatingSettings {
                 "%02x".format(it)
             }
     }
-
-    // ---------------------------------------------------------
-    // خلفية الكروت
-    // ---------------------------------------------------------
 
     private fun roundedBackground(
         color: Int,
