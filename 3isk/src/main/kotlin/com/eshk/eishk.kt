@@ -115,16 +115,12 @@ class eishk : MainAPI() {
                 "${index + 1}. ${plugin.name}  ⭐ ${item.votes}"
 
             newMovieSearchResponse(
-                title,
-                plugin.url,
-                TvType.Movie
-            ) {
-
-                this.posterUrl = plugin.iconUrl
-
-                this.lang = plugin.language ?: "ar"
-
-            }
+    title,
+    plugin.url,
+    TvType.Movie
+) {
+    this.posterUrl = plugin.iconUrl
+}
         }
 
         return newHomePageResponse(
