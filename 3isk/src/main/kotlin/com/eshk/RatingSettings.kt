@@ -13,13 +13,13 @@ import androidx.fragment.app.DialogFragment
 import androidx.fragment.app.FragmentManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.lagradost.cloudstream3.AcraApplication.Companion.context
 import com.lagradost.cloudstream3.app
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
+import org.json.JSONObject
 import java.security.MessageDigest
 
 object RatingSettings {
@@ -30,6 +30,9 @@ object RatingSettings {
     private const val COUNTER_API =
         "https://counterapi.com/api"
 
+    /**
+     * فتح نافذة الإعدادات
+     */
     fun show(fragmentManager: FragmentManager) {
         SettingsDialog().show(
             fragmentManager,
@@ -37,6 +40,9 @@ object RatingSettings {
         )
     }
 
+    /**
+     * نافذة الإعدادات
+     */
     class SettingsDialog : DialogFragment() {
 
         override fun onCreateDialog(
@@ -47,19 +53,34 @@ object RatingSettings {
 
             val layout = LinearLayout(requireContext()).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(32, 32, 32, 32)
+                setPadding(
+                    32,
+                    32,
+                    32,
+                    32
+                )
             }
 
             val title = TextView(requireContext()).apply {
                 text = "⚙️ إعدادات"
                 textSize = 22f
-                setPadding(0, 0, 0, 30)
+                setPadding(
+                    0,
+                    0,
+                    0,
+                    30
+                )
             }
 
             val ratings = TextView(requireContext()).apply {
                 text = "⭐ التقييمات"
                 textSize = 18f
-                setPadding(20, 25, 20, 25)
+                setPadding(
+                    20,
+                    25,
+                    20,
+                    25
+                )
 
                 setOnClickListener {
 
@@ -79,6 +100,9 @@ object RatingSettings {
         }
     }
 
+    /**
+     * نافذة قائمة التقييمات
+     */
     class RatingListDialog : DialogFragment() {
 
         override fun onCreateDialog(
@@ -94,7 +118,12 @@ object RatingSettings {
             val title = TextView(requireContext()).apply {
                 text = "⭐ تقييمات الإضافات"
                 textSize = 22f
-                setPadding(30, 30, 30, 25)
+                setPadding(
+                    30,
+                    30,
+                    30,
+                    25
+                )
             }
 
             val progress = ProgressBar(requireContext()).apply {
@@ -128,6 +157,9 @@ object RatingSettings {
             return dialog
         }
 
+        /**
+         * تحميل الإضافات والتقييمات
+         */
         private fun loadRatings(
             recycler: RecyclerView,
             progress: ProgressBar
@@ -137,6 +169,7 @@ object RatingSettings {
 
                 try {
 
+                    // تحميل plugins.json
                     val response =
                         app.get(PLUGINS_URL)
 
@@ -149,6 +182,7 @@ object RatingSettings {
                     val plugins =
                         mutableListOf<PluginRating>()
 
+                    // قراءة الإضافات
                     for (i in 0 until array.length()) {
 
                         val obj =
@@ -170,6 +204,7 @@ object RatingSettings {
                             continue
                         }
 
+                        // جلب عدد الأصوات
                         val votes =
                             getVotes(url)
 
@@ -183,6 +218,7 @@ object RatingSettings {
                         )
                     }
 
+                    // ترتيب من الأعلى إلى الأقل
                     val sorted =
                         plugins.sortedByDescending {
                             it.votes
@@ -214,7 +250,10 @@ object RatingSettings {
             }
         }
 
-        private fun getVotes(
+        /**
+         * جلب أصوات إضافة واحدة
+         */
+        private suspend fun getVotes(
             pluginUrl: String
         ): Int {
 
@@ -235,8 +274,11 @@ object RatingSettings {
                 val json =
                     response.text
 
-                org.json.JSONObject(json)
-                    .optInt("value", 0)
+                JSONObject(json)
+                    .optInt(
+                        "value",
+                        0
+                    )
 
             } catch (e: Exception) {
 
@@ -244,6 +286,9 @@ object RatingSettings {
             }
         }
 
+        /**
+         * نفس طريقة VotingApi الأصلية
+         */
         private fun transformUrl(
             url: String
         ): String {
@@ -251,13 +296,23 @@ object RatingSettings {
             return MessageDigest
                 .getInstance("SHA-256")
                 .digest(
-                    "$url#funny-salt".toByteArray()
+                    "$url#funny-salt"
+                        .toByteArray()
                 )
                 .joinToString("") {
                     "%02x".format(it)
                 }
         }
 
+        /**
+         * استخراج repository
+         *
+         * مثال:
+         * https://raw.githubusercontent.com/Abodabodd/re-3arabi/...
+         *
+         * يصبح:
+         * raw.githubusercontent.com-Abodabodd-re-3arabi
+         */
         private fun getRepository(
             pluginUrl: String
         ): String {
@@ -270,6 +325,9 @@ object RatingSettings {
         }
     }
 
+    /**
+     * بيانات إضافة واحدة
+     */
     data class PluginRating(
         val name: String,
         val url: String,
@@ -277,6 +335,9 @@ object RatingSettings {
         val votes: Int
     )
 
+    /**
+     * Adapter الخاص بالقائمة
+     */
     class RatingAdapter(
         private val items: List<PluginRating>
     ) : RecyclerView.Adapter<RatingAdapter.ViewHolder>() {
@@ -344,11 +405,13 @@ object RatingSettings {
 
             val name =
                 TextView(context).apply {
+
                     textSize = 17f
                 }
 
             val votes =
                 TextView(context).apply {
+
                     textSize = 14f
                 }
 
@@ -379,9 +442,13 @@ object RatingSettings {
 
             holder.rank.text =
                 when (rank) {
+
                     1 -> "🥇"
+
                     2 -> "🥈"
+
                     3 -> "🥉"
+
                     else -> "$rank."
                 }
 
