@@ -168,8 +168,6 @@ object RatingSettings {
             CoroutineScope(Dispatchers.IO).launch {
 
                 try {
-
-                    // تحميل plugins.json
                     val response =
                         app.get(PLUGINS_URL)
 
@@ -181,8 +179,6 @@ object RatingSettings {
 
                     val plugins =
                         mutableListOf<PluginRating>()
-
-                    // قراءة الإضافات
                     for (i in 0 until array.length()) {
 
                         val obj =
@@ -203,8 +199,6 @@ object RatingSettings {
                         ) {
                             continue
                         }
-
-                        // جلب عدد الأصوات
                         val votes =
                             getVotes(url)
 
@@ -217,8 +211,6 @@ object RatingSettings {
                             )
                         )
                     }
-
-                    // ترتيب من الأعلى إلى الأقل
                     val sorted =
                         plugins.sortedByDescending {
                             it.votes
