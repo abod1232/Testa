@@ -1,24 +1,20 @@
 package com.eshk
 
 import android.app.Dialog
-import android.content.Context
 import android.os.Bundle
-import android.view.*
-import android.widget.*
-import androidx.appcompat.app.AppCompatActivity
+import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
+import android.widget.LinearLayout
+import android.widget.ProgressBar
+import android.widget.TextView
+import android.widget.Toast
 import androidx.fragment.app.DialogFragment
 import androidx.fragment.app.FragmentManager
-import androidx.preference.Preference
-import androidx.preference.PreferenceFragmentCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.lagradost.cloudstream3.AcraApplication.Companion.app
-import com.lagradost.cloudstream3.utils.AppUtils
-import com.lagradost.cloudstream3.utils.UIHelper
-import com.lagradost.cloudstream3.utils.getImage
-import com.lagradost.cloudstream3.utils.loadImage
-import com.lagradost.cloudstream3.utils.isTv
-import com.lagradost.cloudstream3.utils.toast
+import com.lagradost.cloudstream3.AcraApplication.Companion.context
+import com.lagradost.cloudstream3.app
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -34,22 +30,14 @@ object RatingSettings {
     private const val COUNTER_API =
         "https://counterapi.com/api"
 
-    /**
-     * فتح إعدادات الإضافة
-     */
-    fun show(
-        fragmentManager: FragmentManager
-    ) {
-        SettingsBottomSheet().show(
+    fun show(fragmentManager: FragmentManager) {
+        SettingsDialog().show(
             fragmentManager,
             "rating_settings"
         )
     }
 
-    /**
-     * إعدادات الإضافة
-     */
-    class SettingsBottomSheet : androidx.fragment.app.DialogFragment() {
+    class SettingsDialog : DialogFragment() {
 
         override fun onCreateDialog(
             savedInstanceState: Bundle?
@@ -57,7 +45,7 @@ object RatingSettings {
 
             val dialog = Dialog(requireContext())
 
-            val view = LinearLayout(requireContext()).apply {
+            val layout = LinearLayout(requireContext()).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(32, 32, 32, 32)
             }
@@ -65,35 +53,32 @@ object RatingSettings {
             val title = TextView(requireContext()).apply {
                 text = "⚙️ إعدادات"
                 textSize = 22f
-                setPadding(0, 0, 0, 32)
+                setPadding(0, 0, 0, 30)
             }
 
             val ratings = TextView(requireContext()).apply {
                 text = "⭐ التقييمات"
                 textSize = 18f
-                setPadding(16, 24, 16, 24)
+                setPadding(20, 25, 20, 25)
 
                 setOnClickListener {
-                    RatingListDialog()
-                        .show(
-                            parentFragmentManager,
-                            "rating_list"
-                        )
+
+                    RatingListDialog().show(
+                        parentFragmentManager,
+                        "rating_list"
+                    )
                 }
             }
 
-            view.addView(title)
-            view.addView(ratings)
+            layout.addView(title)
+            layout.addView(ratings)
 
-            dialog.setContentView(view)
+            dialog.setContentView(layout)
 
             return dialog
         }
     }
 
-    /**
-     * صفحة التقييمات
-     */
     class RatingListDialog : DialogFragment() {
 
         override fun onCreateDialog(
@@ -109,14 +94,14 @@ object RatingSettings {
             val title = TextView(requireContext()).apply {
                 text = "⭐ تقييمات الإضافات"
                 textSize = 22f
-                setPadding(32, 32, 32, 24)
+                setPadding(30, 30, 30, 25)
             }
 
             val progress = ProgressBar(requireContext()).apply {
                 visibility = View.VISIBLE
             }
 
-            val recyclerView = RecyclerView(requireContext()).apply {
+            val recycler = RecyclerView(requireContext()).apply {
                 layoutManager =
                     LinearLayoutManager(requireContext())
             }
@@ -125,9 +110,9 @@ object RatingSettings {
             root.addView(progress)
 
             root.addView(
-                recyclerView,
+                recycler,
                 LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
                     0,
                     1f
                 )
@@ -136,7 +121,7 @@ object RatingSettings {
             dialog.setContentView(root)
 
             loadRatings(
-                recyclerView,
+                recycler,
                 progress
             )
 
@@ -144,7 +129,7 @@ object RatingSettings {
         }
 
         private fun loadRatings(
-            recyclerView: RecyclerView,
+            recycler: RecyclerView,
             progress: ProgressBar
         ) {
 
@@ -152,9 +137,11 @@ object RatingSettings {
 
                 try {
 
-                    val json =
+                    val response =
                         app.get(PLUGINS_URL)
-                            .text
+
+                    val json =
+                        response.text
 
                     val array =
                         JSONArray(json)
@@ -176,8 +163,12 @@ object RatingSettings {
                         val icon =
                             obj.optString("icon")
 
-                        if (name.isBlank() || url.isBlank())
+                        if (
+                            name.isBlank() ||
+                            url.isBlank()
+                        ) {
                             continue
+                        }
 
                         val votes =
                             getVotes(url)
@@ -202,7 +193,7 @@ object RatingSettings {
                         progress.visibility =
                             View.GONE
 
-                        recyclerView.adapter =
+                        recycler.adapter =
                             RatingAdapter(sorted)
                     }
 
@@ -223,7 +214,7 @@ object RatingSettings {
             }
         }
 
-        private suspend fun getVotes(
+        private fun getVotes(
             pluginUrl: String
         ): Int {
 
@@ -244,11 +235,8 @@ object RatingSettings {
                 val json =
                     response.text
 
-                val value =
-                    org.json.JSONObject(json)
-                        .optInt("value", 0)
-
-                value
+                org.json.JSONObject(json)
+                    .optInt("value", 0)
 
             } catch (e: Exception) {
 
@@ -263,8 +251,7 @@ object RatingSettings {
             return MessageDigest
                 .getInstance("SHA-256")
                 .digest(
-                    "$url#funny-salt"
-                        .toByteArray()
+                    "$url#funny-salt".toByteArray()
                 )
                 .joinToString("") {
                     "%02x".format(it)
@@ -283,9 +270,6 @@ object RatingSettings {
         }
     }
 
-    /**
-     * بيانات الإضافة
-     */
     data class PluginRating(
         val name: String,
         val url: String,
@@ -293,9 +277,6 @@ object RatingSettings {
         val votes: Int
     )
 
-    /**
-     * Adapter
-     */
     class RatingAdapter(
         private val items: List<PluginRating>
     ) : RecyclerView.Adapter<RatingAdapter.ViewHolder>() {
@@ -312,7 +293,8 @@ object RatingSettings {
             viewType: Int
         ): ViewHolder {
 
-            val context = parent.context
+            val context =
+                parent.context
 
             val layout =
                 LinearLayout(context).apply {
@@ -325,9 +307,9 @@ object RatingSettings {
 
                     setPadding(
                         20,
+                        22,
                         20,
-                        20,
-                        20
+                        22
                     )
                 }
 
@@ -342,7 +324,7 @@ object RatingSettings {
                     layoutParams =
                         LinearLayout.LayoutParams(
                             70,
-                            LinearLayout.LayoutParams.WRAP_CONTENT
+                            ViewGroup.LayoutParams.WRAP_CONTENT
                         )
                 }
 
@@ -355,20 +337,18 @@ object RatingSettings {
                     layoutParams =
                         LinearLayout.LayoutParams(
                             0,
-                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
                             1f
                         )
                 }
 
             val name =
                 TextView(context).apply {
-
                     textSize = 17f
                 }
 
             val votes =
                 TextView(context).apply {
-
                     textSize = 14f
                 }
 
@@ -410,15 +390,6 @@ object RatingSettings {
 
             holder.votes.text =
                 "⭐ ${item.votes} صوت"
-
-            holder.layout.setOnClickListener {
-
-                Toast.makeText(
-                    holder.layout.context,
-                    "${item.name}\n⭐ ${item.votes} صوت",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
         }
 
         override fun getItemCount(): Int =
