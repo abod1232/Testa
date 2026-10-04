@@ -1,144 +1,245 @@
 package com.eshk
 
-import android.util.Log
 import com.fasterxml.jackson.annotation.JsonProperty
-import org.jsoup.nodes.Element
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.utils.*
-import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
-import org.jsoup.nodes.Document
+import com.lagradost.cloudstream3.utils.*
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import java.security.MessageDigest
 
 class eishk : MainAPI() {
-    override var mainUrl = "https://animeworld.ac"
-    override var name = "AnimeWorld"
-    override val hasMainPage = true
-    override var lang = "it"
-    override val supportedTypes = setOf(TvType.Anime)
 
-    override val mainPage = mainPageOf(
-        "${mainUrl}/updated" to "Nuovi Episodi",
-        "${mainUrl}/animes" to "Anime",
-        "${mainUrl}/ongoing" to "In Corso",
-        "${mainUrl}/movies" to "Film Anime"
+    override var mainUrl = "https://raw.githubusercontent.com/Abodabodd/re-3arabi/refs/heads/builds"
+    override var name = "تقييم الإضافات"
+    override var lang = "ar"
+
+    override val hasMainPage = true
+
+    override val supportedTypes = setOf(
+        TvType.Movie
     )
 
-    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val url = if (page == 1) request.data else "${request.data}?page=$page"
-        val document = app.get(url).document
-        val home = document.select("div.film-list div.item").mapNotNull { it.toMainPageResult() }
+    companion object {
 
-        return newHomePageResponse(request.name, home, hasNext = true)
-    }
+        private const val PLUGINS_URL =
+            "https://raw.githubusercontent.com/Abodabodd/re-3arabi/refs/heads/builds/plugins.json"
 
-    private fun Element.toMainPageResult(): SearchResponse? {
-        val titleElement = this.selectFirst("a.name") ?: return null
-        val title = titleElement.text() ?: return null
-        val href = fixUrlNull(titleElement.attr("href")) ?: return null
-        val posterUrl = fixUrlNull(this.selectFirst("img")?.attr("src"))
-        val isDub = this.selectFirst("div.status div.dub") != null
+        private const val COUNTER_API =
+            "https://counterapi.com/api"
 
-        return newAnimeSearchResponse(title, href, TvType.AnimeMovie) {
-            this.posterUrl = posterUrl
-            addDubStatus(isDub)
+        private const val SALT =
+            "#funny-salt"
+
+        private fun transformUrl(url: String): String {
+            return MessageDigest
+                .getInstance("SHA-256")
+                .digest((url + SALT).toByteArray())
+                .joinToString("") {
+                    "%02x".format(it)
+                }
+        }
+
+        private fun getRepository(pluginUrl: String): String {
+            return pluginUrl
+                .split("/")
+                .drop(2)
+                .take(3)
+                .joinToString("-")
         }
     }
 
-    override suspend fun search(query: String, page: Int): SearchResponseList {
-        val url = if (page == 1) {
-            "${mainUrl}/filter?sort=0&keyword=${query}"
-        } else {
-            "${mainUrl}/filter?sort=0&keyword=${query}&page=$page"
+    /**
+     * الصفحة الرئيسية
+     */
+    override val mainPage = mainPageOf(
+        "votes" to "⭐ ترتيب الإضافات حسب التقييم"
+    )
+
+    /**
+     * جلب الإضافات والأصوات
+     */
+    override suspend fun getMainPage(
+        page: Int,
+        request: MainPageRequest
+    ): HomePageResponse {
+
+        if (page > 1) {
+            return newHomePageResponse(
+                request.name,
+                emptyList(),
+                hasNext = false
+            )
         }
 
-        val results = app.get(url).document.select("div.film-list div.item")
-            .mapNotNull { it.toMainPageResult() }
+        // جلب plugins.json
+        val plugins = app
+            .get(PLUGINS_URL)
+            .parsedSafe<Array<PluginInfo>>()
+            ?.toList()
+            ?: emptyList()
 
-        return newSearchResponseList(results, hasNext = true)
-    }
+        /*
+         * جلب أصوات جميع الإضافات بالتوازي
+         */
+        val results = coroutineScope {
 
-    override suspend fun quickSearch(query: String): List<SearchResponse>? = search(query)
+            plugins.map { plugin ->
 
-    override suspend fun load(url: String): LoadResponse? {
-        val realUrl = app.get(url, allowRedirects = false).headers["Location"] ?: return null
-        val document = app.get(realUrl).document
+                async {
 
-        val title = document.selectFirst("h2.title")?.text()?.trim() ?: return null
-        val poster = fixUrlNull(document.selectFirst("div.thumb img")?.attr("src"))
-        val year = document.select("dl.meta dd")
-            .firstOrNull { it.text().contains("20") || it.text().contains("19") }?.text()?.trim()
-            ?.takeLast(4)?.toIntOrNull()
-        val tags = document.select("dl.meta dd a[href*=/genre/]").map { it.text() }
-        val rating = document.selectFirst("span#average-vote")?.text()?.trim()?.toDoubleOrNull()
-        val duration =
-            document.select("dl.meta dd").firstOrNull { it.text().contains("min/ep") }?.text()
-                ?.trim()?.split(" ")?.firstOrNull()?.toIntOrNull()
-        val plot = document.selectFirst("div.desc")?.text()?.trim()
-        val status = when (document.select("dl.meta dd a[href*=/status/]").text().trim()) {
-            "Finito" -> ShowStatus.Completed
-            "In corso" -> ShowStatus.Ongoing
-            else -> null
+                    val votes = getVotes(plugin.url)
+
+                    PluginVote(
+                        plugin = plugin,
+                        votes = votes
+                    )
+                }
+
+            }.awaitAll()
         }
 
-        val episodes = document.select("ul.episodes li.episode a").mapNotNull {
-            val epId = it.attr("data-id") ?: return@mapNotNull null
-            val epNum = it.attr("data-episode-num").toIntOrNull() ?: return@mapNotNull null
-            newEpisode(epId) {
-                this.episode = epNum
+        /*
+         * ترتيب من الأعلى تصويتاً إلى الأقل
+         */
+        val sorted = results
+            .sortedByDescending { it.votes }
+
+        /*
+         * تحويلها إلى بطاقات CloudStream
+         */
+        val home = sorted.mapIndexedNotNull { index, item ->
+
+            val plugin = item.plugin
+
+            val title =
+                "${index + 1}. ${plugin.name}  ⭐ ${item.votes}"
+
+            newMovieSearchResponse(
+                title,
+                plugin.url,
+                TvType.Movie
+            ) {
+
+                this.posterUrl = plugin.iconUrl
+
+                this.lang = plugin.language ?: "ar"
+
             }
         }
 
-        if (episodes.isEmpty()) return null
+        return newHomePageResponse(
+            "⭐ ترتيب الإضافات حسب التقييم",
+            home,
+            hasNext = false
+        )
+    }
 
-        return newTvSeriesLoadResponse(title, realUrl, TvType.Anime, episodes) {
-            this.posterUrl = poster
-            this.year = year
-            this.tags = tags
-            this.plot = plot
-            this.duration = duration
-            this.showStatus = status
-            this.recommendations = recommendations(document)
-            rating?.let { this.score = Score.from10(it) }
+    /**
+     * قراءة عدد الأصوات من CounterAPI
+     */
+    private suspend fun getVotes(
+        pluginUrl: String
+    ): Int {
+
+        return try {
+
+            val repository = getRepository(pluginUrl)
+
+            val key = transformUrl(pluginUrl)
+
+            val url =
+                "$COUNTER_API/" +
+                "cs-$repository/" +
+                "vote/$key" +
+                "?readOnly=true"
+
+            app
+                .get(url)
+                .parsedSafe<CounterResult>()
+                ?.value
+                ?: 0
+
+        } catch (e: Exception) {
+
+            0
         }
     }
 
-    private fun recommendations(document: Document): List<SearchResponse> {
-        return document.select("div.interesting div.item").mapNotNull {
-            val onerititle = it.selectFirst("a.name")?.text() ?: return@mapNotNull null
-            val onerihref = fixUrlNull(it.selectFirst("a")?.attr("href")) ?: return@mapNotNull null
-            val oneriposter = fixUrlNull(it.selectFirst("img")?.attr("src"))
-            newAnimeSearchResponse(onerititle, onerihref, TvType.Anime) { this.posterUrl = oneriposter }
-        }
+    /**
+     * عند البحث
+     *
+     * لا نحتاج بحث في هذه الإضافة،
+     * لذلك نرجع القائمة نفسها.
+     */
+    override suspend fun search(
+        query: String,
+        page: Int
+    ): SearchResponseList {
+
+        return newSearchResponseList(
+            emptyList(),
+            hasNext = false
+        )
     }
 
+    /**
+     * لا يوجد تشغيل فيديو.
+     */
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        Log.d("Ayzen_$name", "data = $data")
 
-        val realData =
-            app.get(data, allowRedirects = false).headers["Location"]?.substringAfterLast("/")
-                ?: return false
-        val response =
-            app.get("${mainUrl}/api/episode/info?id=$realData&alt=0").parsedSafe<EpisodeInfo>()
-                ?: return false
-
-        callback(
-            newExtractorLink(
-                source = name,
-                name = name,
-                url = response.grabber,
-                type = ExtractorLinkType.VIDEO
-            )
-        )
-
-        return true
+        return false
     }
 
-    data class EpisodeInfo(
-        @JsonProperty("grabber") val grabber: String
+    /**
+     * بيانات الإضافة من plugins.json
+     */
+    data class PluginInfo(
+
+        @JsonProperty("url")
+        val url: String,
+
+        @JsonProperty("name")
+        val name: String,
+
+        @JsonProperty("internalName")
+        val internalName: String? = null,
+
+        @JsonProperty("version")
+        val version: Int? = null,
+
+        @JsonProperty("description")
+        val description: String? = null,
+
+        @JsonProperty("iconUrl")
+        val iconUrl: String? = null,
+
+        @JsonProperty("language")
+        val language: String? = null,
+
+        @JsonProperty("repositoryUrl")
+        val repositoryUrl: String? = null
+
+    )
+
+    data class PluginVote(
+        val plugin: PluginInfo,
+        val votes: Int
+    )
+
+    /**
+     * استجابة CounterAPI
+     */
+    data class CounterResult(
+
+        @JsonProperty("value")
+        val value: Int? = null
+
     )
 }
