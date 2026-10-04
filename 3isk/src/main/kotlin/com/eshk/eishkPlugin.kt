@@ -6,7 +6,7 @@ import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 
 @CloudstreamPlugin
-class RatingPlugin : Plugin() {
+class eishkPlugin : Plugin() {
 
     override fun load(context: Context) {
 
@@ -18,11 +18,13 @@ class RatingPlugin : Plugin() {
 
             val activity =
                 ctx as? AppCompatActivity
-                    ?: return@openSettings
 
-            RatingSettings.show(
-                activity.supportFragmentManager
-            )
+            if (activity != null) {
+
+                RatingSettings.show(
+                    activity.supportFragmentManager
+                )
+            }
         }
     }
 }
