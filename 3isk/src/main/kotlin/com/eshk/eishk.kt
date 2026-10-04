@@ -72,8 +72,6 @@ class eishk : MainAPI() {
                 hasNext = false
             )
         }
-
-        // جلب plugins.json
         val plugins = app
             .get(PLUGINS_URL)
             .parsedSafe<Array<PluginInfo>>()
