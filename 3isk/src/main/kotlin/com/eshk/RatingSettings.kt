@@ -43,8 +43,11 @@ object RatingSettings {
     private const val COUNTER_API =
         "https://counterapi.com/api"
 
+    private const val NAMESPACE =
+        "cs_re3arabi_ratings"
+
     private const val PREFS =
-        "extension_ratings"
+        "extension_ratings_prefs"
 
     private val imageCache = ConcurrentHashMap<String, Bitmap>()
 
@@ -325,11 +328,11 @@ object RatingSettings {
 
         private suspend fun getCount(pluginUrl: String, action: String): Int {
             return try {
-                val repository = getRepository(pluginUrl)
-                val key = transformUrl(pluginUrl)
-                val url = "$COUNTER_API/cs-$repository/$action/$key?readOnly=true"
+                val key = getKey(pluginUrl, action)
+                val url = "$COUNTER_API/$NAMESPACE/$key?readOnly=true"
                 val response = app.get(url)
-                JSONObject(response.text).optInt("value", 0)
+                val json = JSONObject(response.text)
+                json.optInt("count", json.optInt("value", 0))
             } catch (e: Exception) {
                 0
             }
@@ -556,13 +559,13 @@ object RatingSettings {
                 Context.MODE_PRIVATE
             )
 
-            val key = RatingSettings.transformUrl(item.url)
-            val userVote = prefs.getString("vote_type_$key", "none")
+            val baseKey = getBaseHash(item.url)
+            val userVote = prefs.getString("user_voted_$baseKey", "none")
 
             updateButtonsState(holder.heart, holder.dislike, userVote)
 
             holder.heart.setOnClickListener {
-                if (prefs.getString("vote_type_$key", "none") != "none") {
+                if (prefs.getString("user_voted_$baseKey", "none") != "none") {
                     Toast.makeText(
                         holder.itemView.context,
                         "لقد قمت بالتصويت مسبقاً",
@@ -582,7 +585,7 @@ object RatingSettings {
                         holder.dislike.isEnabled = true
 
                         if (success) {
-                            prefs.edit().putString("vote_type_$key", "like").apply()
+                            prefs.edit().putString("user_voted_$baseKey", "like").apply()
                             item.likes += 1
                             holder.votes.text = "👍 ${item.likes}   •   👎 ${item.dislikes}"
                             updateButtonsState(holder.heart, holder.dislike, "like")
@@ -598,7 +601,7 @@ object RatingSettings {
             }
 
             holder.dislike.setOnClickListener {
-                if (prefs.getString("vote_type_$key", "none") != "none") {
+                if (prefs.getString("user_voted_$baseKey", "none") != "none") {
                     Toast.makeText(
                         holder.itemView.context,
                         "لقد قمت بالتصويت مسبقاً",
@@ -622,7 +625,7 @@ object RatingSettings {
                                 holder.dislike.isEnabled = true
 
                                 if (success) {
-                                    prefs.edit().putString("vote_type_$key", "dislike").apply()
+                                    prefs.edit().putString("user_voted_$baseKey", "dislike").apply()
                                     item.dislikes += 1
                                     holder.votes.text = "👍 ${item.likes}   •   👎 ${item.dislikes}"
                                     updateButtonsState(holder.heart, holder.dislike, "dislike")
@@ -646,11 +649,11 @@ object RatingSettings {
 
     private suspend fun incrementVote(pluginUrl: String, action: String): Boolean {
         return try {
-            val repository = getRepository(pluginUrl)
-            val key = transformUrl(pluginUrl)
-            val url = "$COUNTER_API/cs-$repository/$action/$key"
+            val key = getKey(pluginUrl, action)
+            val url = "$COUNTER_API/$NAMESPACE/$key"
             val response = app.get(url)
-            JSONObject(response.text).has("value")
+            val json = JSONObject(response.text)
+            json.has("count") || json.has("value")
         } catch (e: Exception) {
             false
         }
@@ -689,18 +692,14 @@ object RatingSettings {
         }
     }
 
-    private fun getRepository(pluginUrl: String): String {
-        return pluginUrl
-            .split("/")
-            .drop(2)
-            .take(3)
-            .joinToString("-")
+    private fun getBaseHash(url: String): String {
+        return MessageDigest.getInstance("MD5")
+            .digest(url.toByteArray())
+            .joinToString("") { "%02x".format(it) }
     }
 
-    private fun transformUrl(url: String): String {
-        return MessageDigest.getInstance("SHA-256")
-            .digest("$url#funny-salt".toByteArray())
-            .joinToString("") { "%02x".format(it) }
+    private fun getKey(url: String, action: String): String {
+        return "${action}_${getBaseHash(url)}"
     }
 
     private fun roundedBackground(
