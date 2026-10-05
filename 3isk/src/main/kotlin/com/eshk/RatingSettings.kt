@@ -1,5 +1,6 @@
 package com.eshk
 
+import android.app.AlertDialog
 import android.app.Dialog
 import android.content.Context
 import android.graphics.Bitmap
@@ -225,6 +226,32 @@ object RatingSettings {
             return dialog
         }
 
+        private fun mapTvTypes(typesArray: JSONArray?): String {
+            if (typesArray == null || typesArray.length() == 0) return "إضافة عامة"
+
+            val map = mapOf(
+                "TvSeries" to "مسلسلات",
+                "Movie" to "أفلام",
+                "Anime" to "أنمي",
+                "AsianDrama" to "دراما آسيوية",
+                "Live" to "بث مباشر",
+                "Drama" to "دراما",
+                "Music" to "موسيقى",
+                "Documentary" to "وثائقي",
+                "Others" to "منوعات"
+            )
+
+            val list = mutableListOf<String>()
+            for (i in 0 until typesArray.length()) {
+                val type = typesArray.optString(i)
+                map[type]?.let {
+                    if (!list.contains(it)) list.add(it)
+                }
+            }
+
+            return if (list.isNotEmpty()) list.joinToString(" • ") else "إضافة عامة"
+        }
+
         private fun loadRatings(
             recycler: RecyclerView,
             progress: ProgressBar
@@ -255,8 +282,9 @@ object RatingSettings {
 
                                 val description = when {
                                     obj.optString("description").isNotBlank() -> obj.optString("description")
+                                    obj.has("tvTypes") -> mapTvTypes(obj.optJSONArray("tvTypes"))
                                     obj.optString("type").isNotBlank() -> obj.optString("type")
-                                    else -> "إضافة Cloudstream"
+                                    else -> "إضافة عامة"
                                 }
 
                                 val votes = getVotes(url)
@@ -329,6 +357,7 @@ object RatingSettings {
             val name: TextView,
             val description: TextView,
             val votes: TextView,
+            val dislike: TextView,
             val heart: TextView
         ) : RecyclerView.ViewHolder(card)
 
@@ -382,26 +411,26 @@ object RatingSettings {
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     27.dp(ctx)
                 ).apply {
-                    leftMargin = 101.dp(ctx)
-                    rightMargin = 85.dp(ctx)
+                    leftMargin = 98.dp(ctx)
+                    rightMargin = 118.dp(ctx)
                     topMargin = 11.dp(ctx)
                 }
             }
 
             val description = TextView(ctx).apply {
-                textSize = 12.5f
+                textSize = 12f
                 setTextColor(Color.rgb(155, 163, 185))
                 maxLines = 1
                 ellipsize = TextUtils.TruncateAt.END
                 gravity = Gravity.CENTER_VERTICAL
-                layoutDirection = View.LAYOUT_DIRECTION_LTR
+                layoutDirection = View.LAYOUT_DIRECTION_RTL
 
                 layoutParams = FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     22.dp(ctx)
                 ).apply {
-                    leftMargin = 101.dp(ctx)
-                    rightMargin = 85.dp(ctx)
+                    leftMargin = 98.dp(ctx)
+                    rightMargin = 118.dp(ctx)
                     topMargin = 39.dp(ctx)
                 }
             }
@@ -413,28 +442,47 @@ object RatingSettings {
                 layoutDirection = View.LAYOUT_DIRECTION_LTR
 
                 layoutParams = FrameLayout.LayoutParams(
-                    150.dp(ctx),
+                    140.dp(ctx),
                     22.dp(ctx)
                 ).apply {
-                    leftMargin = 101.dp(ctx)
+                    leftMargin = 98.dp(ctx)
                     topMargin = 66.dp(ctx)
+                }
+            }
+
+            val dislike = TextView(ctx).apply {
+                text = "👎"
+                textSize = 18f
+                gravity = Gravity.CENTER
+
+                background = roundedBackground(
+                    Color.rgb(28, 35, 55),
+                    16f
+                )
+
+                layoutParams = FrameLayout.LayoutParams(
+                    46.dp(ctx),
+                    46.dp(ctx)
+                ).apply {
+                    gravity = Gravity.END or Gravity.CENTER_VERTICAL
+                    rightMargin = 64.dp(ctx)
                 }
             }
 
             val heart = TextView(ctx).apply {
                 text = "♡"
-                textSize = 34f
+                textSize = 28f
                 gravity = Gravity.CENTER
                 setTextColor(Color.rgb(205, 212, 235))
 
                 background = roundedBackground(
                     Color.rgb(28, 35, 55),
-                    18f
+                    16f
                 )
 
                 layoutParams = FrameLayout.LayoutParams(
-                    60.dp(ctx),
-                    60.dp(ctx)
+                    46.dp(ctx),
+                    46.dp(ctx)
                 ).apply {
                     gravity = Gravity.END or Gravity.CENTER_VERTICAL
                     rightMargin = 12.dp(ctx)
@@ -445,6 +493,7 @@ object RatingSettings {
             card.addView(name)
             card.addView(description)
             card.addView(votes)
+            card.addView(dislike)
             card.addView(heart)
 
             return ViewHolder(
@@ -453,6 +502,7 @@ object RatingSettings {
                 name,
                 description,
                 votes,
+                dislike,
                 heart
             )
         }
@@ -504,44 +554,87 @@ object RatingSettings {
             )
 
             val key = RatingSettings.transformUrl(item.url)
-            val hasVoted = prefs.getBoolean("voted_$key", false)
+            val userVote = prefs.getString("vote_type_$key", "none")
 
-            updateHeart(holder.heart, hasVoted)
+            updateButtonsState(holder.heart, holder.dislike, userVote)
 
             holder.heart.setOnClickListener {
-                val alreadyVoted = prefs.getBoolean("voted_$key", false)
-
-                if (alreadyVoted) {
+                if (prefs.getString("vote_type_$key", "none") != "none") {
                     Toast.makeText(
                         holder.itemView.context,
-                        "لقد صوتت لهذه الإضافة مسبقًا",
+                        "لقد قمت بالتصويت مسبقاً",
                         Toast.LENGTH_SHORT
                     ).show()
                     return@setOnClickListener
                 }
 
                 holder.heart.isEnabled = false
+                holder.dislike.isEnabled = false
 
                 CoroutineScope(Dispatchers.IO).launch {
                     val success = RatingSettings.vote(item.url)
 
                     withContext(Dispatchers.Main) {
                         holder.heart.isEnabled = true
+                        holder.dislike.isEnabled = true
 
                         if (success) {
-                            prefs.edit().putBoolean("voted_$key", true).apply()
+                            prefs.edit().putString("vote_type_$key", "like").apply()
                             item.votes += 1
                             holder.votes.text = "⭐  ${item.votes} صوت"
-                            updateHeart(holder.heart, true)
+                            updateButtonsState(holder.heart, holder.dislike, "like")
                         } else {
                             Toast.makeText(
                                 holder.itemView.context,
-                                "تعذر تسجيل التصويت",
+                                "تعذر تسجيل الإعجاب",
                                 Toast.LENGTH_SHORT
                             ).show()
                         }
                     }
                 }
+            }
+
+            holder.dislike.setOnClickListener {
+                if (prefs.getString("vote_type_$key", "none") != "none") {
+                    Toast.makeText(
+                        holder.itemView.context,
+                        "لقد قمت بالتصويت مسبقاً",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    return@setOnClickListener
+                }
+
+                AlertDialog.Builder(holder.itemView.context)
+                    .setTitle("تأكيد التصويت")
+                    .setMessage("هل أنت متأكد أنك تريد تسجيل عدم الإعجاب بالإضافة؟")
+                    .setPositiveButton("نعم") { _, _ ->
+                        holder.heart.isEnabled = false
+                        holder.dislike.isEnabled = false
+
+                        CoroutineScope(Dispatchers.IO).launch {
+                            val success = RatingSettings.downvote(item.url)
+
+                            withContext(Dispatchers.Main) {
+                                holder.heart.isEnabled = true
+                                holder.dislike.isEnabled = true
+
+                                if (success) {
+                                    prefs.edit().putString("vote_type_$key", "dislike").apply()
+                                    item.votes -= 1
+                                    holder.votes.text = "⭐  ${item.votes} صوت"
+                                    updateButtonsState(holder.heart, holder.dislike, "dislike")
+                                } else {
+                                    Toast.makeText(
+                                        holder.itemView.context,
+                                        "تعذر تسجيل عدم الإعجاب",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }
+                        }
+                    }
+                    .setNegativeButton("إلغاء", null)
+                    .show()
             }
         }
 
@@ -560,24 +653,48 @@ object RatingSettings {
         }
     }
 
-    private fun updateHeart(
+    private suspend fun downvote(pluginUrl: String): Boolean {
+        return try {
+            val repository = getRepository(pluginUrl)
+            val key = transformUrl(pluginUrl)
+            val url = "$COUNTER_API/cs-$repository/vote/$key/down"
+            val response = app.get(url)
+            JSONObject(response.text).has("value")
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun updateButtonsState(
         heart: TextView,
-        voted: Boolean
+        dislike: TextView,
+        voteType: String?
     ) {
-        if (voted) {
-            heart.text = "♥"
-            heart.setTextColor(Color.rgb(255, 75, 105))
-            heart.background = roundedBackground(
-                Color.rgb(55, 28, 45),
-                18f
-            )
-        } else {
-            heart.text = "♡"
-            heart.setTextColor(Color.rgb(205, 212, 235))
-            heart.background = roundedBackground(
-                Color.rgb(28, 35, 55),
-                18f
-            )
+        when (voteType) {
+            "like" -> {
+                heart.text = "♥"
+                heart.setTextColor(Color.rgb(255, 75, 105))
+                heart.background = roundedBackground(Color.rgb(55, 28, 45), 16f)
+
+                dislike.text = "👎"
+                dislike.background = roundedBackground(Color.rgb(28, 35, 55), 16f)
+            }
+            "dislike" -> {
+                heart.text = "♡"
+                heart.setTextColor(Color.rgb(205, 212, 235))
+                heart.background = roundedBackground(Color.rgb(28, 35, 55), 16f)
+
+                dislike.text = "💔"
+                dislike.background = roundedBackground(Color.rgb(55, 28, 45), 16f)
+            }
+            else -> {
+                heart.text = "♡"
+                heart.setTextColor(Color.rgb(205, 212, 235))
+                heart.background = roundedBackground(Color.rgb(28, 35, 55), 16f)
+
+                dislike.text = "👎"
+                dislike.background = roundedBackground(Color.rgb(28, 35, 55), 16f)
+            }
         }
     }
 
