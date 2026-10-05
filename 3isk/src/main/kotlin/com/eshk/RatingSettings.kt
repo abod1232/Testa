@@ -1,13 +1,16 @@
 package com.eshk
 
 import android.app.Dialog
+import android.content.Context
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -28,6 +31,10 @@ import java.security.MessageDigest
 
 object RatingSettings {
 
+    // =========================================================
+    // الروابط
+    // =========================================================
+
     private const val PLUGINS_URL =
         "https://raw.githubusercontent.com/Abodabodd/re-3arabi/refs/heads/builds/plugins.json"
 
@@ -37,12 +44,20 @@ object RatingSettings {
     private const val PREFS =
         "extension_ratings"
 
+    // =========================================================
+    // فتح الإعدادات
+    // =========================================================
+
     fun show(fragmentManager: FragmentManager) {
         SettingsDialog().show(
             fragmentManager,
             "rating_settings"
         )
     }
+
+    // =========================================================
+    // نافذة الإعدادات
+    // =========================================================
 
     class SettingsDialog : DialogFragment() {
 
@@ -54,11 +69,16 @@ object RatingSettings {
 
             val root = LinearLayout(requireContext()).apply {
                 orientation = LinearLayout.VERTICAL
+
                 setPadding(
-                    35,
-                    35,
-                    35,
-                    35
+                    32.dp(context),
+                    32.dp(context),
+                    32.dp(context),
+                    32.dp(context)
+                )
+
+                setBackgroundColor(
+                    Color.rgb(8, 13, 25)
                 )
             }
 
@@ -71,27 +91,28 @@ object RatingSettings {
                     0,
                     0,
                     0,
-                    30
+                    25.dp(context)
                 )
             }
 
-            val rating = TextView(requireContext()).apply {
+            val ratings = TextView(requireContext()).apply {
                 text = "⭐  التقييمات"
                 textSize = 18f
                 setTextColor(Color.WHITE)
 
-                gravity = Gravity.CENTER_VERTICAL
+                gravity =
+                    Gravity.CENTER_VERTICAL
 
                 setPadding(
-                    25,
-                    30,
-                    25,
-                    30
+                    20.dp(context),
+                    22.dp(context),
+                    20.dp(context),
+                    22.dp(context)
                 )
 
                 background =
                     roundedBackground(
-                        Color.rgb(25, 31, 48),
+                        Color.rgb(20, 28, 46),
                         20f
                     )
 
@@ -105,13 +126,20 @@ object RatingSettings {
             }
 
             root.addView(title)
-            root.addView(rating)
+
+            root.addView(
+                ratings,
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            )
 
             dialog.setContentView(root)
 
             dialog.window?.setBackgroundDrawable(
                 roundedBackground(
-                    Color.rgb(10, 15, 28),
+                    Color.rgb(8, 13, 25),
                     28f
                 )
             )
@@ -120,98 +148,153 @@ object RatingSettings {
         }
     }
 
+    // =========================================================
+    // نافذة التقييمات
+    // =========================================================
+
     class RatingListDialog : DialogFragment() {
 
         override fun onCreateDialog(
             savedInstanceState: Bundle?
         ): Dialog {
 
-            val dialog = Dialog(requireContext())
+            val dialog =
+                Dialog(requireContext())
 
-            val root = LinearLayout(requireContext()).apply {
-                orientation = LinearLayout.VERTICAL
+            val root =
+                LinearLayout(requireContext()).apply {
 
-                setPadding(
-                    18,
-                    20,
-                    18,
-                    15
-                )
+                    orientation =
+                        LinearLayout.VERTICAL
 
-                setBackgroundColor(
-                    Color.rgb(8, 13, 25)
-                )
-            }
-            val header = LinearLayout(requireContext()).apply {
-
-                orientation =
-                    LinearLayout.HORIZONTAL
-
-                gravity =
-                    Gravity.CENTER_VERTICAL
-
-                setPadding(
-                    10,
-                    5,
-                    10,
-                    15
-                )
-            }
-
-            val title = TextView(requireContext()).apply {
-                text = "⭐ تقييمات الإضافات"
-                textSize = 23f
-                setTextColor(Color.WHITE)
-
-                layoutParams =
-                    LinearLayout.LayoutParams(
-                        0,
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                        1f
+                    setPadding(
+                        14.dp(context),
+                        15.dp(context),
+                        14.dp(context),
+                        10.dp(context)
                     )
-            }
 
-            val close = TextView(requireContext()).apply {
-                text = "✕"
-                textSize = 25f
-                setTextColor(
-                    Color.rgb(
-                        180,
-                        185,
-                        205
+                    setBackgroundColor(
+                        Color.rgb(
+                            7,
+                            12,
+                            24
+                        )
                     )
-                )
-
-                setPadding(
-                    15,
-                    5,
-                    10,
-                    5
-                )
-
-                setOnClickListener {
-                    dismiss()
                 }
-            }
+
+            // =================================================
+            // Header
+            // =================================================
+
+            val header =
+                FrameLayout(requireContext()).apply {
+
+                    layoutParams =
+                        LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            65.dp(context)
+                        )
+                }
+
+            val title =
+                TextView(requireContext()).apply {
+
+                    text =
+                        "⭐ تقييمات الإضافات"
+
+                    textSize =
+                        23f
+
+                    setTextColor(
+                        Color.WHITE
+                    )
+
+                    gravity =
+                        Gravity.CENTER
+
+                    layoutParams =
+                        FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                }
+
+            val close =
+                TextView(requireContext()).apply {
+
+                    text =
+                        "×"
+
+                    textSize =
+                        42f
+
+                    setTextColor(
+                        Color.rgb(
+                            190,
+                            198,
+                            220
+                        )
+                    )
+
+                    gravity =
+                        Gravity.CENTER
+
+                    layoutParams =
+                        FrameLayout.LayoutParams(
+                            55.dp(context),
+                            55.dp(context)
+                        ).apply {
+
+                            gravity =
+                                Gravity.START or
+                                    Gravity.CENTER_VERTICAL
+                        }
+
+                    setOnClickListener {
+                        dismiss()
+                    }
+                }
 
             header.addView(title)
             header.addView(close)
 
             root.addView(header)
+
+            // =================================================
+            // خط التحميل
+            // =================================================
+
             val progress =
-                ProgressBar(requireContext()).apply {
-                    visibility = View.VISIBLE
+                ProgressBar(
+                    requireContext(),
+                    null,
+                    android.R.attr.progressBarStyleHorizontal
+                ).apply {
+
+                    isIndeterminate =
+                        true
+
+                    visibility =
+                        View.VISIBLE
                 }
 
             root.addView(
                 progress,
                 LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
-                    4
+                    3.dp(context)
                 )
             )
+
+            // =================================================
+            // RecyclerView
+            // =================================================
+
             val recycler =
-                RecyclerView(requireContext()).apply {
+                RecyclerView(
+                    requireContext()
+                ).apply {
 
                     layoutManager =
                         LinearLayoutManager(
@@ -220,6 +303,16 @@ object RatingSettings {
 
                     overScrollMode =
                         View.OVER_SCROLL_NEVER
+
+                    clipToPadding =
+                        false
+
+                    setPadding(
+                        0,
+                        8.dp(context),
+                        0,
+                        20.dp(context)
+                    )
                 }
 
             root.addView(
@@ -235,10 +328,26 @@ object RatingSettings {
 
             dialog.window?.setBackgroundDrawable(
                 roundedBackground(
-                    Color.rgb(8, 13, 25),
+                    Color.rgb(
+                        7,
+                        12,
+                        24
+                    ),
                     28f
                 )
             )
+
+            // =================================================
+            // جعل النافذة كبيرة
+            // =================================================
+
+            dialog.setOnShowListener {
+
+                dialog.window?.setLayout(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+            }
 
             loadRatings(
                 recycler,
@@ -248,23 +357,41 @@ object RatingSettings {
             return dialog
         }
 
+        // =====================================================
+        // تحميل التقييمات
+        // =====================================================
+
         private fun loadRatings(
             recycler: RecyclerView,
             progress: ProgressBar
         ) {
 
-            CoroutineScope(Dispatchers.IO).launch {
+            CoroutineScope(
+                Dispatchers.IO
+            ).launch {
 
                 try {
 
+                    // -----------------------------------------
+                    // تحميل plugins.json
+                    // -----------------------------------------
+
                     val response =
-                        app.get(PLUGINS_URL)
+                        app.get(
+                            PLUGINS_URL
+                        )
 
                     val array =
-                        JSONArray(response.text)
+                        JSONArray(
+                            response.text
+                        )
 
                     val plugins =
                         mutableListOf<PluginRating>()
+
+                    // -----------------------------------------
+                    // قراءة الإضافات
+                    // -----------------------------------------
 
                     for (
                         i in 0 until array.length()
@@ -274,31 +401,52 @@ object RatingSettings {
                             array.getJSONObject(i)
 
                         val name =
-                            obj.optString("name")
+                            obj.optString(
+                                "name"
+                            )
 
                         val url =
-                            obj.optString("url")
+                            obj.optString(
+                                "url"
+                            )
+
                         val icon =
                             when {
-                                obj.optString("iconUrl")
-                                    .isNotBlank() ->
-                                    obj.optString("iconUrl")
 
-                                obj.optString("icon")
-                                    .isNotBlank() ->
-                                    obj.optString("icon")
+                                obj.optString(
+                                    "iconUrl"
+                                ).isNotBlank() ->
+                                    obj.optString(
+                                        "iconUrl"
+                                    )
 
-                                else -> ""
+                                obj.optString(
+                                    "icon"
+                                ).isNotBlank() ->
+                                    obj.optString(
+                                        "icon"
+                                    )
+
+                                else ->
+                                    ""
                             }
+
                         val description =
                             when {
-                                obj.optString("description")
-                                    .isNotBlank() ->
-                                    obj.optString("description")
 
-                                obj.optString("type")
-                                    .isNotBlank() ->
-                                    obj.optString("type")
+                                obj.optString(
+                                    "description"
+                                ).isNotBlank() ->
+                                    obj.optString(
+                                        "description"
+                                    )
+
+                                obj.optString(
+                                    "type"
+                                ).isNotBlank() ->
+                                    obj.optString(
+                                        "type"
+                                    )
 
                                 else ->
                                     "إضافة Cloudstream"
@@ -311,37 +459,60 @@ object RatingSettings {
                             continue
                         }
 
+                        // -------------------------------------
+                        // جلب التصويتات
+                        // -------------------------------------
+
                         val votes =
-                            getVotes(url)
+                            getVotes(
+                                url
+                            )
 
                         plugins.add(
                             PluginRating(
-                                name = name,
-                                url = url,
-                                icon = icon,
-                                description = description,
-                                votes = votes
+                                name =
+                                    name,
+                                url =
+                                    url,
+                                icon =
+                                    icon,
+                                description =
+                                    description,
+                                votes =
+                                    votes
                             )
                         )
                     }
+
+                    // -----------------------------------------
+                    // ترتيب من الأعلى إلى الأقل
+                    // -----------------------------------------
 
                     val sorted =
                         plugins.sortedByDescending {
                             it.votes
                         }
 
-                    withContext(Dispatchers.Main) {
+                    withContext(
+                        Dispatchers.Main
+                    ) {
 
                         progress.visibility =
                             View.GONE
 
                         recycler.adapter =
-                            RatingAdapter(sorted)
+                            RatingAdapter(
+                                sorted
+                            )
                     }
 
-                } catch (e: Exception) {
+                } catch (
+                    e: Exception
+                ) {
 
-                    withContext(Dispatchers.Main) {
+                    withContext(
+                        Dispatchers.Main
+                    ) {
 
                         progress.visibility =
                             View.GONE
@@ -356,6 +527,10 @@ object RatingSettings {
             }
         }
 
+        // =====================================================
+        // جلب عدد الأصوات
+        // =====================================================
+
         private suspend fun getVotes(
             pluginUrl: String
         ): Int {
@@ -363,16 +538,22 @@ object RatingSettings {
             return try {
 
                 val repository =
-                    getRepository(pluginUrl)
+                    getRepository(
+                        pluginUrl
+                    )
 
                 val key =
-                    transformUrl(pluginUrl)
+                    transformUrl(
+                        pluginUrl
+                    )
 
                 val url =
                     "$COUNTER_API/cs-$repository/vote/$key?readOnly=true"
 
                 val response =
-                    app.get(url)
+                    app.get(
+                        url
+                    )
 
                 JSONObject(
                     response.text
@@ -390,6 +571,10 @@ object RatingSettings {
         }
     }
 
+    // =========================================================
+    // بيانات الإضافة
+    // =========================================================
+
     data class PluginRating(
         val name: String,
         val url: String,
@@ -398,19 +583,25 @@ object RatingSettings {
         val votes: Int
     )
 
+    // =========================================================
+    // Adapter
+    // =========================================================
+
     class RatingAdapter(
         private val items: List<PluginRating>
     ) : RecyclerView.Adapter<RatingAdapter.ViewHolder>() {
 
         class ViewHolder(
-            val card: LinearLayout,
+            val card: FrameLayout,
             val icon: ImageView,
             val name: TextView,
             val description: TextView,
             val votes: TextView,
             val rank: TextView,
             val heart: TextView
-        ) : RecyclerView.ViewHolder(card)
+        ) : RecyclerView.ViewHolder(
+            card
+        )
 
         override fun onCreateViewHolder(
             parent: ViewGroup,
@@ -420,21 +611,20 @@ object RatingSettings {
             val ctx =
                 parent.context
 
+            // =================================================
+            // الكرت
+            // =================================================
+
             val card =
-                LinearLayout(ctx).apply {
+                FrameLayout(ctx).apply {
 
-                    orientation =
-                        LinearLayout.HORIZONTAL
-
-                    gravity =
-                        Gravity.CENTER_VERTICAL
-
-                    setPadding(
-                        14,
-                        14,
-                        14,
-                        14
-                    )
+                    /*
+                     * مهم جدًا:
+                     * نثبت اتجاه الكرت LTR
+                     * حتى لا تتخربط العناصر بسبب العربية.
+                     */
+                    layoutDirection =
+                        View.LAYOUT_DIRECTION_LTR
 
                     background =
                         roundedBackground(
@@ -443,23 +633,27 @@ object RatingSettings {
                                 22,
                                 38
                             ),
-                            24f
+                            23f
                         )
 
                     layoutParams =
-                        LinearLayout.LayoutParams(
+                        RecyclerView.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
-                            125
+                            105.dp(ctx)
                         ).apply {
 
                             setMargins(
                                 0,
-                                6,
+                                5.dp(ctx),
                                 0,
-                                6
+                                5.dp(ctx)
                             )
                         }
                 }
+
+            // =================================================
+            // صورة الإضافة
+            // =================================================
 
             val icon =
                 ImageView(ctx).apply {
@@ -470,99 +664,195 @@ object RatingSettings {
                     background =
                         roundedBackground(
                             Color.rgb(
-                                25,
-                                30,
-                                45
+                                29,
+                                36,
+                                55
                             ),
-                            18f
+                            17f
                         )
 
                     layoutParams =
-                        LinearLayout.LayoutParams(
-                            78,
-                            78
+                        FrameLayout.LayoutParams(
+                            76.dp(ctx),
+                            76.dp(ctx)
                         ).apply {
 
-                            marginEnd = 15
+                            gravity =
+                                Gravity.START or
+                                    Gravity.CENTER_VERTICAL
+
+                            leftMargin =
+                                12.dp(ctx)
                         }
                 }
 
-            val info =
-                LinearLayout(ctx).apply {
-
-                    orientation =
-                        LinearLayout.VERTICAL
-
-                    gravity =
-                        Gravity.CENTER_VERTICAL
-
-                    layoutParams =
-                        LinearLayout.LayoutParams(
-                            0,
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            1f
-                        )
-                }
+            // =================================================
+            // اسم الإضافة
+            // =================================================
 
             val name =
                 TextView(ctx).apply {
 
-                    textSize = 17f
+                    textSize =
+                        17f
 
                     setTextColor(
                         Color.WHITE
                     )
 
-                    maxLines = 1
+                    maxLines =
+                        1
 
                     ellipsize =
-                        android.text.TextUtils.TruncateAt.END
+                        TextUtils.TruncateAt.END
+
+                    gravity =
+                        Gravity.CENTER_VERTICAL
+
+                    layoutDirection =
+                        View.LAYOUT_DIRECTION_LTR
+
+                    layoutParams =
+                        FrameLayout.LayoutParams(
+                            0,
+                            27.dp(ctx)
+                        ).apply {
+
+                            leftMargin =
+                                101.dp(ctx)
+
+                            rightMargin =
+                                185.dp(ctx)
+
+                            topMargin =
+                                11.dp(ctx)
+                        }
                 }
+
+            // =================================================
+            // وصف الإضافة
+            // =================================================
 
             val description =
                 TextView(ctx).apply {
 
-                    textSize = 13f
+                    textSize =
+                        12.5f
 
                     setTextColor(
                         Color.rgb(
-                            165,
-                            171,
-                            190
+                            155,
+                            163,
+                            185
                         )
                     )
 
-                    maxLines = 1
+                    maxLines =
+                        1
 
                     ellipsize =
-                        android.text.TextUtils.TruncateAt.END
+                        TextUtils.TruncateAt.END
 
-                    setPadding(
-                        0,
-                        4,
-                        0,
-                        2
-                    )
+                    gravity =
+                        Gravity.CENTER_VERTICAL
+
+                    layoutDirection =
+                        View.LAYOUT_DIRECTION_LTR
+
+                    layoutParams =
+                        FrameLayout.LayoutParams(
+                            0,
+                            22.dp(ctx)
+                        ).apply {
+
+                            leftMargin =
+                                101.dp(ctx)
+
+                            rightMargin =
+                                185.dp(ctx)
+
+                            topMargin =
+                                39.dp(ctx)
+                        }
                 }
+
+            // =================================================
+            // الأصوات
+            // =================================================
 
             val votes =
                 TextView(ctx).apply {
 
-                    textSize = 14f
+                    textSize =
+                        13f
 
                     setTextColor(
-                        Color.WHITE
+                        Color.rgb(
+                            225,
+                            228,
+                            240
+                        )
                     )
+
+                    gravity =
+                        Gravity.CENTER_VERTICAL
+
+                    layoutDirection =
+                        View.LAYOUT_DIRECTION_LTR
+
+                    layoutParams =
+                        FrameLayout.LayoutParams(
+                            150.dp(ctx),
+                            22.dp(ctx)
+                        ).apply {
+
+                            leftMargin =
+                                101.dp(ctx)
+
+                            topMargin =
+                                66.dp(ctx)
+                        }
                 }
 
-            info.addView(name)
-            info.addView(description)
-            info.addView(votes)
+            // =================================================
+            // الخط قبل رقم الترتيب
+            // =================================================
+
+            val rankLine =
+                View(ctx).apply {
+
+                    setBackgroundColor(
+                        Color.rgb(
+                            40,
+                            48,
+                            70
+                        )
+                    )
+
+                    layoutParams =
+                        FrameLayout.LayoutParams(
+                            1.dp(ctx),
+                            65.dp(ctx)
+                        ).apply {
+
+                            gravity =
+                                Gravity.END or
+                                    Gravity.CENTER_VERTICAL
+
+                            rightMargin =
+                                140.dp(ctx)
+                        }
+                }
+
+            // =================================================
+            // رقم الترتيب
+            // =================================================
 
             val rank =
                 TextView(ctx).apply {
 
-                    textSize = 19f
+                    textSize =
+                        18f
 
                     setTextColor(
                         Color.WHITE
@@ -571,34 +861,74 @@ object RatingSettings {
                     gravity =
                         Gravity.CENTER
 
-                    layoutParams =
-                        LinearLayout.LayoutParams(
-                            55,
-                            ViewGroup.LayoutParams.MATCH_PARENT
-                        )
+                    layoutDirection =
+                        View.LAYOUT_DIRECTION_LTR
 
-                    setPadding(
-                        8,
-                        0,
-                        8,
-                        0
-                    )
+                    layoutParams =
+                        FrameLayout.LayoutParams(
+                            60.dp(ctx),
+                            55.dp(ctx)
+                        ).apply {
+
+                            gravity =
+                                Gravity.END or
+                                    Gravity.CENTER_VERTICAL
+
+                            rightMargin =
+                                82.dp(ctx)
+                        }
                 }
+
+            // =================================================
+            // الخط قبل القلب
+            // =================================================
+
+            val heartLine =
+                View(ctx).apply {
+
+                    setBackgroundColor(
+                        Color.rgb(
+                            40,
+                            48,
+                            70
+                        )
+                    )
+
+                    layoutParams =
+                        FrameLayout.LayoutParams(
+                            1.dp(ctx),
+                            65.dp(ctx)
+                        ).apply {
+
+                            gravity =
+                                Gravity.END or
+                                    Gravity.CENTER_VERTICAL
+
+                            rightMargin =
+                                74.dp(ctx)
+                        }
+                }
+
+            // =================================================
+            // القلب
+            // =================================================
 
             val heart =
                 TextView(ctx).apply {
 
-                    text = "♡"
+                    text =
+                        "♡"
 
-                    textSize = 35f
+                    textSize =
+                        34f
 
                     gravity =
                         Gravity.CENTER
 
                     setTextColor(
                         Color.rgb(
-                            210,
-                            215,
+                            205,
+                            212,
                             235
                         )
                     )
@@ -610,23 +940,59 @@ object RatingSettings {
                                 35,
                                 55
                             ),
-                            20f
+                            18f
                         )
 
                     layoutParams =
-                        LinearLayout.LayoutParams(
-                            62,
-                            62
+                        FrameLayout.LayoutParams(
+                            60.dp(ctx),
+                            60.dp(ctx)
                         ).apply {
 
-                            marginStart = 10
+                            gravity =
+                                Gravity.END or
+                                    Gravity.CENTER_VERTICAL
+
+                            rightMargin =
+                                10.dp(ctx)
                         }
                 }
 
-            card.addView(icon)
-            card.addView(info)
-            card.addView(rank)
-            card.addView(heart)
+            // =================================================
+            // إضافة العناصر
+            // =================================================
+
+            card.addView(
+                icon
+            )
+
+            card.addView(
+                name
+            )
+
+            card.addView(
+                description
+            )
+
+            card.addView(
+                votes
+            )
+
+            card.addView(
+                rankLine
+            )
+
+            card.addView(
+                rank
+            )
+
+            card.addView(
+                heartLine
+            )
+
+            card.addView(
+                heart
+            )
 
             return ViewHolder(
                 card,
@@ -650,6 +1016,10 @@ object RatingSettings {
             val rank =
                 position + 1
 
+            // =================================================
+            // البيانات
+            // =================================================
+
             holder.name.text =
                 item.name
 
@@ -660,17 +1030,15 @@ object RatingSettings {
                 "⭐  ${item.votes} صوت"
 
             holder.rank.text =
-                when (rank) {
+                rank.toString()
 
-                    1 -> "1"
+            // =================================================
+            // تحميل الصورة
+            // =================================================
 
-                    2 -> "2"
-
-                    3 -> "3"
-
-                    else -> rank.toString()
-                }
-            if (item.icon.isNotBlank()) {
+            if (
+                item.icon.isNotBlank()
+            ) {
 
                 CoroutineScope(
                     Dispatchers.IO
@@ -679,22 +1047,24 @@ object RatingSettings {
                     try {
 
                         val response =
-    app.get(item.icon)
+                            app.get(
+                                item.icon
+                            )
 
-val body =
-    response.body
+                        val body =
+                            response.body
 
-val bytes =
-    body.bytes()
+                        val bytes =
+                            body.bytes()
 
-body.close()
+                        body.close()
 
-val bitmap =
-    BitmapFactory.decodeByteArray(
-        bytes,
-        0,
-        bytes.size
-    )
+                        val bitmap =
+                            BitmapFactory.decodeByteArray(
+                                bytes,
+                                0,
+                                bytes.size
+                            )
 
                         withContext(
                             Dispatchers.Main
@@ -706,26 +1076,37 @@ val bitmap =
                                     position
                             ) {
 
-                                holder.icon.setImageBitmap(
-                                    bitmap
-                                )
+                                holder.icon
+                                    .setImageBitmap(
+                                        bitmap
+                                    )
                             }
                         }
 
                     } catch (
                         e: Exception
                     ) {
+
+                        // لا نفعل شيئًا إذا فشل تحميل الصورة
                     }
                 }
             }
-             val prefs =
-    holder.itemView.context.getSharedPreferences(
-        PREFS,
-        android.content.Context.MODE_PRIVATE
-    )
+
+            // =================================================
+            // حالة التصويت
+            // =================================================
+
+            val prefs =
+                holder.itemView.context
+                    .getSharedPreferences(
+                        PREFS,
+                        Context.MODE_PRIVATE
+                    )
 
             val key =
-                transformUrl(item.url)
+                RatingSettings.transformUrl(
+                    item.url
+                )
 
             val hasVoted =
                 prefs.getBoolean(
@@ -738,6 +1119,10 @@ val bitmap =
                 hasVoted
             )
 
+            // =================================================
+            // الضغط على القلب
+            // =================================================
+
             holder.heart.setOnClickListener {
 
                 val alreadyVoted =
@@ -746,7 +1131,9 @@ val bitmap =
                         false
                     )
 
-                if (alreadyVoted) {
+                if (
+                    alreadyVoted
+                ) {
 
                     Toast.makeText(
                         holder.itemView.context,
@@ -765,7 +1152,9 @@ val bitmap =
                 ).launch {
 
                     val success =
-                        vote(item.url)
+                        RatingSettings.vote(
+                            item.url
+                        )
 
                     withContext(
                         Dispatchers.Main
@@ -774,7 +1163,9 @@ val bitmap =
                         holder.heart.isEnabled =
                             true
 
-                        if (success) {
+                        if (
+                            success
+                        ) {
 
                             prefs.edit()
                                 .putBoolean(
@@ -782,10 +1173,6 @@ val bitmap =
                                     true
                                 )
                                 .apply()
-
-                            item.copy(
-                                votes = item.votes + 1
-                            )
 
                             holder.votes.text =
                                 "⭐  ${item.votes + 1} صوت"
@@ -812,6 +1199,10 @@ val bitmap =
             items.size
     }
 
+    // =========================================================
+    // إرسال التصويت
+    // =========================================================
+
     private suspend fun vote(
         pluginUrl: String
     ): Boolean {
@@ -819,20 +1210,28 @@ val bitmap =
         return try {
 
             val repository =
-                getRepository(pluginUrl)
+                getRepository(
+                    pluginUrl
+                )
 
             val key =
-                transformUrl(pluginUrl)
+                transformUrl(
+                    pluginUrl
+                )
 
             val url =
                 "$COUNTER_API/cs-$repository/vote/$key"
 
             val response =
-                app.get(url)
+                app.get(
+                    url
+                )
 
             JSONObject(
                 response.text
-            ).has("value")
+            ).has(
+                "value"
+            )
 
         } catch (
             e: Exception
@@ -842,6 +1241,10 @@ val bitmap =
         }
     }
 
+    // =========================================================
+    // تغيير شكل القلب
+    // =========================================================
+
     private fun updateHeart(
         heart: TextView,
         voted: Boolean
@@ -849,7 +1252,8 @@ val bitmap =
 
         if (voted) {
 
-            heart.text = "♥"
+            heart.text =
+                "♥"
 
             heart.setTextColor(
                 Color.rgb(
@@ -866,17 +1270,18 @@ val bitmap =
                         28,
                         45
                     ),
-                    20f
+                    18f
                 )
 
         } else {
 
-            heart.text = "♡"
+            heart.text =
+                "♡"
 
             heart.setTextColor(
                 Color.rgb(
-                    210,
-                    215,
+                    205,
+                    212,
                     235
                 )
             )
@@ -885,13 +1290,17 @@ val bitmap =
                 roundedBackground(
                     Color.rgb(
                         28,
-                        35,
+                                               35,
                         55
                     ),
-                    20f
+                    18f
                 )
         }
     }
+
+    // =========================================================
+    // استخراج repository
+    // =========================================================
 
     private fun getRepository(
         pluginUrl: String
@@ -904,12 +1313,18 @@ val bitmap =
             .joinToString("-")
     }
 
+    // =========================================================
+    // SHA-256
+    // =========================================================
+
     private fun transformUrl(
         url: String
     ): String {
 
         return MessageDigest
-            .getInstance("SHA-256")
+            .getInstance(
+                "SHA-256"
+            )
             .digest(
                 "$url#funny-salt"
                     .toByteArray()
@@ -919,6 +1334,10 @@ val bitmap =
             }
     }
 
+    // =========================================================
+    // خلفية
+    // =========================================================
+
     private fun roundedBackground(
         color: Int,
         radius: Float
@@ -926,9 +1345,28 @@ val bitmap =
 
         return GradientDrawable().apply {
 
-            setColor(color)
+            setColor(
+                color
+            )
 
-            cornerRadius = radius
+            cornerRadius =
+                radius
         }
+    }
+
+    // =========================================================
+    // DP
+    // =========================================================
+
+    private fun Int.dp(
+        context: Context
+    ): Int {
+
+        return (
+            this *
+                context.resources
+                    .displayMetrics
+                    .density
+            ).toInt()
     }
 }
