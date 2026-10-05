@@ -151,7 +151,7 @@ object RatingSettings {
                     isSortedByLikes = !isSortedByLikes
                     if (isSortedByLikes) {
                         text = "📋 الافتراضي"
-                        val sorted = originalList.sortedByDescending { it.votes }
+                        val sorted = originalList.sortedByDescending { it.likes }
                         adapter?.updateData(sorted)
                     } else {
                         text = "🔥 الأكثر إعجاباً"
@@ -287,14 +287,16 @@ object RatingSettings {
                                     else -> "إضافة عامة"
                                 }
 
-                                val votes = getVotes(url)
+                                val likesDeferred = async { getCount(url, "like") }
+                                val dislikesDeferred = async { getCount(url, "dislike") }
 
                                 PluginRating(
                                     name = name,
                                     url = url,
                                     icon = icon,
                                     description = description,
-                                    votes = votes
+                                    likes = likesDeferred.await(),
+                                    dislikes = dislikesDeferred.await()
                                 )
                             }
                         }.awaitAll().filterNotNull()
@@ -321,11 +323,11 @@ object RatingSettings {
             }
         }
 
-        private suspend fun getVotes(pluginUrl: String): Int {
+        private suspend fun getCount(pluginUrl: String, action: String): Int {
             return try {
                 val repository = getRepository(pluginUrl)
                 val key = transformUrl(pluginUrl)
-                val url = "$COUNTER_API/cs-$repository/vote/$key?readOnly=true"
+                val url = "$COUNTER_API/cs-$repository/$action/$key?readOnly=true"
                 val response = app.get(url)
                 JSONObject(response.text).optInt("value", 0)
             } catch (e: Exception) {
@@ -339,7 +341,8 @@ object RatingSettings {
         val url: String,
         val icon: String,
         val description: String,
-        var votes: Int
+        var likes: Int,
+        var dislikes: Int
     )
 
     class RatingAdapter(
@@ -442,7 +445,7 @@ object RatingSettings {
                 layoutDirection = View.LAYOUT_DIRECTION_LTR
 
                 layoutParams = FrameLayout.LayoutParams(
-                    140.dp(ctx),
+                    170.dp(ctx),
                     22.dp(ctx)
                 ).apply {
                     leftMargin = 98.dp(ctx)
@@ -515,7 +518,7 @@ object RatingSettings {
 
             holder.name.text = item.name
             holder.description.text = item.description
-            holder.votes.text = "⭐  ${item.votes} صوت"
+            holder.votes.text = "👍 ${item.likes}   •   👎 ${item.dislikes}"
 
             holder.icon.setImageDrawable(null)
             holder.icon.tag = item.icon
@@ -572,7 +575,7 @@ object RatingSettings {
                 holder.dislike.isEnabled = false
 
                 CoroutineScope(Dispatchers.IO).launch {
-                    val success = RatingSettings.vote(item.url)
+                    val success = RatingSettings.incrementVote(item.url, "like")
 
                     withContext(Dispatchers.Main) {
                         holder.heart.isEnabled = true
@@ -580,8 +583,8 @@ object RatingSettings {
 
                         if (success) {
                             prefs.edit().putString("vote_type_$key", "like").apply()
-                            item.votes += 1
-                            holder.votes.text = "⭐  ${item.votes} صوت"
+                            item.likes += 1
+                            holder.votes.text = "👍 ${item.likes}   •   👎 ${item.dislikes}"
                             updateButtonsState(holder.heart, holder.dislike, "like")
                         } else {
                             Toast.makeText(
@@ -612,7 +615,7 @@ object RatingSettings {
                         holder.dislike.isEnabled = false
 
                         CoroutineScope(Dispatchers.IO).launch {
-                            val success = RatingSettings.downvote(item.url)
+                            val success = RatingSettings.incrementVote(item.url, "dislike")
 
                             withContext(Dispatchers.Main) {
                                 holder.heart.isEnabled = true
@@ -620,8 +623,8 @@ object RatingSettings {
 
                                 if (success) {
                                     prefs.edit().putString("vote_type_$key", "dislike").apply()
-                                    item.votes -= 1
-                                    holder.votes.text = "⭐  ${item.votes} صوت"
+                                    item.dislikes += 1
+                                    holder.votes.text = "👍 ${item.likes}   •   👎 ${item.dislikes}"
                                     updateButtonsState(holder.heart, holder.dislike, "dislike")
                                 } else {
                                     Toast.makeText(
@@ -641,23 +644,11 @@ object RatingSettings {
         override fun getItemCount(): Int = items.size
     }
 
-    private suspend fun vote(pluginUrl: String): Boolean {
+    private suspend fun incrementVote(pluginUrl: String, action: String): Boolean {
         return try {
             val repository = getRepository(pluginUrl)
             val key = transformUrl(pluginUrl)
-            val url = "$COUNTER_API/cs-$repository/vote/$key"
-            val response = app.get(url)
-            JSONObject(response.text).has("value")
-        } catch (e: Exception) {
-            false
-        }
-    }
-
-    private suspend fun downvote(pluginUrl: String): Boolean {
-        return try {
-            val repository = getRepository(pluginUrl)
-            val key = transformUrl(pluginUrl)
-            val url = "$COUNTER_API/cs-$repository/vote/$key/down"
+            val url = "$COUNTER_API/cs-$repository/$action/$key"
             val response = app.get(url)
             JSONObject(response.text).has("value")
         } catch (e: Exception) {
