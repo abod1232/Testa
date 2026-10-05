@@ -44,13 +44,10 @@ import java.util.concurrent.ConcurrentHashMap
 object RatingSettings {
 
     private const val PLUGINS_URL =
-        "https://raw.githubusercontent.com/Abodabodd/re-3arabi/refs/heads/builds/plugins.json"
+        "https://raw.githubusercontent.com/abod1232/Testa/refs/heads/builds/plugins.json"
 
     private const val COUNTER_API =
         "https://counterapi.com/api"
-
-    private const val NAMESPACE =
-        "cs_re3arabi_ratings"
 
     private const val PREFS =
         "extension_ratings_prefs"
@@ -63,6 +60,20 @@ object RatingSettings {
             fragmentManager,
             "rating_list"
         )
+    }
+
+    private fun getRepository(pluginUrl: String): String {
+        return pluginUrl
+            .split("/")
+            .drop(2)
+            .take(3)
+            .joinToString("-")
+    }
+
+    private fun transformUrl(url: String): String {
+        return MessageDigest.getInstance("SHA-256")
+            .digest("${url}#funny-salt".toByteArray())
+            .joinToString("") { "%02x".format(it) }
     }
 
     private fun calculateScore(likes: Int, dislikes: Int): Double {
@@ -370,8 +381,8 @@ object RatingSettings {
                                 val rawLang = obj.optString("language", "ar")
                                 val rawTags = parseTypesList(obj.optJSONArray("tvTypes"))
 
-                                val likesDeferred = async { getCount(url, "like") }
-                                val dislikesDeferred = async { getCount(url, "dislike") }
+                                val likesDeferred = async { getOfficialLikes(url) }
+                                val dislikesDeferred = async { getOfficialDislikes(url) }
 
                                 PluginRating(
                                     name = name,
@@ -406,13 +417,27 @@ object RatingSettings {
             }
         }
 
-        private suspend fun getCount(pluginUrl: String, action: String): Int {
+        private suspend fun getOfficialLikes(pluginUrl: String): Int {
             return try {
-                val key = getKey(pluginUrl, action)
-                val url = "$COUNTER_API/$NAMESPACE/$key?readOnly=true"
+                val repository = getRepository(pluginUrl)
+                val key = transformUrl(pluginUrl)
+                val url = "$COUNTER_API/cs-$repository/vote/$key?readOnly=true"
                 val response = app.get(url)
                 val json = JSONObject(response.text)
-                json.optInt("count", json.optInt("value", 0))
+                json.optInt("value", json.optInt("count", 0))
+            } catch (e: Exception) {
+                0
+            }
+        }
+
+        private suspend fun getOfficialDislikes(pluginUrl: String): Int {
+            return try {
+                val repository = getRepository(pluginUrl)
+                val key = transformUrl(pluginUrl)
+                val url = "$COUNTER_API/cs-$repository/dislike/$key?readOnly=true"
+                val response = app.get(url)
+                val json = JSONObject(response.text)
+                json.optInt("value", json.optInt("count", 0))
             } catch (e: Exception) {
                 0
             }
@@ -764,9 +789,9 @@ object RatingSettings {
             }
 
             val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            val baseKey = getBaseHash(item.url)
-            val hasLiked = prefs.getBoolean("liked_$baseKey", false)
-            val hasDisliked = prefs.getBoolean("disliked_$baseKey", false)
+            val key = transformUrl(item.url)
+            val hasLiked = prefs.getBoolean("cs3_like_$key", false)
+            val hasDisliked = prefs.getBoolean("cs3_dislike_$key", false)
 
             updateLikeVisual(ctx, holder.likeBtn, hasLiked)
             updateDislikeVisual(ctx, holder.dislikeBtn, hasDisliked)
@@ -774,7 +799,7 @@ object RatingSettings {
             holder.card.addTouchScaleEffect()
 
             holder.likeBtn.addTouchScaleEffect {
-                if (prefs.getBoolean("liked_$baseKey", false)) {
+                if (prefs.getBoolean("cs3_like_$key", false)) {
                     Toast.makeText(
                         ctx,
                         if (isEnglish) "You already liked this extension" else "لقد سجلت إعجابك بهذه الإضافة مسبقاً",
@@ -786,13 +811,13 @@ object RatingSettings {
                 holder.likeBtn.isEnabled = false
 
                 CoroutineScope(Dispatchers.IO).launch {
-                    val success = RatingSettings.incrementVote(item.url, "like")
+                    val success = RatingSettings.voteLike(item.url)
 
                     withContext(Dispatchers.Main) {
                         holder.likeBtn.isEnabled = true
 
                         if (success) {
-                            prefs.edit().putBoolean("liked_$baseKey", true).apply()
+                            prefs.edit().putBoolean("cs3_like_$key", true).apply()
                             item.likes += 1
                             allPluginsMasterList.find { it.url == item.url }?.likes = item.likes
 
@@ -816,7 +841,7 @@ object RatingSettings {
             }
 
             holder.dislikeBtn.addTouchScaleEffect {
-                if (prefs.getBoolean("disliked_$baseKey", false)) {
+                if (prefs.getBoolean("cs3_dislike_$key", false)) {
                     Toast.makeText(
                         ctx,
                         if (isEnglish) "You already disliked this extension" else "لقد سجلت عدم إعجابك بهذه الإضافة مسبقاً",
@@ -832,13 +857,13 @@ object RatingSettings {
                         holder.dislikeBtn.isEnabled = false
 
                         CoroutineScope(Dispatchers.IO).launch {
-                            val success = RatingSettings.incrementVote(item.url, "dislike")
+                            val success = RatingSettings.voteDislike(item.url)
 
                             withContext(Dispatchers.Main) {
                                 holder.dislikeBtn.isEnabled = true
 
                                 if (success) {
-                                    prefs.edit().putBoolean("disliked_$baseKey", true).apply()
+                                    prefs.edit().putBoolean("cs3_dislike_$key", true).apply()
                                     item.dislikes += 1
                                     allPluginsMasterList.find { it.url == item.url }?.dislikes = item.dislikes
 
@@ -868,13 +893,27 @@ object RatingSettings {
         override fun getItemCount(): Int = items.size
     }
 
-    private suspend fun incrementVote(pluginUrl: String, action: String): Boolean {
+    private suspend fun voteLike(pluginUrl: String): Boolean {
         return try {
-            val key = getKey(pluginUrl, action)
-            val url = "$COUNTER_API/$NAMESPACE/$key"
+            val repository = getRepository(pluginUrl)
+            val key = transformUrl(pluginUrl)
+            val url = "$COUNTER_API/cs-$repository/vote/$key"
             val response = app.get(url)
             val json = JSONObject(response.text)
-            json.has("count") || json.has("value")
+            json.has("value") || json.has("count")
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private suspend fun voteDislike(pluginUrl: String): Boolean {
+        return try {
+            val repository = getRepository(pluginUrl)
+            val key = transformUrl(pluginUrl)
+            val url = "$COUNTER_API/cs-$repository/dislike/$key"
+            val response = app.get(url)
+            val json = JSONObject(response.text)
+            json.has("value") || json.has("count")
         } catch (e: Exception) {
             false
         }
@@ -934,16 +973,6 @@ object RatingSettings {
             }
             true
         }
-    }
-
-    private fun getBaseHash(url: String): String {
-        return MessageDigest.getInstance("MD5")
-            .digest(url.toByteArray())
-            .joinToString("") { "%02x".format(it) }
-    }
-
-    private fun getKey(url: String, action: String): String {
-        return "${action}_${getBaseHash(url)}"
     }
 
     private fun roundedBackground(
