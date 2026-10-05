@@ -36,7 +36,7 @@ class eishk : MainAPI() {
     )
 
     override val mainPage = mainPageOf(
-        "ratings" to "⭐ تقييمات الإضافات"
+        "ratings" to "⭐ التقييمات"
     )
 
     override suspend fun getMainPage(
@@ -53,41 +53,11 @@ class eishk : MainAPI() {
             }
         }
 
-        val item = newMovieSearchResponse(
-            "⚙️ فتح إعدادات وتقييمات الإضافات",
-            "$mainUrl/open_settings",
-            TvType.Movie
-        ) {
-            this.posterUrl = "https://raw.githubusercontent.com/Abodabodd/Oldarabrepo/refs/heads/main/img/file_0000000042f861f49090744dc097ee2f.png"
-        }
-
         return newHomePageResponse(
             request.name,
-            listOf(item),
+            emptyList(),
             hasNext = false
         )
-    }
-
-    override suspend fun load(url: String): LoadResponse {
-
-        withContext(Dispatchers.Main) {
-            try {
-                findActivity(eishkPlugin.pluginContext)?.supportFragmentManager?.let { fm ->
-                    RatingSettings.show(fm)
-                }
-            } catch (e: Exception) {
-            }
-        }
-
-        return newMovieLoadResponse(
-            "⚙️ إعدادات وتقييمات الإضافات",
-            url,
-            TvType.Movie,
-            url
-        ) {
-            this.posterUrl = "https://raw.githubusercontent.com/Abodabodd/Oldarabrepo/refs/heads/main/img/file_0000000042f861f49090744dc097ee2f.png"
-            this.plot = "نافذة تقييم ومراجعة الإضافات والتصويت عليها مباشرة"
-        }
     }
 
     private fun findActivity(context: Context?): FragmentActivity? {
