@@ -10,18 +10,7 @@ import com.lagradost.cloudstream3.utils.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-@CloudstreamPlugin
-class eishkPlugin : Plugin() {
 
-    companion object {
-        var pluginContext: Context? = null
-    }
-
-    override fun load(context: Context) {
-        pluginContext = context
-        registerMainAPI(eishk())
-    }
-}
 
 class eishk : MainAPI() {
 
