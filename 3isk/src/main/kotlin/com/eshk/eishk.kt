@@ -1,9 +1,10 @@
 package com.eshk
 
+import android.content.Context
+import android.content.ContextWrapper
+import androidx.fragment.app.FragmentActivity
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 class eishk : MainAPI() {
 
@@ -12,6 +13,7 @@ class eishk : MainAPI() {
     override var lang = "ar"
 
     override val hasMainPage = true
+    override var hasSettings = true
 
     override val supportedTypes = setOf(
         TvType.Movie
@@ -21,24 +23,20 @@ class eishk : MainAPI() {
         "ratings" to "⭐ تقييمات الإضافات"
     )
 
+    override fun openSettings(context: Context) {
+        context.findFragmentActivity()?.supportFragmentManager?.let { fm ->
+            RatingSettings.show(fm)
+        }
+    }
+
     override suspend fun getMainPage(
         page: Int,
         request: MainPageRequest
     ): HomePageResponse {
 
-        withContext(Dispatchers.Main) {
-            try {
-                val activity = MainActivity.activity
-                activity?.supportFragmentManager?.let { fm ->
-                    RatingSettings.show(fm)
-                }
-            } catch (e: Exception) {
-            }
-        }
-
         val item = newMovieSearchResponse(
-            "⭐ فتح قائمة التقييمات والتصويت",
-            "$mainUrl/open_ratings",
+            "⚙️ اضغط على أيقونة الترس ⚙️ لفتح التقييمات",
+            "$mainUrl/open_settings",
             TvType.Movie
         ) {
             this.posterUrl = "https://raw.githubusercontent.com/Abodabodd/Oldarabrepo/refs/heads/main/img/file_0000000042f861f49090744dc097ee2f.png"
@@ -52,25 +50,25 @@ class eishk : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-
-        withContext(Dispatchers.Main) {
-            try {
-                val activity = MainActivity.activity
-                activity?.supportFragmentManager?.let { fm ->
-                    RatingSettings.show(fm)
-                }
-            } catch (e: Exception) {
-            }
-        }
-
         return newMovieLoadResponse(
-            "⭐ تقييمات الإضافات",
+            "⚙️ إعدادات وتقييمات الإضافات",
             url,
             TvType.Movie,
             url
         ) {
             this.posterUrl = "https://raw.githubusercontent.com/Abodabodd/Oldarabrepo/refs/heads/main/img/file_0000000042f861f49090744dc097ee2f.png"
-            this.plot = "نافذة تقييم ومراجعة الإضافات والتصويت عليها مباشرة"
+            this.plot = "اضغط على أيقونة الإعدادات ⚙️ الخاصة بالإضافة لفتح نافذة التقييمات والتصويت مباشرة"
         }
+    }
+
+    private fun Context.findFragmentActivity(): FragmentActivity? {
+        var currentContext: Context? = this
+        while (currentContext is ContextWrapper) {
+            if (currentContext is FragmentActivity) {
+                return currentContext
+            }
+            currentContext = currentContext.baseContext
+        }
+        return null
     }
 }
