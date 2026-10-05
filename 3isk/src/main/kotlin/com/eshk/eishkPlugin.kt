@@ -1,31 +1,38 @@
-
 package com.eshk
 
 import android.content.Context
-import androidx.appcompat.app.AppCompatActivity
+import android.content.ContextWrapper
+import androidx.fragment.app.FragmentActivity
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 
 @CloudstreamPlugin
 class eishkPlugin : Plugin() {
 
-    override fun load(context: Context) {
+    companion object {
+        var pluginContext: Context? = null
 
-        registerMainAPI(
-            eishk()
-        )
+        fun openRatings(context: Context?) {
+            var current = context
+            while (current is ContextWrapper) {
+                if (current is FragmentActivity) {
+                    RatingSettings.show(current.supportFragmentManager)
+                    return
+                }
+                current = current.baseContext
+            }
+            if (current is FragmentActivity) {
+                RatingSettings.show(current.supportFragmentManager)
+            }
+        }
+    }
+
+    override fun load(context: Context) {
+        pluginContext = context
+        registerMainAPI(eishk())
 
         openSettings = { ctx ->
-
-            val activity =
-                ctx as? AppCompatActivity
-
-            if (activity != null) {
-
-                RatingSettings.show(
-                    activity.supportFragmentManager
-                )
-            }
+            openRatings(ctx)
         }
     }
 }
