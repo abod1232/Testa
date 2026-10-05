@@ -77,6 +77,19 @@ object RatingSettings {
         return score.coerceIn(1.0, 5.0)
     }
 
+    data class ThemeColor(
+        val rootBg: String,
+        val cardBg: String,
+        val cardStroke: String,
+        val titleColor: String
+    )
+
+    private val THEMES = listOf(
+        ThemeColor("#040C1A", "#081326", "#0E3A6E", "#38BDF8"),
+        ThemeColor("#120C03", "#1F1406", "#5C3A08", "#FBBF24"),
+        ThemeColor("#0D051A", "#160A2E", "#4C1D95", "#C084FC")
+    )
+
     class RatingListDialog : DialogFragment() {
 
         private var originalList: List<PluginRating> = emptyList()
@@ -92,7 +105,7 @@ object RatingSettings {
             val root = LinearLayout(requireContext()).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(10.dp(context), 14.dp(context), 10.dp(context), 8.dp(context))
-                setBackgroundColor(Color.parseColor("#060A14"))
+                setBackgroundColor(Color.parseColor(THEMES[0].rootBg))
             }
 
             val header = LinearLayout(requireContext()).apply {
@@ -100,9 +113,9 @@ object RatingSettings {
                 gravity = Gravity.CENTER_VERTICAL
                 layoutParams = LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
-                    54.dp(context)
+                    52.dp(context)
                 ).apply {
-                    bottomMargin = 10.dp(context)
+                    bottomMargin = 8.dp(context)
                 }
             }
 
@@ -112,8 +125,8 @@ object RatingSettings {
                 setTextColor(Color.parseColor("#94A3B8"))
                 gravity = Gravity.CENTER
                 layoutParams = LinearLayout.LayoutParams(
-                    42.dp(context),
-                    42.dp(context)
+                    40.dp(context),
+                    40.dp(context)
                 )
                 addTouchScaleEffect { dismiss() }
             }
@@ -121,7 +134,7 @@ object RatingSettings {
             val title = TextView(requireContext()).apply {
                 text = "⭐ التقييمات"
                 textSize = 18f
-                setTextColor(Color.WHITE)
+                setTextColor(Color.parseColor(THEMES[0].titleColor))
                 gravity = Gravity.CENTER
                 setTypeface(typeface, Typeface.BOLD)
                 layoutParams = LinearLayout.LayoutParams(
@@ -151,6 +164,13 @@ object RatingSettings {
                 addTouchScaleEffect {
                     if (originalList.isEmpty()) return@addTouchScaleEffect
                     sortMode = (sortMode + 1) % 3
+                    val currentTheme = THEMES[sortMode]
+
+                    root.setBackgroundColor(Color.parseColor(currentTheme.rootBg))
+                    dialog.window?.setBackgroundDrawable(
+                        roundedBackground(Color.parseColor(currentTheme.rootBg), 26f)
+                    )
+                    title.setTextColor(Color.parseColor(currentTheme.titleColor))
 
                     when (sortMode) {
                         1 -> {
@@ -163,27 +183,22 @@ object RatingSettings {
                                 12f
                             )
                             val sorted = originalList.sortedWith(
-                                compareByDescending<PluginRating> { it.likes }
-                                    .thenByDescending { it.likes - it.dislikes }
-                                    .thenBy { it.dislikes }
+                                compareByDescending<PluginRating> { calculateScore(it.likes, it.dislikes) }
+                                    .thenByDescending { it.likes + it.dislikes }
+                                    .thenByDescending { it.likes }
                             )
-                            adapter?.updateData(sorted)
+                            adapter?.updateData(sorted, sortMode)
                         }
                         2 -> {
                             text = "📋 الافتراضي"
-                            setTextColor(Color.parseColor("#A78BFA"))
+                            setTextColor(Color.parseColor("#C084FC"))
                             background = roundedStrokeBackground(
                                 Color.parseColor("#1E1438"),
                                 Color.parseColor("#7C3AED"),
                                 1.dp(context),
                                 12f
                             )
-                            val sorted = originalList.sortedWith(
-                                compareByDescending<PluginRating> { calculateScore(it.likes, it.dislikes) }
-                                    .thenByDescending { it.likes + it.dislikes }
-                                    .thenByDescending { it.likes }
-                            )
-                            adapter?.updateData(sorted)
+                            adapter?.updateData(originalList, sortMode)
                         }
                         else -> {
                             text = "🔥 الأكثر إعجاباً"
@@ -194,7 +209,12 @@ object RatingSettings {
                                 1.dp(context),
                                 12f
                             )
-                            adapter?.updateData(originalList)
+                            val sorted = originalList.sortedWith(
+                                compareByDescending<PluginRating> { it.likes }
+                                    .thenByDescending { it.likes - it.dislikes }
+                                    .thenBy { it.dislikes }
+                            )
+                            adapter?.updateData(sorted, sortMode)
                         }
                     }
                 }
@@ -242,7 +262,7 @@ object RatingSettings {
             dialog.setContentView(root)
 
             dialog.window?.setBackgroundDrawable(
-                roundedBackground(Color.parseColor("#060A14"), 26f)
+                roundedBackground(Color.parseColor(THEMES[0].rootBg), 26f)
             )
 
             dialog.setOnShowListener {
@@ -343,7 +363,7 @@ object RatingSettings {
 
                     withContext(Dispatchers.Main) {
                         progress.visibility = View.GONE
-                        adapter = RatingAdapter(originalList.toMutableList())
+                        adapter = RatingAdapter(originalList.toMutableList(), 0)
                         recycler.adapter = adapter
                     }
 
@@ -384,11 +404,13 @@ object RatingSettings {
     )
 
     class RatingAdapter(
-        private var items: List<PluginRating>
+        private var items: List<PluginRating>,
+        private var currentThemeIndex: Int
     ) : RecyclerView.Adapter<RatingAdapter.ViewHolder>() {
 
-        fun updateData(newItems: List<PluginRating>) {
+        fun updateData(newItems: List<PluginRating>, themeIndex: Int) {
             items = newItems
+            currentThemeIndex = themeIndex
             notifyDataSetChanged()
         }
 
@@ -409,40 +431,41 @@ object RatingSettings {
             viewType: Int
         ): ViewHolder {
             val ctx = parent.context
+            val theme = THEMES[currentThemeIndex]
 
             val card = FrameLayout(ctx).apply {
                 layoutDirection = View.LAYOUT_DIRECTION_LTR
                 background = roundedStrokeBackground(
-                    Color.parseColor("#0B1120"),
-                    Color.parseColor("#1E293B"),
+                    Color.parseColor(theme.cardBg),
+                    Color.parseColor(theme.cardStroke),
                     1.dp(ctx),
-                    20f
+                    18f
                 )
 
                 layoutParams = RecyclerView.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
-                    98.dp(ctx)
+                    90.dp(ctx)
                 ).apply {
-                    setMargins(0, 4.dp(ctx), 0, 4.dp(ctx))
+                    setMargins(0, 3.dp(ctx), 0, 3.dp(ctx))
                 }
             }
 
             val icon = ImageView(ctx).apply {
                 scaleType = ImageView.ScaleType.CENTER_CROP
-                background = roundedBackground(Color.parseColor("#161F36"), 16f)
+                background = roundedBackground(Color.parseColor("#151D33"), 15f)
                 outlineProvider = object : ViewOutlineProvider() {
                     override fun getOutline(view: View, outline: Outline) {
-                        outline.setRoundRect(0, 0, view.width, view.height, 16.dp(ctx).toFloat())
+                        outline.setRoundRect(0, 0, view.width, view.height, 15.dp(ctx).toFloat())
                     }
                 }
                 clipToOutline = true
 
                 layoutParams = FrameLayout.LayoutParams(
-                    62.dp(ctx),
-                    62.dp(ctx)
+                    58.dp(ctx),
+                    58.dp(ctx)
                 ).apply {
                     gravity = Gravity.START or Gravity.CENTER_VERTICAL
-                    leftMargin = 12.dp(ctx)
+                    leftMargin = 10.dp(ctx)
                 }
             }
 
@@ -454,13 +477,13 @@ object RatingSettings {
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     FrameLayout.LayoutParams.MATCH_PARENT
                 ).apply {
-                    leftMargin = 82.dp(ctx)
-                    rightMargin = 106.dp(ctx)
+                    leftMargin = 76.dp(ctx)
+                    rightMargin = 72.dp(ctx)
                 }
             }
 
             val name = TextView(ctx).apply {
-                textSize = 15f
+                textSize = 14.5f
                 setTextColor(Color.WHITE)
                 maxLines = 1
                 ellipsize = TextUtils.TruncateAt.END
@@ -472,11 +495,11 @@ object RatingSettings {
             val tagsContainer = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
                 layoutDirection = View.LAYOUT_DIRECTION_LTR
-                setPadding(0, 4.dp(ctx), 0, 4.dp(ctx))
+                setPadding(0, 3.dp(ctx), 0, 3.dp(ctx))
             }
 
             val ratingText = TextView(ctx).apply {
-                textSize = 12f
+                textSize = 11.5f
                 setTextColor(Color.parseColor("#94A3B8"))
                 gravity = Gravity.START
                 layoutDirection = View.LAYOUT_DIRECTION_LTR
@@ -489,11 +512,11 @@ object RatingSettings {
             infoContainer.addView(ratingText)
 
             val actionsContainer = LinearLayout(ctx).apply {
-                orientation = LinearLayout.HORIZONTAL
+                orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
 
                 layoutParams = FrameLayout.LayoutParams(
-                    96.dp(ctx),
+                    58.dp(ctx),
                     FrameLayout.LayoutParams.MATCH_PARENT
                 ).apply {
                     gravity = Gravity.END or Gravity.CENTER_VERTICAL
@@ -502,31 +525,32 @@ object RatingSettings {
             }
 
             val likeBtn = LinearLayout(ctx).apply {
-                orientation = LinearLayout.VERTICAL
+                orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
                 background = roundedStrokeBackground(
-                    Color.parseColor("#07251D"),
+                    Color.parseColor("#06241C"),
                     Color.parseColor("#10B981"),
-                    1.2.dp(ctx),
-                    14f
+                    1.dp(ctx),
+                    10f
                 )
 
                 layoutParams = LinearLayout.LayoutParams(
-                    43.dp(ctx),
-                    58.dp(ctx)
+                    56.dp(ctx),
+                    26.dp(ctx)
                 ).apply {
-                    rightMargin = 5.dp(ctx)
+                    bottomMargin = 4.dp(ctx)
                 }
             }
 
             val likeIcon = TextView(ctx).apply {
                 text = "👍"
-                textSize = 14f
+                textSize = 11f
                 gravity = Gravity.CENTER
+                setPadding(0, 0, 4.dp(ctx), 0)
             }
 
             val likeCount = TextView(ctx).apply {
-                textSize = 11.5f
+                textSize = 11f
                 setTextColor(Color.WHITE)
                 gravity = Gravity.CENTER
                 setTypeface(typeface, Typeface.BOLD)
@@ -536,29 +560,30 @@ object RatingSettings {
             likeBtn.addView(likeCount)
 
             val dislikeBtn = LinearLayout(ctx).apply {
-                orientation = LinearLayout.VERTICAL
+                orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
                 background = roundedStrokeBackground(
-                    Color.parseColor("#260B12"),
+                    Color.parseColor("#260910"),
                     Color.parseColor("#EF4444"),
-                    1.2.dp(ctx),
-                    14f
+                    1.dp(ctx),
+                    10f
                 )
 
                 layoutParams = LinearLayout.LayoutParams(
-                    43.dp(ctx),
-                    58.dp(ctx)
+                    56.dp(ctx),
+                    26.dp(ctx)
                 )
             }
 
             val dislikeIcon = TextView(ctx).apply {
                 text = "👎"
-                textSize = 14f
+                textSize = 11f
                 gravity = Gravity.CENTER
+                setPadding(0, 0, 4.dp(ctx), 0)
             }
 
             val dislikeCount = TextView(ctx).apply {
-                textSize = 11.5f
+                textSize = 11f
                 setTextColor(Color.WHITE)
                 gravity = Gravity.CENTER
                 setTypeface(typeface, Typeface.BOLD)
@@ -593,6 +618,14 @@ object RatingSettings {
         ) {
             val ctx = holder.itemView.context
             val item = items[position]
+            val theme = THEMES[currentThemeIndex]
+
+            holder.card.background = roundedStrokeBackground(
+                Color.parseColor(theme.cardBg),
+                Color.parseColor(theme.cardStroke),
+                1.dp(ctx),
+                18f
+            )
 
             holder.name.text = item.name
 
@@ -611,10 +644,10 @@ object RatingSettings {
 
             val langTag = TextView(ctx).apply {
                 text = item.language
-                textSize = 10f
+                textSize = 9.5f
                 setTextColor(Color.parseColor("#E2E8F0"))
-                background = roundedBackground(Color.parseColor("#334155"), 6f)
-                setPadding(6.dp(ctx), 2.dp(ctx), 6.dp(ctx), 2.dp(ctx))
+                background = roundedBackground(Color.parseColor("#334155"), 5f)
+                setPadding(5.dp(ctx), 2.dp(ctx), 5.dp(ctx), 2.dp(ctx))
                 maxLines = 1
                 layoutParams = LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -628,10 +661,10 @@ object RatingSettings {
             item.tags.take(2).forEach { tag ->
                 val tagView = TextView(ctx).apply {
                     text = tag
-                    textSize = 10f
+                    textSize = 9.5f
                     setTextColor(Color.parseColor("#93C5FD"))
-                    background = roundedBackground(Color.parseColor("#172554"), 6f)
-                    setPadding(6.dp(ctx), 2.dp(ctx), 6.dp(ctx), 2.dp(ctx))
+                    background = roundedBackground(Color.parseColor("#172554"), 5f)
+                    setPadding(5.dp(ctx), 2.dp(ctx), 5.dp(ctx), 2.dp(ctx))
                     maxLines = 1
                     layoutParams = LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -679,30 +712,30 @@ object RatingSettings {
 
             val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             val baseKey = getBaseHash(item.url)
-            val userVote = prefs.getString("user_voted_$baseKey", "none")
+            val hasLiked = prefs.getBoolean("liked_$baseKey", false)
+            val hasDisliked = prefs.getBoolean("disliked_$baseKey", false)
 
-            updateButtonsVisual(ctx, holder.likeBtn, holder.dislikeBtn, userVote)
+            updateLikeVisual(ctx, holder.likeBtn, hasLiked)
+            updateDislikeVisual(ctx, holder.dislikeBtn, hasDisliked)
 
             holder.card.addTouchScaleEffect()
 
             holder.likeBtn.addTouchScaleEffect {
-                if (prefs.getString("user_voted_$baseKey", "none") != "none") {
-                    Toast.makeText(ctx, "لقد قمت بالتصويت مسبقاً", Toast.LENGTH_SHORT).show()
+                if (prefs.getBoolean("liked_$baseKey", false)) {
+                    Toast.makeText(ctx, "لقد سجلت إعجابك بهذه الإضافة مسبقاً", Toast.LENGTH_SHORT).show()
                     return@addTouchScaleEffect
                 }
 
                 holder.likeBtn.isEnabled = false
-                holder.dislikeBtn.isEnabled = false
 
                 CoroutineScope(Dispatchers.IO).launch {
                     val success = RatingSettings.incrementVote(item.url, "like")
 
                     withContext(Dispatchers.Main) {
                         holder.likeBtn.isEnabled = true
-                        holder.dislikeBtn.isEnabled = true
 
                         if (success) {
-                            prefs.edit().putString("user_voted_$baseKey", "like").apply()
+                            prefs.edit().putBoolean("liked_$baseKey", true).apply()
                             item.likes += 1
                             holder.likeCount.text = item.likes.toString()
 
@@ -711,7 +744,7 @@ object RatingSettings {
                             holder.ratingText.text = "⭐ $updatedScore  ($updatedTotal صوت)"
                             holder.ratingText.setTextColor(Color.parseColor("#FBBF24"))
 
-                            updateButtonsVisual(ctx, holder.likeBtn, holder.dislikeBtn, "like")
+                            updateLikeVisual(ctx, holder.likeBtn, true)
                         } else {
                             Toast.makeText(ctx, "تعذر تسجيل الإعجاب", Toast.LENGTH_SHORT).show()
                         }
@@ -720,8 +753,8 @@ object RatingSettings {
             }
 
             holder.dislikeBtn.addTouchScaleEffect {
-                if (prefs.getString("user_voted_$baseKey", "none") != "none") {
-                    Toast.makeText(ctx, "لقد قمت بالتصويت مسبقاً", Toast.LENGTH_SHORT).show()
+                if (prefs.getBoolean("disliked_$baseKey", false)) {
+                    Toast.makeText(ctx, "لقد سجلت عدم إعجابك بهذه الإضافة مسبقاً", Toast.LENGTH_SHORT).show()
                     return@addTouchScaleEffect
                 }
 
@@ -729,18 +762,16 @@ object RatingSettings {
                     .setTitle("تأكيد التصويت")
                     .setMessage("هل أنت متأكد أنك تريد تسجيل عدم الإعجاب بالإضافة؟")
                     .setPositiveButton("نعم") { _, _ ->
-                        holder.likeBtn.isEnabled = false
                         holder.dislikeBtn.isEnabled = false
 
                         CoroutineScope(Dispatchers.IO).launch {
                             val success = RatingSettings.incrementVote(item.url, "dislike")
 
                             withContext(Dispatchers.Main) {
-                                holder.likeBtn.isEnabled = true
                                 holder.dislikeBtn.isEnabled = true
 
                                 if (success) {
-                                    prefs.edit().putString("user_voted_$baseKey", "dislike").apply()
+                                    prefs.edit().putBoolean("disliked_$baseKey", true).apply()
                                     item.dislikes += 1
                                     holder.dislikeCount.text = item.dislikes.toString()
 
@@ -749,7 +780,7 @@ object RatingSettings {
                                     holder.ratingText.text = "⭐ $updatedScore  ($updatedTotal صوت)"
                                     holder.ratingText.setTextColor(Color.parseColor("#FBBF24"))
 
-                                    updateButtonsVisual(ctx, holder.likeBtn, holder.dislikeBtn, "dislike")
+                                    updateDislikeVisual(ctx, holder.dislikeBtn, true)
                                 } else {
                                     Toast.makeText(ctx, "تعذر تسجيل عدم الإعجاب", Toast.LENGTH_SHORT).show()
                                 }
@@ -776,55 +807,39 @@ object RatingSettings {
         }
     }
 
-    private fun updateButtonsVisual(
-        ctx: Context,
-        likeBtn: LinearLayout,
-        dislikeBtn: LinearLayout,
-        voteType: String?
-    ) {
-        when (voteType) {
-            "like" -> {
-                likeBtn.background = roundedStrokeBackground(
-                    Color.parseColor("#064E3B"),
-                    Color.parseColor("#34D399"),
-                    1.8.dp(ctx),
-                    14f
-                )
-                dislikeBtn.background = roundedStrokeBackground(
-                    Color.parseColor("#15080C"),
-                    Color.parseColor("#451A23"),
-                    1.dp(ctx),
-                    14f
-                )
-            }
-            "dislike" -> {
-                likeBtn.background = roundedStrokeBackground(
-                    Color.parseColor("#061A14"),
-                    Color.parseColor("#153E31"),
-                    1.dp(ctx),
-                    14f
-                )
-                dislikeBtn.background = roundedStrokeBackground(
-                    Color.parseColor("#4C0519"),
-                    Color.parseColor("#F87171"),
-                    1.8.dp(ctx),
-                    14f
-                )
-            }
-            else -> {
-                likeBtn.background = roundedStrokeBackground(
-                    Color.parseColor("#07251D"),
-                    Color.parseColor("#10B981"),
-                    1.2.dp(ctx),
-                    14f
-                )
-                dislikeBtn.background = roundedStrokeBackground(
-                    Color.parseColor("#260B12"),
-                    Color.parseColor("#EF4444"),
-                    1.2.dp(ctx),
-                    14f
-                )
-            }
+    private fun updateLikeVisual(ctx: Context, likeBtn: LinearLayout, active: Boolean) {
+        if (active) {
+            likeBtn.background = roundedStrokeBackground(
+                Color.parseColor("#064E3B"),
+                Color.parseColor("#34D399"),
+                1.5.dp(ctx),
+                10f
+            )
+        } else {
+            likeBtn.background = roundedStrokeBackground(
+                Color.parseColor("#06241C"),
+                Color.parseColor("#10B981"),
+                1.dp(ctx),
+                10f
+            )
+        }
+    }
+
+    private fun updateDislikeVisual(ctx: Context, dislikeBtn: LinearLayout, active: Boolean) {
+        if (active) {
+            dislikeBtn.background = roundedStrokeBackground(
+                Color.parseColor("#4C0519"),
+                Color.parseColor("#F87171"),
+                1.5.dp(ctx),
+                10f
+            )
+        } else {
+            dislikeBtn.background = roundedStrokeBackground(
+                Color.parseColor("#260910"),
+                Color.parseColor("#EF4444"),
+                1.dp(ctx),
+                10f
+            )
         }
     }
 
