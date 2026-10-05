@@ -64,10 +64,23 @@ object RatingSettings {
         )
     }
 
+    private fun calculateScore(likes: Int, dislikes: Int): Double {
+        val total = likes + dislikes
+        if (total == 0) return 0.0
+
+        var score = 1.0 + ((likes.toDouble() / total) * 4.0)
+
+        if (total < 10) {
+            score -= 1.0
+        }
+
+        return score.coerceIn(1.0, 5.0)
+    }
+
     class RatingListDialog : DialogFragment() {
 
         private var originalList: List<PluginRating> = emptyList()
-        private var isSortedByLikes = false
+        private var sortMode = 0
         private var adapter: RatingAdapter? = null
 
         override fun onCreateDialog(
@@ -137,14 +150,52 @@ object RatingSettings {
 
                 addTouchScaleEffect {
                     if (originalList.isEmpty()) return@addTouchScaleEffect
-                    isSortedByLikes = !isSortedByLikes
-                    if (isSortedByLikes) {
-                        text = "📋 الافتراضي"
-                        val sorted = originalList.sortedByDescending { it.likes }
-                        adapter?.updateData(sorted)
-                    } else {
-                        text = "🔥 الأكثر إعجاباً"
-                        adapter?.updateData(originalList)
+                    sortMode = (sortMode + 1) % 3
+
+                    when (sortMode) {
+                        1 -> {
+                            text = "⭐ الأعلى تقييماً"
+                            setTextColor(Color.parseColor("#FBBF24"))
+                            background = roundedStrokeBackground(
+                                Color.parseColor("#261C08"),
+                                Color.parseColor("#D97706"),
+                                1.dp(context),
+                                12f
+                            )
+                            val sorted = originalList.sortedWith(
+                                compareByDescending<PluginRating> { it.likes }
+                                    .thenByDescending { it.likes - it.dislikes }
+                                    .thenBy { it.dislikes }
+                            )
+                            adapter?.updateData(sorted)
+                        }
+                        2 -> {
+                            text = "📋 الافتراضي"
+                            setTextColor(Color.parseColor("#A78BFA"))
+                            background = roundedStrokeBackground(
+                                Color.parseColor("#1E1438"),
+                                Color.parseColor("#7C3AED"),
+                                1.dp(context),
+                                12f
+                            )
+                            val sorted = originalList.sortedWith(
+                                compareByDescending<PluginRating> { calculateScore(it.likes, it.dislikes) }
+                                    .thenByDescending { it.likes + it.dislikes }
+                                    .thenByDescending { it.likes }
+                            )
+                            adapter?.updateData(sorted)
+                        }
+                        else -> {
+                            text = "🔥 الأكثر إعجاباً"
+                            setTextColor(Color.parseColor("#38BDF8"))
+                            background = roundedStrokeBackground(
+                                Color.parseColor("#0C1C36"),
+                                Color.parseColor("#0284C7"),
+                                1.dp(context),
+                                12f
+                            )
+                            adapter?.updateData(originalList)
+                        }
                     }
                 }
             }
@@ -550,7 +601,7 @@ object RatingSettings {
                 holder.ratingText.text = "✨ جديد • بانتظار التقييم"
                 holder.ratingText.setTextColor(Color.parseColor("#64748B"))
             } else {
-                val score = 1.0 + ((item.likes.toDouble() / total) * 4.0)
+                val score = calculateScore(item.likes, item.dislikes)
                 val formattedScore = String.format(Locale.US, "%.1f", score)
                 holder.ratingText.text = "⭐ $formattedScore  ($total صوت)"
                 holder.ratingText.setTextColor(Color.parseColor("#FBBF24"))
@@ -656,7 +707,7 @@ object RatingSettings {
                             holder.likeCount.text = item.likes.toString()
 
                             val updatedTotal = item.likes + item.dislikes
-                            val updatedScore = String.format(Locale.US, "%.1f", 1.0 + ((item.likes.toDouble() / updatedTotal) * 4.0))
+                            val updatedScore = String.format(Locale.US, "%.1f", calculateScore(item.likes, item.dislikes))
                             holder.ratingText.text = "⭐ $updatedScore  ($updatedTotal صوت)"
                             holder.ratingText.setTextColor(Color.parseColor("#FBBF24"))
 
@@ -694,7 +745,7 @@ object RatingSettings {
                                     holder.dislikeCount.text = item.dislikes.toString()
 
                                     val updatedTotal = item.likes + item.dislikes
-                                    val updatedScore = String.format(Locale.US, "%.1f", 1.0 + ((item.likes.toDouble() / updatedTotal) * 4.0))
+                                    val updatedScore = String.format(Locale.US, "%.1f", calculateScore(item.likes, item.dislikes))
                                     holder.ratingText.text = "⭐ $updatedScore  ($updatedTotal صوت)"
                                     holder.ratingText.setTextColor(Color.parseColor("#FBBF24"))
 
