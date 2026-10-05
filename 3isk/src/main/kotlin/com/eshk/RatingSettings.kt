@@ -31,10 +31,6 @@ import java.security.MessageDigest
 
 object RatingSettings {
 
-    // =========================================================
-    // الروابط
-    // =========================================================
-
     private const val PLUGINS_URL =
         "https://raw.githubusercontent.com/Abodabodd/re-3arabi/refs/heads/builds/plugins.json"
 
@@ -44,20 +40,12 @@ object RatingSettings {
     private const val PREFS =
         "extension_ratings"
 
-    // =========================================================
-    // فتح الإعدادات
-    // =========================================================
-
     fun show(fragmentManager: FragmentManager) {
         SettingsDialog().show(
             fragmentManager,
             "rating_settings"
         )
     }
-
-    // =========================================================
-    // نافذة الإعدادات
-    // =========================================================
 
     class SettingsDialog : DialogFragment() {
 
@@ -148,10 +136,6 @@ object RatingSettings {
         }
     }
 
-    // =========================================================
-    // نافذة التقييمات
-    // =========================================================
-
     class RatingListDialog : DialogFragment() {
 
         override fun onCreateDialog(
@@ -182,10 +166,6 @@ object RatingSettings {
                         )
                     )
                 }
-
-            // =================================================
-            // Header
-            // =================================================
 
             val header =
                 FrameLayout(requireContext()).apply {
@@ -261,10 +241,6 @@ object RatingSettings {
 
             root.addView(header)
 
-            // =================================================
-            // خط التحميل
-            // =================================================
-
             val progress =
                 ProgressBar(
                     requireContext(),
@@ -286,10 +262,6 @@ object RatingSettings {
                     3.dp(context)
                 )
             )
-
-            // =================================================
-            // RecyclerView
-            // =================================================
 
             val recycler =
                 RecyclerView(
@@ -337,10 +309,6 @@ object RatingSettings {
                 )
             )
 
-            // =================================================
-            // جعل النافذة كبيرة
-            // =================================================
-
             dialog.setOnShowListener {
 
                 dialog.window?.setLayout(
@@ -357,10 +325,6 @@ object RatingSettings {
             return dialog
         }
 
-        // =====================================================
-        // تحميل التقييمات
-        // =====================================================
-
         private fun loadRatings(
             recycler: RecyclerView,
             progress: ProgressBar
@@ -371,10 +335,6 @@ object RatingSettings {
             ).launch {
 
                 try {
-
-                    // -----------------------------------------
-                    // تحميل plugins.json
-                    // -----------------------------------------
 
                     val response =
                         app.get(
@@ -388,10 +348,6 @@ object RatingSettings {
 
                     val plugins =
                         mutableListOf<PluginRating>()
-
-                    // -----------------------------------------
-                    // قراءة الإضافات
-                    // -----------------------------------------
 
                     for (
                         i in 0 until array.length()
@@ -459,10 +415,6 @@ object RatingSettings {
                             continue
                         }
 
-                        // -------------------------------------
-                        // جلب التصويتات
-                        // -------------------------------------
-
                         val votes =
                             getVotes(
                                 url
@@ -483,10 +435,6 @@ object RatingSettings {
                             )
                         )
                     }
-
-                    // -----------------------------------------
-                    // ترتيب من الأعلى إلى الأقل
-                    // -----------------------------------------
 
                     val sorted =
                         plugins.sortedByDescending {
@@ -526,10 +474,6 @@ object RatingSettings {
                 }
             }
         }
-
-        // =====================================================
-        // جلب عدد الأصوات
-        // =====================================================
 
         private suspend fun getVotes(
             pluginUrl: String
@@ -571,10 +515,6 @@ object RatingSettings {
         }
     }
 
-    // =========================================================
-    // بيانات الإضافة
-    // =========================================================
-
     data class PluginRating(
         val name: String,
         val url: String,
@@ -582,10 +522,6 @@ object RatingSettings {
         val description: String,
         val votes: Int
     )
-
-    // =========================================================
-    // Adapter
-    // =========================================================
 
     class RatingAdapter(
         private val items: List<PluginRating>
@@ -610,10 +546,6 @@ object RatingSettings {
 
             val ctx =
                 parent.context
-
-            // =================================================
-            // الكرت
-            // =================================================
 
             val card =
                 FrameLayout(ctx).apply {
@@ -651,10 +583,6 @@ object RatingSettings {
                         }
                 }
 
-            // =================================================
-            // صورة الإضافة
-            // =================================================
-
             val icon =
                 ImageView(ctx).apply {
 
@@ -685,10 +613,6 @@ object RatingSettings {
                                 12.dp(ctx)
                         }
                 }
-
-            // =================================================
-            // اسم الإضافة
-            // =================================================
 
             val name =
                 TextView(ctx).apply {
@@ -728,10 +652,6 @@ object RatingSettings {
                                 11.dp(ctx)
                         }
                 }
-
-            // =================================================
-            // وصف الإضافة
-            // =================================================
 
             val description =
                 TextView(ctx).apply {
@@ -776,10 +696,6 @@ object RatingSettings {
                         }
                 }
 
-            // =================================================
-            // الأصوات
-            // =================================================
-
             val votes =
                 TextView(ctx).apply {
 
@@ -814,10 +730,6 @@ object RatingSettings {
                         }
                 }
 
-            // =================================================
-            // الخط قبل رقم الترتيب
-            // =================================================
-
             val rankLine =
                 View(ctx).apply {
 
@@ -843,10 +755,6 @@ object RatingSettings {
                                 140.dp(ctx)
                         }
                 }
-
-            // =================================================
-            // رقم الترتيب
-            // =================================================
 
             val rank =
                 TextView(ctx).apply {
@@ -879,10 +787,6 @@ object RatingSettings {
                         }
                 }
 
-            // =================================================
-            // الخط قبل القلب
-            // =================================================
-
             val heartLine =
                 View(ctx).apply {
 
@@ -908,10 +812,6 @@ object RatingSettings {
                                 74.dp(ctx)
                         }
                 }
-
-            // =================================================
-            // القلب
-            // =================================================
 
             val heart =
                 TextView(ctx).apply {
@@ -957,10 +857,6 @@ object RatingSettings {
                                 10.dp(ctx)
                         }
                 }
-
-            // =================================================
-            // إضافة العناصر
-            // =================================================
 
             card.addView(
                 icon
@@ -1016,10 +912,6 @@ object RatingSettings {
             val rank =
                 position + 1
 
-            // =================================================
-            // البيانات
-            // =================================================
-
             holder.name.text =
                 item.name
 
@@ -1031,10 +923,6 @@ object RatingSettings {
 
             holder.rank.text =
                 rank.toString()
-
-            // =================================================
-            // تحميل الصورة
-            // =================================================
 
             if (
                 item.icon.isNotBlank()
@@ -1086,15 +974,9 @@ object RatingSettings {
                     } catch (
                         e: Exception
                     ) {
-
-                        // لا نفعل شيئًا إذا فشل تحميل الصورة
                     }
                 }
             }
-
-            // =================================================
-            // حالة التصويت
-            // =================================================
 
             val prefs =
                 holder.itemView.context
@@ -1118,10 +1000,6 @@ object RatingSettings {
                 holder.heart,
                 hasVoted
             )
-
-            // =================================================
-            // الضغط على القلب
-            // =================================================
 
             holder.heart.setOnClickListener {
 
@@ -1199,10 +1077,6 @@ object RatingSettings {
             items.size
     }
 
-    // =========================================================
-    // إرسال التصويت
-    // =========================================================
-
     private suspend fun vote(
         pluginUrl: String
     ): Boolean {
@@ -1240,10 +1114,6 @@ object RatingSettings {
             false
         }
     }
-
-    // =========================================================
-    // تغيير شكل القلب
-    // =========================================================
 
     private fun updateHeart(
         heart: TextView,
@@ -1298,10 +1168,6 @@ object RatingSettings {
         }
     }
 
-    // =========================================================
-    // استخراج repository
-    // =========================================================
-
     private fun getRepository(
         pluginUrl: String
     ): String {
@@ -1312,10 +1178,6 @@ object RatingSettings {
             .take(3)
             .joinToString("-")
     }
-
-    // =========================================================
-    // SHA-256
-    // =========================================================
 
     private fun transformUrl(
         url: String
@@ -1334,10 +1196,6 @@ object RatingSettings {
             }
     }
 
-    // =========================================================
-    // خلفية
-    // =========================================================
-
     private fun roundedBackground(
         color: Int,
         radius: Float
@@ -1353,10 +1211,6 @@ object RatingSettings {
                 radius
         }
     }
-
-    // =========================================================
-    // DP
-    // =========================================================
 
     private fun Int.dp(
         context: Context
