@@ -1213,14 +1213,17 @@ object RatingSettings {
     }
 
     private fun Int.dp(
-        context: Context
-    ): Int {
+    context: Context?
+): Int {
 
-        return (
-            this *
-                context.resources
-                    .displayMetrics
-                    .density
-            ).toInt()
-    }
+    val safeContext =
+        context ?: return this
+
+    return (
+        this *
+            safeContext.resources
+                .displayMetrics
+                .density
+        ).toInt()
+}
 }
