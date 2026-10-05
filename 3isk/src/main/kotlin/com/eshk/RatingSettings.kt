@@ -1,17 +1,21 @@
 package com.eshk
 
+import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.app.Dialog
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.graphics.Outline
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.text.TextUtils
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewOutlineProvider
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -33,6 +37,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
 object RatingSettings {
@@ -72,24 +77,17 @@ object RatingSettings {
 
             val root = LinearLayout(requireContext()).apply {
                 orientation = LinearLayout.VERTICAL
-
-                setPadding(
-                    14.dp(context),
-                    15.dp(context),
-                    14.dp(context),
-                    10.dp(context)
-                )
-
-                setBackgroundColor(
-                    Color.rgb(7, 12, 24)
-                )
+                setPadding(12.dp(context), 16.dp(context), 12.dp(context), 8.dp(context))
+                setBackgroundColor(Color.parseColor("#050811"))
             }
 
             val header = FrameLayout(requireContext()).apply {
                 layoutParams = LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
-                    65.dp(context)
-                )
+                    60.dp(context)
+                ).apply {
+                    bottomMargin = 8.dp(context)
+                }
             }
 
             val title = TextView(requireContext()).apply {
@@ -97,7 +95,6 @@ object RatingSettings {
                 textSize = 20f
                 setTextColor(Color.WHITE)
                 gravity = Gravity.CENTER
-
                 layoutParams = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
@@ -106,51 +103,39 @@ object RatingSettings {
 
             val close = TextView(requireContext()).apply {
                 text = "×"
-                textSize = 42f
-                setTextColor(Color.rgb(190, 198, 220))
+                textSize = 38f
+                setTextColor(Color.parseColor("#94A3B8"))
                 gravity = Gravity.CENTER
-
                 layoutParams = FrameLayout.LayoutParams(
-                    55.dp(context),
-                    55.dp(context)
+                    48.dp(context),
+                    48.dp(context)
                 ).apply {
                     gravity = Gravity.START or Gravity.CENTER_VERTICAL
                 }
-
-                setOnClickListener {
-                    dismiss()
-                }
+                addTouchScaleEffect { dismiss() }
             }
 
             val sortBtn = TextView(requireContext()).apply {
                 text = "🔥 الأكثر إعجاباً"
-                textSize = 12f
-                setTextColor(Color.rgb(205, 215, 240))
+                textSize = 12.5f
+                setTextColor(Color.parseColor("#38BDF8"))
                 gravity = Gravity.CENTER
-
-                background = roundedBackground(
-                    Color.rgb(24, 34, 56),
+                background = roundedStrokeBackground(
+                    Color.parseColor("#0C1B33"),
+                    Color.parseColor("#0284C7"),
+                    1.dp(context),
                     14f
                 )
-
-                setPadding(
-                    10.dp(context),
-                    6.dp(context),
-                    10.dp(context),
-                    6.dp(context)
-                )
-
+                setPadding(12.dp(context), 8.dp(context), 12.dp(context), 8.dp(context))
                 layoutParams = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
                 ).apply {
                     gravity = Gravity.END or Gravity.CENTER_VERTICAL
-                    rightMargin = 6.dp(context)
                 }
 
-                setOnClickListener {
-                    if (originalList.isEmpty()) return@setOnClickListener
-
+                addTouchScaleEffect {
+                    if (originalList.isEmpty()) return@addTouchScaleEffect
                     isSortedByLikes = !isSortedByLikes
                     if (isSortedByLikes) {
                         text = "📋 الافتراضي"
@@ -190,13 +175,7 @@ object RatingSettings {
                 layoutManager = LinearLayoutManager(requireContext())
                 overScrollMode = View.OVER_SCROLL_NEVER
                 clipToPadding = false
-
-                setPadding(
-                    0,
-                    8.dp(context),
-                    0,
-                    20.dp(context)
-                )
+                setPadding(0, 8.dp(context), 0, 24.dp(context))
             }
 
             root.addView(
@@ -211,10 +190,7 @@ object RatingSettings {
             dialog.setContentView(root)
 
             dialog.window?.setBackgroundDrawable(
-                roundedBackground(
-                    Color.rgb(7, 12, 24),
-                    28f
-                )
+                roundedBackground(Color.parseColor("#050811"), 28f)
             )
 
             dialog.setOnShowListener {
@@ -229,19 +205,19 @@ object RatingSettings {
             return dialog
         }
 
-        private fun mapTvTypes(typesArray: JSONArray?): String {
-            if (typesArray == null || typesArray.length() == 0) return "إضافة عامة"
+        private fun parseTypes(typesArray: JSONArray?): List<String> {
+            if (typesArray == null || typesArray.length() == 0) return listOf("إضافة عامة")
 
             val map = mapOf(
                 "TvSeries" to "مسلسلات",
                 "Movie" to "أفلام",
                 "Anime" to "أنمي",
-                "AsianDrama" to "دراما آسيوية",
-                "Live" to "بث مباشر",
+                "AsianDrama" to "آسيوي",
+                "Live" to "مباشر",
                 "Drama" to "دراما",
                 "Music" to "موسيقى",
                 "Documentary" to "وثائقي",
-                "Others" to "منوعات"
+                "Others" to "منوعة"
             )
 
             val list = mutableListOf<String>()
@@ -252,7 +228,7 @@ object RatingSettings {
                 }
             }
 
-            return if (list.isNotEmpty()) list.joinToString(" • ") else "إضافة عامة"
+            return if (list.isNotEmpty()) list else listOf("عام")
         }
 
         private fun loadRatings(
@@ -283,12 +259,7 @@ object RatingSettings {
                                     else -> ""
                                 }
 
-                                val description = when {
-                                    obj.optString("description").isNotBlank() -> obj.optString("description")
-                                    obj.has("tvTypes") -> mapTvTypes(obj.optJSONArray("tvTypes"))
-                                    obj.optString("type").isNotBlank() -> obj.optString("type")
-                                    else -> "إضافة عامة"
-                                }
+                                val tags = parseTypes(obj.optJSONArray("tvTypes"))
 
                                 val likesDeferred = async { getCount(url, "like") }
                                 val dislikesDeferred = async { getCount(url, "dislike") }
@@ -297,7 +268,7 @@ object RatingSettings {
                                     name = name,
                                     url = url,
                                     icon = icon,
-                                    description = description,
+                                    tags = tags,
                                     likes = likesDeferred.await(),
                                     dislikes = dislikesDeferred.await()
                                 )
@@ -343,7 +314,7 @@ object RatingSettings {
         val name: String,
         val url: String,
         val icon: String,
-        val description: String,
+        val tags: List<String>,
         var likes: Int,
         var dislikes: Int
     )
@@ -361,10 +332,12 @@ object RatingSettings {
             val card: FrameLayout,
             val icon: ImageView,
             val name: TextView,
-            val description: TextView,
-            val votes: TextView,
-            val dislike: TextView,
-            val heart: TextView
+            val tagsContainer: LinearLayout,
+            val ratingText: TextView,
+            val likeBtn: LinearLayout,
+            val likeCount: TextView,
+            val dislikeBtn: LinearLayout,
+            val dislikeCount: TextView
         ) : RecyclerView.ViewHolder(card)
 
         override fun onCreateViewHolder(
@@ -375,15 +348,16 @@ object RatingSettings {
 
             val card = FrameLayout(ctx).apply {
                 layoutDirection = View.LAYOUT_DIRECTION_LTR
-
-                background = roundedBackground(
-                    Color.rgb(15, 22, 38),
-                    23f
+                background = roundedStrokeBackground(
+                    Color.parseColor("#0C101F"),
+                    Color.parseColor("#172038"),
+                    1.dp(ctx),
+                    22f
                 )
 
                 layoutParams = RecyclerView.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
-                    105.dp(ctx)
+                    94.dp(ctx)
                 ).apply {
                     setMargins(0, 5.dp(ctx), 0, 5.dp(ctx))
                 }
@@ -391,125 +365,159 @@ object RatingSettings {
 
             val icon = ImageView(ctx).apply {
                 scaleType = ImageView.ScaleType.CENTER_CROP
-                background = roundedBackground(
-                    Color.rgb(29, 36, 55),
-                    17f
-                )
+                background = roundedBackground(Color.parseColor("#172138"), 18f)
+                outlineProvider = object : ViewOutlineProvider() {
+                    override fun getOutline(view: View, outline: Outline) {
+                        outline.setRoundRect(0, 0, view.width, view.height, 18.dp(ctx).toFloat())
+                    }
+                }
+                clipToOutline = true
 
                 layoutParams = FrameLayout.LayoutParams(
-                    76.dp(ctx),
-                    76.dp(ctx)
+                    68.dp(ctx),
+                    68.dp(ctx)
                 ).apply {
                     gravity = Gravity.START or Gravity.CENTER_VERTICAL
                     leftMargin = 12.dp(ctx)
                 }
             }
 
+            val infoContainer = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+
+                layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                ).apply {
+                    leftMargin = 90.dp(ctx)
+                    rightMargin = 126.dp(ctx)
+                }
+            }
+
             val name = TextView(ctx).apply {
-                textSize = 17f
+                textSize = 15.5f
                 setTextColor(Color.WHITE)
                 maxLines = 1
                 ellipsize = TextUtils.TruncateAt.END
-                gravity = Gravity.CENTER_VERTICAL
+                gravity = Gravity.START
                 layoutDirection = View.LAYOUT_DIRECTION_LTR
-
-                layoutParams = FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    27.dp(ctx)
-                ).apply {
-                    leftMargin = 98.dp(ctx)
-                    rightMargin = 118.dp(ctx)
-                    topMargin = 11.dp(ctx)
-                }
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
             }
 
-            val description = TextView(ctx).apply {
-                textSize = 12f
-                setTextColor(Color.rgb(155, 163, 185))
-                maxLines = 1
-                ellipsize = TextUtils.TruncateAt.END
-                gravity = Gravity.CENTER_VERTICAL
-                layoutDirection = View.LAYOUT_DIRECTION_RTL
-
-                layoutParams = FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    22.dp(ctx)
-                ).apply {
-                    leftMargin = 98.dp(ctx)
-                    rightMargin = 118.dp(ctx)
-                    topMargin = 39.dp(ctx)
-                }
-            }
-
-            val votes = TextView(ctx).apply {
-                textSize = 13f
-                setTextColor(Color.rgb(225, 228, 240))
-                gravity = Gravity.CENTER_VERTICAL
+            val tagsContainer = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
                 layoutDirection = View.LAYOUT_DIRECTION_LTR
+                setPadding(0, 4.dp(ctx), 0, 4.dp(ctx))
+            }
+
+            val ratingText = TextView(ctx).apply {
+                textSize = 12.5f
+                setTextColor(Color.parseColor("#94A3B8"))
+                gravity = Gravity.START
+                layoutDirection = View.LAYOUT_DIRECTION_LTR
+            }
+
+            infoContainer.addView(name)
+            infoContainer.addView(tagsContainer)
+            infoContainer.addView(ratingText)
+
+            val actionsContainer = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
 
                 layoutParams = FrameLayout.LayoutParams(
-                    170.dp(ctx),
-                    22.dp(ctx)
+                    116.dp(ctx),
+                    FrameLayout.LayoutParams.MATCH_PARENT
                 ).apply {
-                    leftMargin = 98.dp(ctx)
-                    topMargin = 66.dp(ctx)
+                    gravity = Gravity.END or Gravity.CENTER_VERTICAL
+                    rightMargin = 8.dp(ctx)
                 }
             }
 
-            val dislike = TextView(ctx).apply {
+            val likeBtn = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                background = roundedStrokeBackground(
+                    Color.parseColor("#09241B"),
+                    Color.parseColor("#10B981"),
+                    1.2.dp(ctx),
+                    16f
+                )
+
+                layoutParams = LinearLayout.LayoutParams(
+                    52.dp(ctx),
+                    68.dp(ctx)
+                ).apply {
+                    rightMargin = 6.dp(ctx)
+                }
+            }
+
+            val likeIcon = TextView(ctx).apply {
+                text = "👍"
+                textSize = 16f
+                gravity = Gravity.CENTER
+            }
+
+            val likeCount = TextView(ctx).apply {
+                textSize = 12.5f
+                setTextColor(Color.WHITE)
+                gravity = Gravity.CENTER
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+            }
+
+            likeBtn.addView(likeIcon)
+            likeBtn.addView(likeCount)
+
+            val dislikeBtn = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                background = roundedStrokeBackground(
+                    Color.parseColor("#290C13"),
+                    Color.parseColor("#EF4444"),
+                    1.2.dp(ctx),
+                    16f
+                )
+
+                layoutParams = LinearLayout.LayoutParams(
+                    52.dp(ctx),
+                    68.dp(ctx)
+                )
+            }
+
+            val dislikeIcon = TextView(ctx).apply {
                 text = "👎"
-                textSize = 18f
+                textSize = 16f
                 gravity = Gravity.CENTER
-
-                background = roundedBackground(
-                    Color.rgb(28, 35, 55),
-                    16f
-                )
-
-                layoutParams = FrameLayout.LayoutParams(
-                    46.dp(ctx),
-                    46.dp(ctx)
-                ).apply {
-                    gravity = Gravity.END or Gravity.CENTER_VERTICAL
-                    rightMargin = 64.dp(ctx)
-                }
             }
 
-            val heart = TextView(ctx).apply {
-                text = "♡"
-                textSize = 28f
+            val dislikeCount = TextView(ctx).apply {
+                textSize = 12.5f
+                setTextColor(Color.WHITE)
                 gravity = Gravity.CENTER
-                setTextColor(Color.rgb(205, 212, 235))
-
-                background = roundedBackground(
-                    Color.rgb(28, 35, 55),
-                    16f
-                )
-
-                layoutParams = FrameLayout.LayoutParams(
-                    46.dp(ctx),
-                    46.dp(ctx)
-                ).apply {
-                    gravity = Gravity.END or Gravity.CENTER_VERTICAL
-                    rightMargin = 12.dp(ctx)
-                }
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
             }
+
+            dislikeBtn.addView(dislikeIcon)
+            dislikeBtn.addView(dislikeCount)
+
+            actionsContainer.addView(likeBtn)
+            actionsContainer.addView(dislikeBtn)
 
             card.addView(icon)
-            card.addView(name)
-            card.addView(description)
-            card.addView(votes)
-            card.addView(dislike)
-            card.addView(heart)
+            card.addView(infoContainer)
+            card.addView(actionsContainer)
 
             return ViewHolder(
                 card,
                 icon,
                 name,
-                description,
-                votes,
-                dislike,
-                heart
+                tagsContainer,
+                ratingText,
+                likeBtn,
+                likeCount,
+                dislikeBtn,
+                dislikeCount
             )
         }
 
@@ -517,11 +525,40 @@ object RatingSettings {
             holder: ViewHolder,
             position: Int
         ) {
+            val ctx = holder.itemView.context
             val item = items[position]
 
             holder.name.text = item.name
-            holder.description.text = item.description
-            holder.votes.text = "👍 ${item.likes}   •   👎 ${item.dislikes}"
+
+            val total = item.likes + item.dislikes
+            val score = if (total == 0) {
+                "5.0"
+            } else {
+                val calculated = 1.0 + ((item.likes.toDouble() / total) * 4.0)
+                String.format(Locale.US, "%.1f", calculated)
+            }
+            holder.ratingText.text = "⭐ $score  ($total صوت)"
+
+            holder.tagsContainer.removeAllViews()
+            item.tags.take(3).forEach { tag ->
+                val tagView = TextView(ctx).apply {
+                    text = tag
+                    textSize = 10.5f
+                    setTextColor(Color.parseColor("#93C5FD"))
+                    background = roundedBackground(Color.parseColor("#16233B"), 8f)
+                    setPadding(7.dp(ctx), 2.dp(ctx), 7.dp(ctx), 2.dp(ctx))
+                    layoutParams = LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                    ).apply {
+                        rightMargin = 5.dp(ctx)
+                    }
+                }
+                holder.tagsContainer.addView(tagView)
+            }
+
+            holder.likeCount.text = item.likes.toString()
+            holder.dislikeCount.text = item.dislikes.toString()
 
             holder.icon.setImageDrawable(null)
             holder.icon.tag = item.icon
@@ -554,87 +591,79 @@ object RatingSettings {
                 }
             }
 
-            val prefs = holder.itemView.context.getSharedPreferences(
-                PREFS,
-                Context.MODE_PRIVATE
-            )
-
+            val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             val baseKey = getBaseHash(item.url)
             val userVote = prefs.getString("user_voted_$baseKey", "none")
 
-            updateButtonsState(holder.heart, holder.dislike, userVote)
+            updateButtonsVisual(ctx, holder.likeBtn, holder.dislikeBtn, userVote)
 
-            holder.heart.setOnClickListener {
+            holder.card.addTouchScaleEffect()
+
+            holder.likeBtn.addTouchScaleEffect {
                 if (prefs.getString("user_voted_$baseKey", "none") != "none") {
-                    Toast.makeText(
-                        holder.itemView.context,
-                        "لقد قمت بالتصويت مسبقاً",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                    return@setOnClickListener
+                    Toast.makeText(ctx, "لقد قمت بالتصويت مسبقاً", Toast.LENGTH_SHORT).show()
+                    return@addTouchScaleEffect
                 }
 
-                holder.heart.isEnabled = false
-                holder.dislike.isEnabled = false
+                holder.likeBtn.isEnabled = false
+                holder.dislikeBtn.isEnabled = false
 
                 CoroutineScope(Dispatchers.IO).launch {
                     val success = RatingSettings.incrementVote(item.url, "like")
 
                     withContext(Dispatchers.Main) {
-                        holder.heart.isEnabled = true
-                        holder.dislike.isEnabled = true
+                        holder.likeBtn.isEnabled = true
+                        holder.dislikeBtn.isEnabled = true
 
                         if (success) {
                             prefs.edit().putString("user_voted_$baseKey", "like").apply()
                             item.likes += 1
-                            holder.votes.text = "👍 ${item.likes}   •   👎 ${item.dislikes}"
-                            updateButtonsState(holder.heart, holder.dislike, "like")
+                            holder.likeCount.text = item.likes.toString()
+
+                            val updatedTotal = item.likes + item.dislikes
+                            val updatedScore = String.format(Locale.US, "%.1f", 1.0 + ((item.likes.toDouble() / updatedTotal) * 4.0))
+                            holder.ratingText.text = "⭐ $updatedScore  ($updatedTotal صوت)"
+
+                            updateButtonsVisual(ctx, holder.likeBtn, holder.dislikeBtn, "like")
                         } else {
-                            Toast.makeText(
-                                holder.itemView.context,
-                                "تعذر تسجيل الإعجاب",
-                                Toast.LENGTH_SHORT
-                            ).show()
+                            Toast.makeText(ctx, "تعذر تسجيل الإعجاب", Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
             }
 
-            holder.dislike.setOnClickListener {
+            holder.dislikeBtn.addTouchScaleEffect {
                 if (prefs.getString("user_voted_$baseKey", "none") != "none") {
-                    Toast.makeText(
-                        holder.itemView.context,
-                        "لقد قمت بالتصويت مسبقاً",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                    return@setOnClickListener
+                    Toast.makeText(ctx, "لقد قمت بالتصويت مسبقاً", Toast.LENGTH_SHORT).show()
+                    return@addTouchScaleEffect
                 }
 
-                AlertDialog.Builder(holder.itemView.context)
+                AlertDialog.Builder(ctx)
                     .setTitle("تأكيد التصويت")
                     .setMessage("هل أنت متأكد أنك تريد تسجيل عدم الإعجاب بالإضافة؟")
                     .setPositiveButton("نعم") { _, _ ->
-                        holder.heart.isEnabled = false
-                        holder.dislike.isEnabled = false
+                        holder.likeBtn.isEnabled = false
+                        holder.dislikeBtn.isEnabled = false
 
                         CoroutineScope(Dispatchers.IO).launch {
                             val success = RatingSettings.incrementVote(item.url, "dislike")
 
                             withContext(Dispatchers.Main) {
-                                holder.heart.isEnabled = true
-                                holder.dislike.isEnabled = true
+                                holder.likeBtn.isEnabled = true
+                                holder.dislikeBtn.isEnabled = true
 
                                 if (success) {
                                     prefs.edit().putString("user_voted_$baseKey", "dislike").apply()
                                     item.dislikes += 1
-                                    holder.votes.text = "👍 ${item.likes}   •   👎 ${item.dislikes}"
-                                    updateButtonsState(holder.heart, holder.dislike, "dislike")
+                                    holder.dislikeCount.text = item.dislikes.toString()
+
+                                    val updatedTotal = item.likes + item.dislikes
+                                    val updatedScore = String.format(Locale.US, "%.1f", 1.0 + ((item.likes.toDouble() / updatedTotal) * 4.0))
+                                    holder.ratingText.text = "⭐ $updatedScore  ($updatedTotal صوت)"
+
+                                    updateButtonsVisual(ctx, holder.likeBtn, holder.dislikeBtn, "dislike")
                                 } else {
-                                    Toast.makeText(
-                                        holder.itemView.context,
-                                        "تعذر تسجيل عدم الإعجاب",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
+                                    Toast.makeText(ctx, "تعذر تسجيل عدم الإعجاب", Toast.LENGTH_SHORT).show()
                                 }
                             }
                         }
@@ -659,36 +688,75 @@ object RatingSettings {
         }
     }
 
-    private fun updateButtonsState(
-        heart: TextView,
-        dislike: TextView,
+    private fun updateButtonsVisual(
+        ctx: Context,
+        likeBtn: LinearLayout,
+        dislikeBtn: LinearLayout,
         voteType: String?
     ) {
         when (voteType) {
             "like" -> {
-                heart.text = "♥"
-                heart.setTextColor(Color.rgb(255, 75, 105))
-                heart.background = roundedBackground(Color.rgb(55, 28, 45), 16f)
-
-                dislike.text = "👎"
-                dislike.background = roundedBackground(Color.rgb(28, 35, 55), 16f)
+                likeBtn.background = roundedStrokeBackground(
+                    Color.parseColor("#054734"),
+                    Color.parseColor("#34D399"),
+                    2.dp(ctx),
+                    16f
+                )
+                dislikeBtn.background = roundedStrokeBackground(
+                    Color.parseColor("#1C0D13"),
+                    Color.parseColor("#5A212D"),
+                    1.dp(ctx),
+                    16f
+                )
             }
             "dislike" -> {
-                heart.text = "♡"
-                heart.setTextColor(Color.rgb(205, 212, 235))
-                heart.background = roundedBackground(Color.rgb(28, 35, 55), 16f)
-
-                dislike.text = "💔"
-                dislike.background = roundedBackground(Color.rgb(55, 28, 45), 16f)
+                likeBtn.background = roundedStrokeBackground(
+                    Color.parseColor("#081A15"),
+                    Color.parseColor("#1B4538"),
+                    1.dp(ctx),
+                    16f
+                )
+                dislikeBtn.background = roundedStrokeBackground(
+                    Color.parseColor("#4D121D"),
+                    Color.parseColor("#F87171"),
+                    2.dp(ctx),
+                    16f
+                )
             }
             else -> {
-                heart.text = "♡"
-                heart.setTextColor(Color.rgb(205, 212, 235))
-                heart.background = roundedBackground(Color.rgb(28, 35, 55), 16f)
-
-                dislike.text = "👎"
-                dislike.background = roundedBackground(Color.rgb(28, 35, 55), 16f)
+                likeBtn.background = roundedStrokeBackground(
+                    Color.parseColor("#09241B"),
+                    Color.parseColor("#10B981"),
+                    1.2.dp(ctx),
+                    16f
+                )
+                dislikeBtn.background = roundedStrokeBackground(
+                    Color.parseColor("#290C13"),
+                    Color.parseColor("#EF4444"),
+                    1.2.dp(ctx),
+                    16f
+                )
             }
+        }
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun View.addTouchScaleEffect(onClick: (() -> Unit)? = null) {
+        setOnTouchListener { v, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    v.animate().scaleX(0.93f).scaleY(0.93f).setDuration(90).start()
+                }
+                MotionEvent.ACTION_UP -> {
+                    v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(100).withEndAction {
+                        onClick?.invoke()
+                    }.start()
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(90).start()
+                }
+            }
+            true
         }
     }
 
@@ -712,8 +780,21 @@ object RatingSettings {
         }
     }
 
-    private fun Int.dp(context: Context?): Int {
-        val safeContext = context ?: return this
-        return (this * safeContext.resources.displayMetrics.density).toInt()
+    private fun roundedStrokeBackground(
+        color: Int,
+        strokeColor: Int,
+        strokeWidth: Int,
+        radius: Float
+    ): GradientDrawable {
+        return GradientDrawable().apply {
+            setColor(color)
+            setStroke(strokeWidth, strokeColor)
+            cornerRadius = radius
+        }
+    }
+
+    private fun Number.dp(context: Context?): Int {
+        val safeContext = context ?: return this.toInt()
+        return (this.toFloat() * safeContext.resources.displayMetrics.density).toInt()
     }
 }
