@@ -1,6 +1,6 @@
 package com.eshk
 
-import android.content.Context
+import android.content.Contex
 import androidx.appcompat.app.AppCompatActivity
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
