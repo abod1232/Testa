@@ -160,40 +160,6 @@ class eishk : MainAPI() {
             0
         }
     }
-
-    /**
-     * عند البحث
-     *
-     * لا نحتاج بحث في هذه الإضافة،
-     * لذلك نرجع القائمة نفسها.
-     */
-    override suspend fun search(
-        query: String,
-        page: Int
-    ): SearchResponseList {
-
-        return newSearchResponseList(
-            emptyList(),
-            hasNext = false
-        )
-    }
-
-    /**
-     * لا يوجد تشغيل فيديو.
-     */
-    override suspend fun loadLinks(
-        data: String,
-        isCasting: Boolean,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean {
-
-        return false
-    }
-
-    /**
-     * بيانات الإضافة من plugins.json
-     */
     data class PluginInfo(
 
         @JsonProperty("url")
