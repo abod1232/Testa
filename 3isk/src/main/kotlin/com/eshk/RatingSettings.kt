@@ -2,6 +2,7 @@ package com.eshk
 
 import android.app.Dialog
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
@@ -23,11 +24,15 @@ import androidx.recyclerview.widget.RecyclerView
 import com.lagradost.cloudstream3.app
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
 
 object RatingSettings {
 
@@ -40,96 +45,13 @@ object RatingSettings {
     private const val PREFS =
         "extension_ratings"
 
+    private val imageCache = ConcurrentHashMap<String, Bitmap>()
+
     fun show(fragmentManager: FragmentManager) {
-        SettingsDialog().show(
+        RatingListDialog().show(
             fragmentManager,
-            "rating_settings"
+            "rating_list"
         )
-    }
-
-    class SettingsDialog : DialogFragment() {
-
-        override fun onCreateDialog(
-            savedInstanceState: Bundle?
-        ): Dialog {
-
-            val dialog = Dialog(requireContext())
-
-            val root = LinearLayout(requireContext()).apply {
-                orientation = LinearLayout.VERTICAL
-
-                setPadding(
-                    32.dp(context),
-                    32.dp(context),
-                    32.dp(context),
-                    32.dp(context)
-                )
-
-                setBackgroundColor(
-                    Color.rgb(8, 13, 25)
-                )
-            }
-
-            val title = TextView(requireContext()).apply {
-                text = "⚙️ إعدادات"
-                textSize = 23f
-                setTextColor(Color.WHITE)
-
-                setPadding(
-                    0,
-                    0,
-                    0,
-                    25.dp(context)
-                )
-            }
-
-            val ratings = TextView(requireContext()).apply {
-                text = "⭐  التقييمات"
-                textSize = 18f
-                setTextColor(Color.WHITE)
-
-                gravity = Gravity.CENTER_VERTICAL
-
-                setPadding(
-                    20.dp(context),
-                    22.dp(context),
-                    20.dp(context),
-                    22.dp(context)
-                )
-
-                background = roundedBackground(
-                    Color.rgb(20, 28, 46),
-                    20f
-                )
-
-                setOnClickListener {
-                    RatingListDialog().show(
-                        parentFragmentManager,
-                        "rating_list"
-                    )
-                }
-            }
-
-            root.addView(title)
-            root.addView(
-                ratings,
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-            )
-
-            dialog.setContentView(root)
-
-            dialog.window?.setBackgroundDrawable(
-                roundedBackground(
-                    Color.rgb(8, 13, 25),
-                    28f
-                )
-            )
-
-            return dialog
-        }
     }
 
     class RatingListDialog : DialogFragment() {
@@ -311,40 +233,43 @@ object RatingSettings {
                 try {
                     val response = app.get(PLUGINS_URL)
                     val array = JSONArray(response.text)
-                    val plugins = mutableListOf<PluginRating>()
+                    val rawList = mutableListOf<JSONObject>()
 
                     for (i in 0 until array.length()) {
-                        val obj = array.getJSONObject(i)
-                        val name = obj.optString("name")
-                        val url = obj.optString("url")
+                        rawList.add(array.getJSONObject(i))
+                    }
 
-                        val icon = when {
-                            obj.optString("iconUrl").isNotBlank() -> obj.optString("iconUrl")
-                            obj.optString("icon").isNotBlank() -> obj.optString("icon")
-                            else -> ""
-                        }
+                    val plugins = coroutineScope {
+                        rawList.map { obj ->
+                            async(Dispatchers.IO) {
+                                val name = obj.optString("name")
+                                val url = obj.optString("url")
 
-                        val description = when {
-                            obj.optString("description").isNotBlank() -> obj.optString("description")
-                            obj.optString("type").isNotBlank() -> obj.optString("type")
-                            else -> "إضافة Cloudstream"
-                        }
+                                if (name.isBlank() || url.isBlank()) return@async null
 
-                        if (name.isBlank() || url.isBlank()) {
-                            continue
-                        }
+                                val icon = when {
+                                    obj.optString("iconUrl").isNotBlank() -> obj.optString("iconUrl")
+                                    obj.optString("icon").isNotBlank() -> obj.optString("icon")
+                                    else -> ""
+                                }
 
-                        val votes = getVotes(url)
+                                val description = when {
+                                    obj.optString("description").isNotBlank() -> obj.optString("description")
+                                    obj.optString("type").isNotBlank() -> obj.optString("type")
+                                    else -> "إضافة Cloudstream"
+                                }
 
-                        plugins.add(
-                            PluginRating(
-                                name = name,
-                                url = url,
-                                icon = icon,
-                                description = description,
-                                votes = votes
-                            )
-                        )
+                                val votes = getVotes(url)
+
+                                PluginRating(
+                                    name = name,
+                                    url = url,
+                                    icon = icon,
+                                    description = description,
+                                    votes = votes
+                                )
+                            }
+                        }.awaitAll().filterNotNull()
                     }
 
                     originalList = plugins
@@ -546,21 +471,29 @@ object RatingSettings {
             holder.icon.tag = item.icon
 
             if (item.icon.isNotBlank()) {
-                CoroutineScope(Dispatchers.IO).launch {
-                    try {
-                        val response = app.get(item.icon)
-                        val body = response.body
-                        val bytes = body.bytes()
-                        body.close()
+                val cached = imageCache[item.icon]
+                if (cached != null) {
+                    holder.icon.setImageBitmap(cached)
+                } else {
+                    CoroutineScope(Dispatchers.IO).launch {
+                        try {
+                            val response = app.get(item.icon)
+                            val body = response.body
+                            val bytes = body.bytes()
+                            body.close()
 
-                        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
 
-                        withContext(Dispatchers.Main) {
-                            if (holder.icon.tag == item.icon && bitmap != null) {
-                                holder.icon.setImageBitmap(bitmap)
+                            if (bitmap != null) {
+                                imageCache[item.icon] = bitmap
+                                withContext(Dispatchers.Main) {
+                                    if (holder.icon.tag == item.icon) {
+                                        holder.icon.setImageBitmap(bitmap)
+                                    }
+                                }
                             }
+                        } catch (e: Exception) {
                         }
-                    } catch (e: Exception) {
                     }
                 }
             }
