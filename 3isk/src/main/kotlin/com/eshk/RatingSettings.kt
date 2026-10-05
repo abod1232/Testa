@@ -38,7 +38,7 @@ import java.util.concurrent.ConcurrentHashMap
 object RatingSettings {
 
     private const val PLUGINS_URL =
-        "https://github.com/abod1232/Testa/raw/refs/heads/builds/CS.json"
+        "https://raw.githubusercontent.com/abod1232/Testa/refs/heads/builds/plugins.json"
 
     private const val COUNTER_API =
         "https://counterapi.com/api"
