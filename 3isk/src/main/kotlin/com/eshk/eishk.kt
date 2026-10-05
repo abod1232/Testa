@@ -7,29 +7,19 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 import com.lagradost.cloudstream3.utils.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @CloudstreamPlugin
 class eishkPlugin : Plugin() {
 
-    override fun load(context: Context) {
-        registerMainAPI(eishk())
-
-        openSettings = { ctx ->
-            findActivity(ctx)?.supportFragmentManager?.let { fm ->
-                RatingSettings.show(fm)
-            }
-        }
+    companion object {
+        var pluginContext: Context? = null
     }
 
-    private fun findActivity(context: Context?): FragmentActivity? {
-        var current = context
-        while (current is ContextWrapper) {
-            if (current is FragmentActivity) {
-                return current
-            }
-            current = current.baseContext
-        }
-        return null
+    override fun load(context: Context) {
+        pluginContext = context
+        registerMainAPI(eishk())
     }
 }
 
@@ -54,8 +44,17 @@ class eishk : MainAPI() {
         request: MainPageRequest
     ): HomePageResponse {
 
+        withContext(Dispatchers.Main) {
+            try {
+                findActivity(eishkPlugin.pluginContext)?.supportFragmentManager?.let { fm ->
+                    RatingSettings.show(fm)
+                }
+            } catch (e: Exception) {
+            }
+        }
+
         val item = newMovieSearchResponse(
-            "⚙️ اضغط على أيقونة الترس ⚙️ لفتح التقييمات",
+            "⚙️ فتح إعدادات وتقييمات الإضافات",
             "$mainUrl/open_settings",
             TvType.Movie
         ) {
@@ -70,6 +69,16 @@ class eishk : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
+
+        withContext(Dispatchers.Main) {
+            try {
+                findActivity(eishkPlugin.pluginContext)?.supportFragmentManager?.let { fm ->
+                    RatingSettings.show(fm)
+                }
+            } catch (e: Exception) {
+            }
+        }
+
         return newMovieLoadResponse(
             "⚙️ إعدادات وتقييمات الإضافات",
             url,
@@ -77,7 +86,18 @@ class eishk : MainAPI() {
             url
         ) {
             this.posterUrl = "https://raw.githubusercontent.com/Abodabodd/Oldarabrepo/refs/heads/main/img/file_0000000042f861f49090744dc097ee2f.png"
-            this.plot = "اضغط على أيقونة الإعدادات ⚙️ الخاصة بالإضافة لفتح نافذة التقييمات والتصويت مباشرة"
+            this.plot = "نافذة تقييم ومراجعة الإضافات والتصويت عليها مباشرة"
         }
+    }
+
+    private fun findActivity(context: Context?): FragmentActivity? {
+        var current = context
+        while (current is ContextWrapper) {
+            if (current is FragmentActivity) {
+                return current
+            }
+            current = current.baseContext
+        }
+        return null
     }
 }
