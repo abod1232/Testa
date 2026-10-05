@@ -9,25 +9,25 @@ import com.lagradost.cloudstream3.plugins.Plugin
 import com.lagradost.cloudstream3.utils.*
 
 @CloudstreamPlugin
-class EishkPlugin : Plugin() {
+class eishkPlugin : Plugin() {
 
     override fun load(context: Context) {
         registerMainAPI(eishk())
 
         openSettings = { ctx ->
-            ctx.findFragmentActivity()?.supportFragmentManager?.let { fm ->
+            findActivity(ctx)?.supportFragmentManager?.let { fm ->
                 RatingSettings.show(fm)
             }
         }
     }
 
-    private fun Context.findFragmentActivity(): FragmentActivity? {
-        var currentContext: Context? = this
-        while (currentContext is ContextWrapper) {
-            if (currentContext is FragmentActivity) {
-                return currentContext
+    private fun findActivity(context: Context?): FragmentActivity? {
+        var current = context
+        while (current is ContextWrapper) {
+            if (current is FragmentActivity) {
+                return current
             }
-            currentContext = currentContext.baseContext
+            current = current.baseContext
         }
         return null
     }
@@ -55,7 +55,7 @@ class eishk : MainAPI() {
     ): HomePageResponse {
 
         val item = newMovieSearchResponse(
-            "⚙️ اضغط على أيقونة الترس ⚙️ في قائمة الإضافات لفتح التقييمات",
+            "⚙️ اضغط على أيقونة الترس ⚙️ لفتح التقييمات",
             "$mainUrl/open_settings",
             TvType.Movie
         ) {
@@ -77,7 +77,7 @@ class eishk : MainAPI() {
             url
         ) {
             this.posterUrl = "https://raw.githubusercontent.com/Abodabodd/Oldarabrepo/refs/heads/main/img/file_0000000042f861f49090744dc097ee2f.png"
-            this.plot = "اضغط على أيقونة الإعدادات ⚙️ الخاصة بهذه الإضافة لفتح نافذة التقييمات والتصويت مباشرة"
+            this.plot = "اضغط على أيقونة الإعدادات ⚙️ الخاصة بالإضافة لفتح نافذة التقييمات والتصويت مباشرة"
         }
     }
 }
