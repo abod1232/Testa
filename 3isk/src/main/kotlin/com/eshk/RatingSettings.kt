@@ -88,8 +88,7 @@ object RatingSettings {
                 textSize = 18f
                 setTextColor(Color.WHITE)
 
-                gravity =
-                    Gravity.CENTER_VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
 
                 setPadding(
                     20.dp(context),
@@ -98,14 +97,12 @@ object RatingSettings {
                     22.dp(context)
                 )
 
-                background =
-                    roundedBackground(
-                        Color.rgb(20, 28, 46),
-                        20f
-                    )
+                background = roundedBackground(
+                    Color.rgb(20, 28, 46),
+                    20f
+                )
 
                 setOnClickListener {
-
                     RatingListDialog().show(
                         parentFragmentManager,
                         "rating_list"
@@ -114,7 +111,6 @@ object RatingSettings {
             }
 
             root.addView(title)
-
             root.addView(
                 ratings,
                 LinearLayout.LayoutParams(
@@ -138,122 +134,123 @@ object RatingSettings {
 
     class RatingListDialog : DialogFragment() {
 
+        private var originalList: List<PluginRating> = emptyList()
+        private var isSortedByLikes = false
+        private var adapter: RatingAdapter? = null
+
         override fun onCreateDialog(
             savedInstanceState: Bundle?
         ): Dialog {
 
-            val dialog =
-                Dialog(requireContext())
+            val dialog = Dialog(requireContext())
 
-            val root =
-                LinearLayout(requireContext()).apply {
+            val root = LinearLayout(requireContext()).apply {
+                orientation = LinearLayout.VERTICAL
 
-                    orientation =
-                        LinearLayout.VERTICAL
+                setPadding(
+                    14.dp(context),
+                    15.dp(context),
+                    14.dp(context),
+                    10.dp(context)
+                )
 
-                    setPadding(
-                        14.dp(context),
-                        15.dp(context),
-                        14.dp(context),
-                        10.dp(context)
-                    )
+                setBackgroundColor(
+                    Color.rgb(7, 12, 24)
+                )
+            }
 
-                    setBackgroundColor(
-                        Color.rgb(
-                            7,
-                            12,
-                            24
-                        )
-                    )
+            val header = FrameLayout(requireContext()).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    65.dp(context)
+                )
+            }
+
+            val title = TextView(requireContext()).apply {
+                text = "⭐ تقييمات الإضافات"
+                textSize = 20f
+                setTextColor(Color.WHITE)
+                gravity = Gravity.CENTER
+
+                layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+            }
+
+            val close = TextView(requireContext()).apply {
+                text = "×"
+                textSize = 42f
+                setTextColor(Color.rgb(190, 198, 220))
+                gravity = Gravity.CENTER
+
+                layoutParams = FrameLayout.LayoutParams(
+                    55.dp(context),
+                    55.dp(context)
+                ).apply {
+                    gravity = Gravity.START or Gravity.CENTER_VERTICAL
                 }
 
-            val header =
-                FrameLayout(requireContext()).apply {
+                setOnClickListener {
+                    dismiss()
+                }
+            }
 
-                    layoutParams =
-                        LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            65.dp(context)
-                        )
+            val sortBtn = TextView(requireContext()).apply {
+                text = "🔥 الأكثر إعجاباً"
+                textSize = 12f
+                setTextColor(Color.rgb(205, 215, 240))
+                gravity = Gravity.CENTER
+
+                background = roundedBackground(
+                    Color.rgb(24, 34, 56),
+                    14f
+                )
+
+                setPadding(
+                    10.dp(context),
+                    6.dp(context),
+                    10.dp(context),
+                    6.dp(context)
+                )
+
+                layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    gravity = Gravity.END or Gravity.CENTER_VERTICAL
+                    rightMargin = 6.dp(context)
                 }
 
-            val title =
-                TextView(requireContext()).apply {
+                setOnClickListener {
+                    if (originalList.isEmpty()) return@setOnClickListener
 
-                    text =
-                        "⭐ تقييمات الإضافات"
-
-                    textSize =
-                        23f
-
-                    setTextColor(
-                        Color.WHITE
-                    )
-
-                    gravity =
-                        Gravity.CENTER
-
-                    layoutParams =
-                        FrameLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT
-                        )
-                }
-
-            val close =
-                TextView(requireContext()).apply {
-
-                    text =
-                        "×"
-
-                    textSize =
-                        42f
-
-                    setTextColor(
-                        Color.rgb(
-                            190,
-                            198,
-                            220
-                        )
-                    )
-
-                    gravity =
-                        Gravity.CENTER
-
-                    layoutParams =
-                        FrameLayout.LayoutParams(
-                            55.dp(context),
-                            55.dp(context)
-                        ).apply {
-
-                            gravity =
-                                Gravity.START or
-                                    Gravity.CENTER_VERTICAL
-                        }
-
-                    setOnClickListener {
-                        dismiss()
+                    isSortedByLikes = !isSortedByLikes
+                    if (isSortedByLikes) {
+                        text = "📋 الافتراضي"
+                        val sorted = originalList.sortedByDescending { it.votes }
+                        adapter?.updateData(sorted)
+                    } else {
+                        text = "🔥 الأكثر إعجاباً"
+                        adapter?.updateData(originalList)
                     }
                 }
+            }
 
-            header.addView(title)
             header.addView(close)
+            header.addView(title)
+            header.addView(sortBtn)
 
             root.addView(header)
 
-            val progress =
-                ProgressBar(
-                    requireContext(),
-                    null,
-                    android.R.attr.progressBarStyleHorizontal
-                ).apply {
-
-                    isIndeterminate =
-                        true
-
-                    visibility =
-                        View.VISIBLE
-                }
+            val progress = ProgressBar(
+                requireContext(),
+                null,
+                android.R.attr.progressBarStyleHorizontal
+            ).apply {
+                isIndeterminate = true
+                visibility = View.VISIBLE
+            }
 
             root.addView(
                 progress,
@@ -263,29 +260,18 @@ object RatingSettings {
                 )
             )
 
-            val recycler =
-                RecyclerView(
-                    requireContext()
-                ).apply {
+            val recycler = RecyclerView(requireContext()).apply {
+                layoutManager = LinearLayoutManager(requireContext())
+                overScrollMode = View.OVER_SCROLL_NEVER
+                clipToPadding = false
 
-                    layoutManager =
-                        LinearLayoutManager(
-                            requireContext()
-                        )
-
-                    overScrollMode =
-                        View.OVER_SCROLL_NEVER
-
-                    clipToPadding =
-                        false
-
-                    setPadding(
-                        0,
-                        8.dp(context),
-                        0,
-                        20.dp(context)
-                    )
-                }
+                setPadding(
+                    0,
+                    8.dp(context),
+                    0,
+                    20.dp(context)
+                )
+            }
 
             root.addView(
                 recycler,
@@ -300,27 +286,19 @@ object RatingSettings {
 
             dialog.window?.setBackgroundDrawable(
                 roundedBackground(
-                    Color.rgb(
-                        7,
-                        12,
-                        24
-                    ),
+                    Color.rgb(7, 12, 24),
                     28f
                 )
             )
 
             dialog.setOnShowListener {
-
                 dialog.window?.setLayout(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
             }
 
-            loadRatings(
-                recycler,
-                progress
-            )
+            loadRatings(recycler, progress)
 
             return dialog
         }
@@ -329,142 +307,57 @@ object RatingSettings {
             recycler: RecyclerView,
             progress: ProgressBar
         ) {
-
-            CoroutineScope(
-                Dispatchers.IO
-            ).launch {
-
+            CoroutineScope(Dispatchers.IO).launch {
                 try {
+                    val response = app.get(PLUGINS_URL)
+                    val array = JSONArray(response.text)
+                    val plugins = mutableListOf<PluginRating>()
 
-                    val response =
-                        app.get(
-                            PLUGINS_URL
-                        )
+                    for (i in 0 until array.length()) {
+                        val obj = array.getJSONObject(i)
+                        val name = obj.optString("name")
+                        val url = obj.optString("url")
 
-                    val array =
-                        JSONArray(
-                            response.text
-                        )
+                        val icon = when {
+                            obj.optString("iconUrl").isNotBlank() -> obj.optString("iconUrl")
+                            obj.optString("icon").isNotBlank() -> obj.optString("icon")
+                            else -> ""
+                        }
 
-                    val plugins =
-                        mutableListOf<PluginRating>()
+                        val description = when {
+                            obj.optString("description").isNotBlank() -> obj.optString("description")
+                            obj.optString("type").isNotBlank() -> obj.optString("type")
+                            else -> "إضافة Cloudstream"
+                        }
 
-                    for (
-                        i in 0 until array.length()
-                    ) {
-
-                        val obj =
-                            array.getJSONObject(i)
-
-                        val name =
-                            obj.optString(
-                                "name"
-                            )
-
-                        val url =
-                            obj.optString(
-                                "url"
-                            )
-
-                        val icon =
-                            when {
-
-                                obj.optString(
-                                    "iconUrl"
-                                ).isNotBlank() ->
-                                    obj.optString(
-                                        "iconUrl"
-                                    )
-
-                                obj.optString(
-                                    "icon"
-                                ).isNotBlank() ->
-                                    obj.optString(
-                                        "icon"
-                                    )
-
-                                else ->
-                                    ""
-                            }
-
-                        val description =
-                            when {
-
-                                obj.optString(
-                                    "description"
-                                ).isNotBlank() ->
-                                    obj.optString(
-                                        "description"
-                                    )
-
-                                obj.optString(
-                                    "type"
-                                ).isNotBlank() ->
-                                    obj.optString(
-                                        "type"
-                                    )
-
-                                else ->
-                                    "إضافة Cloudstream"
-                            }
-
-                        if (
-                            name.isBlank() ||
-                            url.isBlank()
-                        ) {
+                        if (name.isBlank() || url.isBlank()) {
                             continue
                         }
 
-                        val votes =
-                            getVotes(
-                                url
-                            )
+                        val votes = getVotes(url)
 
                         plugins.add(
                             PluginRating(
-                                name =
-                                    name,
-                                url =
-                                    url,
-                                icon =
-                                    icon,
-                                description =
-                                    description,
-                                votes =
-                                    votes
+                                name = name,
+                                url = url,
+                                icon = icon,
+                                description = description,
+                                votes = votes
                             )
                         )
                     }
 
-                    val sorted =
-                        plugins.sortedByDescending {
-                            it.votes
-                        }
+                    originalList = plugins
 
-                    withContext(
-                        Dispatchers.Main
-                    ) {
-
-                        progress.visibility =
-                            View.GONE
-
-                        recycler.adapter =
-                            RatingAdapter(
-                                sorted
-                            )
+                    withContext(Dispatchers.Main) {
+                        progress.visibility = View.GONE
+                        adapter = RatingAdapter(originalList.toMutableList())
+                        recycler.adapter = adapter
                     }
 
-                } catch (
-                    e: Exception
-                ) {
-
-                    withContext(
-                        Dispatchers.Main
-                    ) {
-
-                        progress.visibility =
-                            View.GONE
-
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        progress.visibility = View.GONE
                         Toast.makeText(
                             requireContext(),
                             "حدث خطأ أثناء تحميل التقييمات",
@@ -475,41 +368,14 @@ object RatingSettings {
             }
         }
 
-        private suspend fun getVotes(
-            pluginUrl: String
-        ): Int {
-
+        private suspend fun getVotes(pluginUrl: String): Int {
             return try {
-
-                val repository =
-                    getRepository(
-                        pluginUrl
-                    )
-
-                val key =
-                    transformUrl(
-                        pluginUrl
-                    )
-
-                val url =
-                    "$COUNTER_API/cs-$repository/vote/$key?readOnly=true"
-
-                val response =
-                    app.get(
-                        url
-                    )
-
-                JSONObject(
-                    response.text
-                ).optInt(
-                    "value",
-                    0
-                )
-
-            } catch (
-                e: Exception
-            ) {
-
+                val repository = getRepository(pluginUrl)
+                val key = transformUrl(pluginUrl)
+                val url = "$COUNTER_API/cs-$repository/vote/$key?readOnly=true"
+                val response = app.get(url)
+                JSONObject(response.text).optInt("value", 0)
+            } catch (e: Exception) {
                 0
             }
         }
@@ -520,12 +386,17 @@ object RatingSettings {
         val url: String,
         val icon: String,
         val description: String,
-        val votes: Int
+        var votes: Int
     )
 
     class RatingAdapter(
-        private val items: List<PluginRating>
+        private var items: List<PluginRating>
     ) : RecyclerView.Adapter<RatingAdapter.ViewHolder>() {
+
+        fun updateData(newItems: List<PluginRating>) {
+            items = newItems
+            notifyDataSetChanged()
+        }
 
         class ViewHolder(
             val card: FrameLayout,
@@ -533,362 +404,123 @@ object RatingSettings {
             val name: TextView,
             val description: TextView,
             val votes: TextView,
-            val rank: TextView,
             val heart: TextView
-        ) : RecyclerView.ViewHolder(
-            card
-        )
+        ) : RecyclerView.ViewHolder(card)
 
         override fun onCreateViewHolder(
             parent: ViewGroup,
             viewType: Int
         ): ViewHolder {
+            val ctx = parent.context
 
-            val ctx =
-                parent.context
+            val card = FrameLayout(ctx).apply {
+                layoutDirection = View.LAYOUT_DIRECTION_LTR
 
-            val card =
-                FrameLayout(ctx).apply {
+                background = roundedBackground(
+                    Color.rgb(15, 22, 38),
+                    23f
+                )
 
-                    /*
-                     * مهم جدًا:
-                     * نثبت اتجاه الكرت LTR
-                     * حتى لا تتخربط العناصر بسبب العربية.
-                     */
-                    layoutDirection =
-                        View.LAYOUT_DIRECTION_LTR
-
-                    background =
-                        roundedBackground(
-                            Color.rgb(
-                                15,
-                                22,
-                                38
-                            ),
-                            23f
-                        )
-
-                    layoutParams =
-                        RecyclerView.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            105.dp(ctx)
-                        ).apply {
-
-                            setMargins(
-                                0,
-                                5.dp(ctx),
-                                0,
-                                5.dp(ctx)
-                            )
-                        }
+                layoutParams = RecyclerView.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    105.dp(ctx)
+                ).apply {
+                    setMargins(0, 5.dp(ctx), 0, 5.dp(ctx))
                 }
+            }
 
-            val icon =
-                ImageView(ctx).apply {
+            val icon = ImageView(ctx).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                background = roundedBackground(
+                    Color.rgb(29, 36, 55),
+                    17f
+                )
 
-                    scaleType =
-                        ImageView.ScaleType.CENTER_CROP
-
-                    background =
-                        roundedBackground(
-                            Color.rgb(
-                                29,
-                                36,
-                                55
-                            ),
-                            17f
-                        )
-
-                    layoutParams =
-                        FrameLayout.LayoutParams(
-                            76.dp(ctx),
-                            76.dp(ctx)
-                        ).apply {
-
-                            gravity =
-                                Gravity.START or
-                                    Gravity.CENTER_VERTICAL
-
-                            leftMargin =
-                                12.dp(ctx)
-                        }
+                layoutParams = FrameLayout.LayoutParams(
+                    76.dp(ctx),
+                    76.dp(ctx)
+                ).apply {
+                    gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                    leftMargin = 12.dp(ctx)
                 }
+            }
 
-            val name =
-                TextView(ctx).apply {
+            val name = TextView(ctx).apply {
+                textSize = 17f
+                setTextColor(Color.WHITE)
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+                gravity = Gravity.CENTER_VERTICAL
+                layoutDirection = View.LAYOUT_DIRECTION_LTR
 
-                    textSize =
-                        17f
-
-                    setTextColor(
-                        Color.WHITE
-                    )
-
-                    maxLines =
-                        1
-
-                    ellipsize =
-                        TextUtils.TruncateAt.END
-
-                    gravity =
-                        Gravity.CENTER_VERTICAL
-
-                    layoutDirection =
-                        View.LAYOUT_DIRECTION_LTR
-
-                    layoutParams =
-                        FrameLayout.LayoutParams(
-                            0,
-                            27.dp(ctx)
-                        ).apply {
-
-                            leftMargin =
-                                101.dp(ctx)
-
-                            rightMargin =
-                                185.dp(ctx)
-
-                            topMargin =
-                                11.dp(ctx)
-                        }
+                layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    27.dp(ctx)
+                ).apply {
+                    leftMargin = 101.dp(ctx)
+                    rightMargin = 85.dp(ctx)
+                    topMargin = 11.dp(ctx)
                 }
+            }
 
-            val description =
-                TextView(ctx).apply {
+            val description = TextView(ctx).apply {
+                textSize = 12.5f
+                setTextColor(Color.rgb(155, 163, 185))
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+                gravity = Gravity.CENTER_VERTICAL
+                layoutDirection = View.LAYOUT_DIRECTION_LTR
 
-                    textSize =
-                        12.5f
-
-                    setTextColor(
-                        Color.rgb(
-                            155,
-                            163,
-                            185
-                        )
-                    )
-
-                    maxLines =
-                        1
-
-                    ellipsize =
-                        TextUtils.TruncateAt.END
-
-                    gravity =
-                        Gravity.CENTER_VERTICAL
-
-                    layoutDirection =
-                        View.LAYOUT_DIRECTION_LTR
-
-                    layoutParams =
-                        FrameLayout.LayoutParams(
-                            0,
-                            22.dp(ctx)
-                        ).apply {
-
-                            leftMargin =
-                                101.dp(ctx)
-
-                            rightMargin =
-                                185.dp(ctx)
-
-                            topMargin =
-                                39.dp(ctx)
-                        }
+                layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    22.dp(ctx)
+                ).apply {
+                    leftMargin = 101.dp(ctx)
+                    rightMargin = 85.dp(ctx)
+                    topMargin = 39.dp(ctx)
                 }
+            }
 
-            val votes =
-                TextView(ctx).apply {
+            val votes = TextView(ctx).apply {
+                textSize = 13f
+                setTextColor(Color.rgb(225, 228, 240))
+                gravity = Gravity.CENTER_VERTICAL
+                layoutDirection = View.LAYOUT_DIRECTION_LTR
 
-                    textSize =
-                        13f
-
-                    setTextColor(
-                        Color.rgb(
-                            225,
-                            228,
-                            240
-                        )
-                    )
-
-                    gravity =
-                        Gravity.CENTER_VERTICAL
-
-                    layoutDirection =
-                        View.LAYOUT_DIRECTION_LTR
-
-                    layoutParams =
-                        FrameLayout.LayoutParams(
-                            150.dp(ctx),
-                            22.dp(ctx)
-                        ).apply {
-
-                            leftMargin =
-                                101.dp(ctx)
-
-                            topMargin =
-                                66.dp(ctx)
-                        }
+                layoutParams = FrameLayout.LayoutParams(
+                    150.dp(ctx),
+                    22.dp(ctx)
+                ).apply {
+                    leftMargin = 101.dp(ctx)
+                    topMargin = 66.dp(ctx)
                 }
+            }
 
-            val rankLine =
-                View(ctx).apply {
+            val heart = TextView(ctx).apply {
+                text = "♡"
+                textSize = 34f
+                gravity = Gravity.CENTER
+                setTextColor(Color.rgb(205, 212, 235))
 
-                    setBackgroundColor(
-                        Color.rgb(
-                            40,
-                            48,
-                            70
-                        )
-                    )
+                background = roundedBackground(
+                    Color.rgb(28, 35, 55),
+                    18f
+                )
 
-                    layoutParams =
-                        FrameLayout.LayoutParams(
-                            1.dp(ctx),
-                            65.dp(ctx)
-                        ).apply {
-
-                            gravity =
-                                Gravity.END or
-                                    Gravity.CENTER_VERTICAL
-
-                            rightMargin =
-                                140.dp(ctx)
-                        }
+                layoutParams = FrameLayout.LayoutParams(
+                    60.dp(ctx),
+                    60.dp(ctx)
+                ).apply {
+                    gravity = Gravity.END or Gravity.CENTER_VERTICAL
+                    rightMargin = 12.dp(ctx)
                 }
+            }
 
-            val rank =
-                TextView(ctx).apply {
-
-                    textSize =
-                        18f
-
-                    setTextColor(
-                        Color.WHITE
-                    )
-
-                    gravity =
-                        Gravity.CENTER
-
-                    layoutDirection =
-                        View.LAYOUT_DIRECTION_LTR
-
-                    layoutParams =
-                        FrameLayout.LayoutParams(
-                            60.dp(ctx),
-                            55.dp(ctx)
-                        ).apply {
-
-                            gravity =
-                                Gravity.END or
-                                    Gravity.CENTER_VERTICAL
-
-                            rightMargin =
-                                82.dp(ctx)
-                        }
-                }
-
-            val heartLine =
-                View(ctx).apply {
-
-                    setBackgroundColor(
-                        Color.rgb(
-                            40,
-                            48,
-                            70
-                        )
-                    )
-
-                    layoutParams =
-                        FrameLayout.LayoutParams(
-                            1.dp(ctx),
-                            65.dp(ctx)
-                        ).apply {
-
-                            gravity =
-                                Gravity.END or
-                                    Gravity.CENTER_VERTICAL
-
-                            rightMargin =
-                                74.dp(ctx)
-                        }
-                }
-
-            val heart =
-                TextView(ctx).apply {
-
-                    text =
-                        "♡"
-
-                    textSize =
-                        34f
-
-                    gravity =
-                        Gravity.CENTER
-
-                    setTextColor(
-                        Color.rgb(
-                            205,
-                            212,
-                            235
-                        )
-                    )
-
-                    background =
-                        roundedBackground(
-                            Color.rgb(
-                                28,
-                                35,
-                                55
-                            ),
-                            18f
-                        )
-
-                    layoutParams =
-                        FrameLayout.LayoutParams(
-                            60.dp(ctx),
-                            60.dp(ctx)
-                        ).apply {
-
-                            gravity =
-                                Gravity.END or
-                                    Gravity.CENTER_VERTICAL
-
-                            rightMargin =
-                                10.dp(ctx)
-                        }
-                }
-
-            card.addView(
-                icon
-            )
-
-            card.addView(
-                name
-            )
-
-            card.addView(
-                description
-            )
-
-            card.addView(
-                votes
-            )
-
-            card.addView(
-                rankLine
-            )
-
-            card.addView(
-                rank
-            )
-
-            card.addView(
-                heartLine
-            )
-
-            card.addView(
-                heart
-            )
+            card.addView(icon)
+            card.addView(name)
+            card.addView(description)
+            card.addView(votes)
+            card.addView(heart)
 
             return ViewHolder(
                 card,
@@ -896,7 +528,6 @@ object RatingSettings {
                 name,
                 description,
                 votes,
-                rank,
                 heart
             )
         }
@@ -905,163 +536,71 @@ object RatingSettings {
             holder: ViewHolder,
             position: Int
         ) {
+            val item = items[position]
 
-            val item =
-                items[position]
+            holder.name.text = item.name
+            holder.description.text = item.description
+            holder.votes.text = "⭐  ${item.votes} صوت"
 
-            val rank =
-                position + 1
+            holder.icon.setImageDrawable(null)
+            holder.icon.tag = item.icon
 
-            holder.name.text =
-                item.name
-
-            holder.description.text =
-                item.description
-
-            holder.votes.text =
-                "⭐  ${item.votes} صوت"
-
-            holder.rank.text =
-                rank.toString()
-
-            if (
-                item.icon.isNotBlank()
-            ) {
-
-                CoroutineScope(
-                    Dispatchers.IO
-                ).launch {
-
+            if (item.icon.isNotBlank()) {
+                CoroutineScope(Dispatchers.IO).launch {
                     try {
-
-                        val response =
-                            app.get(
-                                item.icon
-                            )
-
-                        val body =
-                            response.body
-
-                        val bytes =
-                            body.bytes()
-
+                        val response = app.get(item.icon)
+                        val body = response.body
+                        val bytes = body.bytes()
                         body.close()
 
-                        val bitmap =
-                            BitmapFactory.decodeByteArray(
-                                bytes,
-                                0,
-                                bytes.size
-                            )
+                        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
 
-                        withContext(
-                            Dispatchers.Main
-                        ) {
-
-                            if (
-                                bitmap != null &&
-                                holder.bindingAdapterPosition ==
-                                    position
-                            ) {
-
-                                holder.icon
-                                    .setImageBitmap(
-                                        bitmap
-                                    )
+                        withContext(Dispatchers.Main) {
+                            if (holder.icon.tag == item.icon && bitmap != null) {
+                                holder.icon.setImageBitmap(bitmap)
                             }
                         }
-
-                    } catch (
-                        e: Exception
-                    ) {
+                    } catch (e: Exception) {
                     }
                 }
             }
 
-            val prefs =
-                holder.itemView.context
-                    .getSharedPreferences(
-                        PREFS,
-                        Context.MODE_PRIVATE
-                    )
-
-            val key =
-                RatingSettings.transformUrl(
-                    item.url
-                )
-
-            val hasVoted =
-                prefs.getBoolean(
-                    "voted_$key",
-                    false
-                )
-
-            updateHeart(
-                holder.heart,
-                hasVoted
+            val prefs = holder.itemView.context.getSharedPreferences(
+                PREFS,
+                Context.MODE_PRIVATE
             )
 
+            val key = RatingSettings.transformUrl(item.url)
+            val hasVoted = prefs.getBoolean("voted_$key", false)
+
+            updateHeart(holder.heart, hasVoted)
+
             holder.heart.setOnClickListener {
+                val alreadyVoted = prefs.getBoolean("voted_$key", false)
 
-                val alreadyVoted =
-                    prefs.getBoolean(
-                        "voted_$key",
-                        false
-                    )
-
-                if (
-                    alreadyVoted
-                ) {
-
+                if (alreadyVoted) {
                     Toast.makeText(
                         holder.itemView.context,
                         "لقد صوتت لهذه الإضافة مسبقًا",
                         Toast.LENGTH_SHORT
                     ).show()
-
                     return@setOnClickListener
                 }
 
-                holder.heart.isEnabled =
-                    false
+                holder.heart.isEnabled = false
 
-                CoroutineScope(
-                    Dispatchers.IO
-                ).launch {
+                CoroutineScope(Dispatchers.IO).launch {
+                    val success = RatingSettings.vote(item.url)
 
-                    val success =
-                        RatingSettings.vote(
-                            item.url
-                        )
+                    withContext(Dispatchers.Main) {
+                        holder.heart.isEnabled = true
 
-                    withContext(
-                        Dispatchers.Main
-                    ) {
-
-                        holder.heart.isEnabled =
-                            true
-
-                        if (
-                            success
-                        ) {
-
-                            prefs.edit()
-                                .putBoolean(
-                                    "voted_$key",
-                                    true
-                                )
-                                .apply()
-
-                            holder.votes.text =
-                                "⭐  ${item.votes + 1} صوت"
-
-                            updateHeart(
-                                holder.heart,
-                                true
-                            )
-
+                        if (success) {
+                            prefs.edit().putBoolean("voted_$key", true).apply()
+                            item.votes += 1
+                            holder.votes.text = "⭐  ${item.votes} صوت"
+                            updateHeart(holder.heart, true)
                         } else {
-
                             Toast.makeText(
                                 holder.itemView.context,
                                 "تعذر تسجيل التصويت",
@@ -1073,44 +612,17 @@ object RatingSettings {
             }
         }
 
-        override fun getItemCount(): Int =
-            items.size
+        override fun getItemCount(): Int = items.size
     }
 
-    private suspend fun vote(
-        pluginUrl: String
-    ): Boolean {
-
+    private suspend fun vote(pluginUrl: String): Boolean {
         return try {
-
-            val repository =
-                getRepository(
-                    pluginUrl
-                )
-
-            val key =
-                transformUrl(
-                    pluginUrl
-                )
-
-            val url =
-                "$COUNTER_API/cs-$repository/vote/$key"
-
-            val response =
-                app.get(
-                    url
-                )
-
-            JSONObject(
-                response.text
-            ).has(
-                "value"
-            )
-
-        } catch (
-            e: Exception
-        ) {
-
+            val repository = getRepository(pluginUrl)
+            val key = transformUrl(pluginUrl)
+            val url = "$COUNTER_API/cs-$repository/vote/$key"
+            val response = app.get(url)
+            JSONObject(response.text).has("value")
+        } catch (e: Exception) {
             false
         }
     }
@@ -1119,59 +631,24 @@ object RatingSettings {
         heart: TextView,
         voted: Boolean
     ) {
-
         if (voted) {
-
-            heart.text =
-                "♥"
-
-            heart.setTextColor(
-                Color.rgb(
-                    255,
-                    75,
-                    105
-                )
+            heart.text = "♥"
+            heart.setTextColor(Color.rgb(255, 75, 105))
+            heart.background = roundedBackground(
+                Color.rgb(55, 28, 45),
+                18f
             )
-
-            heart.background =
-                roundedBackground(
-                    Color.rgb(
-                        55,
-                        28,
-                        45
-                    ),
-                    18f
-                )
-
         } else {
-
-            heart.text =
-                "♡"
-
-            heart.setTextColor(
-                Color.rgb(
-                    205,
-                    212,
-                    235
-                )
+            heart.text = "♡"
+            heart.setTextColor(Color.rgb(205, 212, 235))
+            heart.background = roundedBackground(
+                Color.rgb(28, 35, 55),
+                18f
             )
-
-            heart.background =
-                roundedBackground(
-                    Color.rgb(
-                        28,
-                                               35,
-                        55
-                    ),
-                    18f
-                )
         }
     }
 
-    private fun getRepository(
-        pluginUrl: String
-    ): String {
-
+    private fun getRepository(pluginUrl: String): String {
         return pluginUrl
             .split("/")
             .drop(2)
@@ -1179,51 +656,24 @@ object RatingSettings {
             .joinToString("-")
     }
 
-    private fun transformUrl(
-        url: String
-    ): String {
-
-        return MessageDigest
-            .getInstance(
-                "SHA-256"
-            )
-            .digest(
-                "$url#funny-salt"
-                    .toByteArray()
-            )
-            .joinToString("") {
-                "%02x".format(it)
-            }
+    private fun transformUrl(url: String): String {
+        return MessageDigest.getInstance("SHA-256")
+            .digest("$url#funny-salt".toByteArray())
+            .joinToString("") { "%02x".format(it) }
     }
 
     private fun roundedBackground(
         color: Int,
         radius: Float
     ): GradientDrawable {
-
         return GradientDrawable().apply {
-
-            setColor(
-                color
-            )
-
-            cornerRadius =
-                radius
+            setColor(color)
+            cornerRadius = radius
         }
     }
 
-    private fun Int.dp(
-    context: Context?
-): Int {
-
-    val safeContext =
-        context ?: return this
-
-    return (
-        this *
-            safeContext.resources
-                .displayMetrics
-                .density
-        ).toInt()
-}
+    private fun Int.dp(context: Context?): Int {
+        val safeContext = context ?: return this
+        return (this * safeContext.resources.displayMetrics.density).toInt()
+    }
 }
