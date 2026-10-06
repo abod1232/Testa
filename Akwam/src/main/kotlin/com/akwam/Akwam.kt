@@ -332,100 +332,115 @@ class Akwam : MainAPI() {
     }
 
 
+    private fun fixUrl(url: String): String {
+        if (url.isBlank()) return ""
+        if (url.startsWith("http://") || url.startsWith("https://")) return url
+        val base = mainUrl.trimEnd('/')
+        val path = url.trimStart('/')
+        return "$base/$path"
+    }
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val episodeUrl = data
-        val defaultHeaders = mapOf("Referer" to mainUrl)
+        val episodeUrl = fixUrl(data)
+        val defaultHeaders = mapOf(
+            "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer" to mainUrl
+        )
 
         try {
-            val step1Doc = try {
-                app.get(episodeUrl, headers = defaultHeaders).document
-            } catch (e: Exception) {
-                return false
+            // 1. جلب صفحة الحلقة أو الفيلم
+            val mainDoc = app.get(episodeUrl, headers = defaultHeaders).document
+            val seenUrls = mutableSetOf<String>()
+
+            // -------------------------------------------------------------
+            // 2. معالجة روابط المشاهدة (Watch Links)
+            // -------------------------------------------------------------
+            val watchLinks = mainDoc.select("a.link-show, a[href*='/watch/']")
+            for (watchEl in watchLinks) {
+                try {
+                    val watchPageUrl = fixUrl(watchEl.attr("href"))
+                    if (watchPageUrl.isBlank()) continue
+
+                    val watchDoc = app.get(watchPageUrl, headers = mapOf("Referer" to episodeUrl)).document
+                    val sourceElements = watchDoc.select("source[src], video[src]")
+
+                    for (srcEl in sourceElements) {
+                        val videoUrl = srcEl.attr("src").trim()
+                        if (videoUrl.isBlank() || !seenUrls.add(videoUrl)) continue
+
+                        val qualityAttr = srcEl.attr("size")
+                            .ifBlank { srcEl.attr("label") }
+                            .ifBlank { "720p" }
+
+                        callback(
+                            newExtractorLink(
+                                source = "${this.name} Stream",
+                                name = "${this.name} Stream - $qualityAttr",
+                                url = videoUrl
+                            ) {
+                                this.referer = watchPageUrl
+                                this.quality = getQualityFromName(qualityAttr)
+                                this.type = ExtractorLinkType.VIDEO
+                            }
+                        )
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
             }
 
-            val seenUrls = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+            // -------------------------------------------------------------
+            // 3. معالجة روابط التحميل المباشرة (Direct Download Links)
+            // -------------------------------------------------------------
+            val downloadLinks = mainDoc.select("a.link-download, a[href*='/download/']")
+            for (downloadEl in downloadLinks) {
+                try {
+                    val downloadPageUrl = fixUrl(downloadEl.attr("href"))
+                    if (downloadPageUrl.isBlank()) continue
 
-            kotlinx.coroutines.coroutineScope {
-                val watchElements = step1Doc.select("a.link-show, a[href*='/watch/']")
-                val watchJobs = watchElements.map { watchEl ->
-                    async {
-                        try {
-                            val rawWatchUrl = watchEl.attr("abs:href").ifBlank { watchEl.attr("href") }
-                            if (rawWatchUrl.isNotBlank()) {
-                                val watchDoc = app.get(rawWatchUrl, headers = mapOf("Referer" to episodeUrl)).document
-                                val sourceElements = watchDoc.select("source[src]")
+                    val downloadDoc = app.get(downloadPageUrl, headers = mapOf("Referer" to episodeUrl)).document
 
-                                for (srcEl in sourceElements) {
-                                    val rawVideoUrl = srcEl.attr("abs:src").ifBlank { srcEl.attr("src") }.trim()
-                                    val videoUrl = rawVideoUrl.replace(" ", "%20")
-                                    if (videoUrl.isBlank() || !seenUrls.add(videoUrl)) continue
+                    // استخراج الرابط المباشر من صفحة التحميل
+                    val directElements = downloadDoc.select("a[href*='downet.net'], a[href*='.mp4'], a.link-btn[href*='/download/'], a:contains(تحميل)")
+                    
+                    for (directEl in directElements) {
+                        val directUrl = directEl.attr("href").trim()
+                        
+                        // تجاهل الرابط إذا كان هو نفسه رابط صفحة التحميل الحالية
+                        if (directUrl.isBlank() || directUrl == downloadPageUrl || !seenUrls.add(directUrl)) continue
 
-                                    val qualityAttr = srcEl.attr("size")
-                                        .ifBlank { srcEl.attr("label") }
-                                        .ifBlank { "720p" }
+                        val sizeText = downloadEl.selectFirst("span.font-size-14")?.text()?.trim() ?: ""
+                        val linkTitle = if (sizeText.isNotEmpty()) {
+                            "${this.name} Download ($sizeText)"
+                        } else {
+                            "${this.name} Download"
+                        }
 
-                                    callback(
-                                        newExtractorLink(
-                                            source = "${this@Akwam.name} Stream",
-                                            name = "${this@Akwam.name} - $qualityAttr",
-                                            url = videoUrl
-                                        ) {
-                                            this.referer = rawWatchUrl
-                                            this.quality = getQualityFromName(qualityAttr)
-                                            this.type = ExtractorLinkType.VIDEO
-                                        }
-                                    )
-                                }
+                        callback(
+                            newExtractorLink(
+                                source = "${this.name} Download",
+                                name = linkTitle,
+                                url = directUrl
+                            ) {
+                                this.referer = downloadPageUrl
+                                this.quality = Qualities.Unknown.value
+                                this.type = ExtractorLinkType.VIDEO
                             }
-                        } catch (_: Exception) {}
+                        )
                     }
+                } catch (e: Exception) {
+                    e.printStackTrace()
                 }
-                val downloadElements = step1Doc.select("a.link-download, a[href*='/download/']")
-                val downloadJobs = downloadElements.map { downloadEl ->
-                    async {
-                        try {
-                            val rawDownloadPageUrl = downloadEl.attr("abs:href").ifBlank { downloadEl.attr("href") }
-                            if (rawDownloadPageUrl.isNotBlank()) {
-                                val downloadDoc = app.get(rawDownloadPageUrl, headers = mapOf("Referer" to episodeUrl)).document
-                                val directLinkElements = downloadDoc.select("a[href*='downet.net'], a[href*='.mp4'], a.link-btn[href*='/download/'], a:contains(تحميل)")
-
-                                for (directEl in directLinkElements) {
-                                    val directUrl = directEl.attr("abs:href").ifBlank { directEl.attr("href") }.trim()
-                                    if (directUrl.isBlank() || directUrl == rawDownloadPageUrl || !seenUrls.add(directUrl)) continue
-                                    val sizeText = downloadEl.selectFirst("span.font-size-14")?.text()?.trim() ?: ""
-                                    val displayName = if (sizeText.isNotEmpty()) {
-                                        "${this@Akwam.name} Download ($sizeText)"
-                                    } else {
-                                        "${this@Akwam.name} Download"
-                                    }
-
-                                    callback(
-                                        newExtractorLink(
-                                            source = "${this@Akwam.name} Download",
-                                            name = displayName,
-                                            url = directUrl
-                                        ) {
-                                            this.referer = rawDownloadPageUrl
-                                            this.quality = Qualities.Unknown.value
-                                            this.type = ExtractorLinkType.VIDEO
-                                        }
-                                    )
-                                }
-                            }
-                        } catch (_: Exception) {}
-                    }
-                }
-                watchJobs.awaitAll()
-                downloadJobs.awaitAll()
             }
 
             return seenUrls.isNotEmpty()
         } catch (e: Exception) {
+            e.printStackTrace()
             return false
         }
     }
