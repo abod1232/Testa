@@ -377,8 +377,6 @@ class Akwam : MainAPI() {
         try {
             val mainDoc = app.get(episodeUrl, headers = headers).document
             val seenUrls = mutableSetOf<String>()
-
-            // 1. استخراج الروابط المباشرة من صفحات التحميل
             val downloadElements = mainDoc.select("a.link-download, a[href*='/download/']")
             for (downloadEl in downloadElements) {
                 try {
@@ -391,8 +389,6 @@ class Akwam : MainAPI() {
                     for (directEl in directLinks) {
                         val rawUrl = directEl.attr("href").trim()
                         if (rawUrl.isBlank() || rawUrl == downloadPageUrl || !rawUrl.startsWith("http")) continue
-
-                        // تحويل الرابط النهائي إلى http:// وتشفير المسافات
                         val directUrl = rawUrl.replace("https://", "http://").replace(" ", "%20")
                         if (!seenUrls.add(directUrl)) continue
 
@@ -413,8 +409,6 @@ class Akwam : MainAPI() {
                     }
                 } catch (_: Exception) {}
             }
-
-            // 2. فحص صفحات المشاهدة في حال توفرت روابط صالحة
             val watchElements = mainDoc.select("a.link-show, a[href*='/watch/']")
             for (watchEl in watchElements) {
                 try {
