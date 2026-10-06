@@ -330,9 +330,6 @@ class Akwam : MainAPI() {
         if (nums.isNotEmpty()) return nums.last()
         return 999
     }
-
-
-    // دالة إصلاح وتشفير الروابط العربية لتفادي انهيار OkHttp
     private fun fixUrl(url: String): String {
         if (url.isBlank()) return ""
         val fullUrl = if (url.startsWith("http://") || url.startsWith("https://")) {
@@ -387,10 +384,6 @@ class Akwam : MainAPI() {
             android.util.Log.d(TAG, "===> [2] تم جلب صفحة الحلقة بنجاح (Status: ${response.code})")
 
             val seenUrls = mutableSetOf<String>()
-
-            // -------------------------------------------------------------
-            // [3] فحص واستخراج روابط المشاهدة (Watch)
-            // -------------------------------------------------------------
             val watchElements = mainDoc.select("a.link-show, a[href*='/watch/']")
             android.util.Log.d(TAG, "===> [3] تم العثور على (${watchElements.size}) رابط مشاهدة في الصفحة")
 
@@ -429,10 +422,6 @@ class Akwam : MainAPI() {
                     android.util.Log.e(TAG, "   ❌ [خطأ المشاهدة #$index]: ${e.message}")
                 }
             }
-
-            // -------------------------------------------------------------
-            // [4] فحص واستخراج روابط التحميل (Download)
-            // -------------------------------------------------------------
             val downloadElements = mainDoc.select("a.link-download, a[href*='/download/']")
             android.util.Log.d(TAG, "===> [4] تم العثور على (${downloadElements.size}) رابط صفحة تحميل")
 
@@ -442,8 +431,6 @@ class Akwam : MainAPI() {
                     android.util.Log.d(TAG, "   📥 [Download #$index] جاري فتح صفحة التحميل: $rawDownloadPageUrl")
 
                     val downloadDoc = app.get(rawDownloadPageUrl, headers = mapOf("Referer" to episodeUrl)).document
-
-                    // استخراج الرابط المباشر النهائي (.mp4 / downet)
                     val directElements = downloadDoc.select("a[href*='downet.net'], a[href*='.mp4'], a.link-btn, a:contains(تحميل)")
                     android.util.Log.d(TAG, "   📥 [Download #$index] عثر على (${directElements.size}) رابط داخل الصفحة")
 
