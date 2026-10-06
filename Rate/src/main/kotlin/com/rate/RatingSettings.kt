@@ -1,4 +1,4 @@
-package com.eshk
+package com.rate
 
 import android.annotation.SuppressLint
 import android.app.AlertDialog
