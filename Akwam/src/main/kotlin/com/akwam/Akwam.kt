@@ -353,13 +353,8 @@ class Akwam : MainAPI() {
         )
 
         try {
-            // 1. جلب صفحة الحلقة أو الفيلم
             val mainDoc = app.get(episodeUrl, headers = defaultHeaders).document
             val seenUrls = mutableSetOf<String>()
-
-            // -------------------------------------------------------------
-            // 2. معالجة روابط المشاهدة (Watch Links)
-            // -------------------------------------------------------------
             val watchLinks = mainDoc.select("a.link-show, a[href*='/watch/']")
             for (watchEl in watchLinks) {
                 try {
@@ -393,10 +388,6 @@ class Akwam : MainAPI() {
                     e.printStackTrace()
                 }
             }
-
-            // -------------------------------------------------------------
-            // 3. معالجة روابط التحميل المباشرة (Direct Download Links)
-            // -------------------------------------------------------------
             val downloadLinks = mainDoc.select("a.link-download, a[href*='/download/']")
             for (downloadEl in downloadLinks) {
                 try {
@@ -404,14 +395,10 @@ class Akwam : MainAPI() {
                     if (downloadPageUrl.isBlank()) continue
 
                     val downloadDoc = app.get(downloadPageUrl, headers = mapOf("Referer" to episodeUrl)).document
-
-                    // استخراج الرابط المباشر من صفحة التحميل
                     val directElements = downloadDoc.select("a[href*='downet.net'], a[href*='.mp4'], a.link-btn[href*='/download/'], a:contains(تحميل)")
                     
                     for (directEl in directElements) {
                         val directUrl = directEl.attr("href").trim()
-                        
-                        // تجاهل الرابط إذا كان هو نفسه رابط صفحة التحميل الحالية
                         if (directUrl.isBlank() || directUrl == downloadPageUrl || !seenUrls.add(directUrl)) continue
 
                         val sizeText = downloadEl.selectFirst("span.font-size-14")?.text()?.trim() ?: ""
