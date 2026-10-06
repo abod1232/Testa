@@ -356,7 +356,7 @@ class Akwam : MainAPI() {
                 }
                 val result = "$scheme://$host/$encodedPath"
                 if (query != null) "$result?$query" else result
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 fullUrl
             }
         }
@@ -368,43 +368,72 @@ class Akwam : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val TAG = "AkwamDebug"
         val episodeUrl = fixUrl(data)
-        android.util.Log.d(TAG, "===> [1] بدء تشغيل loadLinks للرابط: $episodeUrl")
-
         val headers = mapOf(
             "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Referer" to mainUrl
         )
 
         try {
-            android.util.Log.d(TAG, "===> [2] جاري طلب صفحة الحلقة...")
-            val response = app.get(episodeUrl, headers = headers)
-            val mainDoc = response.document
-            android.util.Log.d(TAG, "===> [2] تم جلب صفحة الحلقة بنجاح (Status: ${response.code})")
-
+            val mainDoc = app.get(episodeUrl, headers = headers).document
             val seenUrls = mutableSetOf<String>()
-            val watchElements = mainDoc.select("a.link-show, a[href*='/watch/']")
-            android.util.Log.d(TAG, "===> [3] تم العثور على (${watchElements.size}) رابط مشاهدة في الصفحة")
 
-            for ((index, watchEl) in watchElements.withIndex()) {
+            // 1. استخراج الروابط المباشرة من صفحات التحميل
+            val downloadElements = mainDoc.select("a.link-download, a[href*='/download/']")
+            for (downloadEl in downloadElements) {
                 try {
-                    val rawWatchUrl = fixUrl(watchEl.attr("href"))
-                    android.util.Log.d(TAG, "   📺 [Watch #$index] جاري فحص صفحة المشاهدة: $rawWatchUrl")
+                    val downloadPageUrl = fixUrl(downloadEl.attr("href"))
+                    if (downloadPageUrl.isBlank()) continue
 
-                    val watchDoc = app.get(rawWatchUrl, headers = mapOf("Referer" to episodeUrl)).document
-                    val sourceElements = watchDoc.select("source[src], video[src]")
-                    android.util.Log.d(TAG, "   📺 [Watch #$index] عثر على (${sourceElements.size}) مصدر فيديو")
+                    val downloadDoc = app.get(downloadPageUrl, headers = mapOf("Referer" to episodeUrl)).document
+                    val directLinks = downloadDoc.select("a[href*='downet.net'], a[href*='.mp4'], a.link-btn")
 
-                    for (srcEl in sourceElements) {
-                        val videoUrl = srcEl.attr("src").trim()
-                        if (videoUrl.isBlank() || !seenUrls.add(videoUrl)) continue
+                    for (directEl in directLinks) {
+                        val rawUrl = directEl.attr("href").trim()
+                        if (rawUrl.isBlank() || rawUrl == downloadPageUrl || !rawUrl.startsWith("http")) continue
 
-                        val qualityAttr = srcEl.attr("size")
-                            .ifBlank { srcEl.attr("label") }
+                        // تحويل الرابط النهائي إلى http:// وتشفير المسافات
+                        val directUrl = rawUrl.replace("https://", "http://").replace(" ", "%20")
+                        if (!seenUrls.add(directUrl)) continue
+
+                        val sizeText = downloadEl.selectFirst("span.font-size-14")?.text()?.trim() ?: ""
+                        val linkName = if (sizeText.isNotEmpty()) "${this.name} ($sizeText)" else "${this.name} Server"
+
+                        callback(
+                            newExtractorLink(
+                                source = this.name,
+                                name = linkName,
+                                url = directUrl
+                            ) {
+                                this.referer = downloadPageUrl
+                                this.quality = Qualities.P720.value
+                                this.type = ExtractorLinkType.VIDEO
+                            }
+                        )
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // 2. فحص صفحات المشاهدة في حال توفرت روابط صالحة
+            val watchElements = mainDoc.select("a.link-show, a[href*='/watch/']")
+            for (watchEl in watchElements) {
+                try {
+                    val watchPageUrl = fixUrl(watchEl.attr("href"))
+                    if (watchPageUrl.isBlank()) continue
+
+                    val watchDoc = app.get(watchPageUrl, headers = mapOf("Referer" to episodeUrl)).document
+                    val sources = watchDoc.select("source[src], video[src]")
+
+                    for (src in sources) {
+                        val rawUrl = src.attr("src").trim()
+                        if (rawUrl.isBlank() || !rawUrl.startsWith("http")) continue
+
+                        val videoUrl = rawUrl.replace("https://", "http://").replace(" ", "%20")
+                        if (!seenUrls.add(videoUrl)) continue
+
+                        val qualityAttr = src.attr("size")
+                            .ifBlank { src.attr("label") }
                             .ifBlank { "720p" }
-
-                        android.util.Log.d(TAG, "   ✅ [نجاح المشاهدة] رابط البث: $videoUrl ($qualityAttr)")
 
                         callback(
                             newExtractorLink(
@@ -412,60 +441,17 @@ class Akwam : MainAPI() {
                                 name = "${this.name} Stream - $qualityAttr",
                                 url = videoUrl
                             ) {
-                                this.referer = rawWatchUrl
+                                this.referer = watchPageUrl
                                 this.quality = getQualityFromName(qualityAttr)
                                 this.type = ExtractorLinkType.VIDEO
                             }
                         )
                     }
-                } catch (e: Exception) {
-                    android.util.Log.e(TAG, "   ❌ [خطأ المشاهدة #$index]: ${e.message}")
-                }
-            }
-            val downloadElements = mainDoc.select("a.link-download, a[href*='/download/']")
-            android.util.Log.d(TAG, "===> [4] تم العثور على (${downloadElements.size}) رابط صفحة تحميل")
-
-            for ((index, downloadEl) in downloadElements.withIndex()) {
-                try {
-                    val rawDownloadPageUrl = fixUrl(downloadEl.attr("href"))
-                    android.util.Log.d(TAG, "   📥 [Download #$index] جاري فتح صفحة التحميل: $rawDownloadPageUrl")
-
-                    val downloadDoc = app.get(rawDownloadPageUrl, headers = mapOf("Referer" to episodeUrl)).document
-                    val directElements = downloadDoc.select("a[href*='downet.net'], a[href*='.mp4'], a.link-btn, a:contains(تحميل)")
-                    android.util.Log.d(TAG, "   📥 [Download #$index] عثر على (${directElements.size}) رابط داخل الصفحة")
-
-                    for (directEl in directElements) {
-                        val directUrl = directEl.attr("href").trim()
-                        if (directUrl.isBlank() || directUrl == rawDownloadPageUrl || !seenUrls.add(directUrl)) continue
-
-                        val sizeText = downloadEl.selectFirst("span.font-size-14")?.text()?.trim() ?: ""
-                        val linkTitle = if (sizeText.isNotEmpty()) "${this.name} Download ($sizeText)" else "${this.name} Download"
-
-                        android.util.Log.d(TAG, "   ✅ [نجاح التحميل] الرابط المباشر: $directUrl ($sizeText)")
-
-                        callback(
-                            newExtractorLink(
-                                source = "${this.name} Download",
-                                name = linkTitle,
-                                url = directUrl
-                            ) {
-                                this.referer = rawDownloadPageUrl
-                                this.quality = Qualities.Unknown.value
-                                this.type = ExtractorLinkType.VIDEO
-                            }
-                        )
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.e(TAG, "   ❌ [خطأ التحميل #$index]: ${e.message}")
-                }
+                } catch (_: Exception) {}
             }
 
-            android.util.Log.d(TAG, "===> [5] اكتملت العملية! إجمالي الروابط المستخرجة: ${seenUrls.size}")
             return seenUrls.isNotEmpty()
-
-        } catch (e: Exception) {
-            android.util.Log.e(TAG, "💥 خطأ فادح في loadLinks: ${e.message}")
-            e.printStackTrace()
+        } catch (_: Exception) {
             return false
         }
     }
