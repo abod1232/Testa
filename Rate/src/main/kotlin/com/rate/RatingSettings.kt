@@ -1,4 +1,4 @@
-package com.rate
+package com.eshk
 
 import android.annotation.SuppressLint
 import android.app.AlertDialog
@@ -44,7 +44,7 @@ import java.util.concurrent.ConcurrentHashMap
 object RatingSettings {
 
     private const val PLUGINS_URL =
-        "https://raw.githubusercontent.com/Abodabodd/re-3arabi/refs/heads/builds/plugins.json"
+        "https://raw.githubusercontent.com/abod1232/Testa/refs/heads/builds/plugins.json"
 
     private const val COUNTER_API =
         "https://counterapi.com/api"
@@ -957,17 +957,33 @@ object RatingSettings {
 
     @SuppressLint("ClickableViewAccessibility")
     private fun View.addTouchScaleEffect(onClick: (() -> Unit)? = null) {
+        var isInside = false
         setOnTouchListener { v, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
+                    isInside = true
                     v.animate().scaleX(0.93f).scaleY(0.93f).setDuration(80).start()
                 }
+                MotionEvent.ACTION_MOVE -> {
+                    val withinBounds = event.x in 0f..v.width.toFloat() && event.y in 0f..v.height.toFloat()
+                    if (isInside != withinBounds) {
+                        isInside = withinBounds
+                        if (isInside) {
+                            v.animate().scaleX(0.93f).scaleY(0.93f).setDuration(80).start()
+                        } else {
+                            v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(80).start()
+                        }
+                    }
+                }
                 MotionEvent.ACTION_UP -> {
-                    v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(100).withEndAction {
+                    v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(100).start()
+                    val withinBounds = event.x in 0f..v.width.toFloat() && event.y in 0f..v.height.toFloat()
+                    if (withinBounds && isInside) {
                         onClick?.invoke()
-                    }.start()
+                    }
                 }
                 MotionEvent.ACTION_CANCEL -> {
+                    isInside = false
                     v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(80).start()
                 }
             }
