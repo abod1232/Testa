@@ -1,24 +1,4 @@
 [
-        {
-        "url": "https://github.com/abod1232/Testa/raw/refs/heads/builds/Egy.cs3",
-        "status": 1,
-        "version": 1,
-        "name": "egy",
-        "internalName": "egy",
-        "authors": [
-            "Abodabodd"
-        ],
-        "description": "",
-        "fileSize": 31165,
-        "repositoryUrl": "https://github.com/abod1232/Testa",
-        "language": "ar",
-        "tvTypes": [
-            "TvSeries",
-            "Movie"
-        ],
-        "iconUrl": "https://3esk.onl/wp-content/uploads/2021/01/3isk-logo.png",
-        "apiVersion": 1,
-    },
     {
         "url": "https://raw.githubusercontent.com/abod1232/Testa/builds/3isk.cs3",
         "status": 1,
@@ -29,7 +9,7 @@
             "Abodabodd"
         ],
         "description": "",
-        "fileSize": 31165,
+        "fileSize": 30575,
         "repositoryUrl": "https://github.com/abod1232/Testa",
         "language": "ar",
         "tvTypes": [
@@ -38,7 +18,7 @@
         ],
         "iconUrl": "https://3esk.onl/wp-content/uploads/2021/01/3isk-logo.png",
         "apiVersion": 1,
-        "fileHash": "sha256-00ead28e610d86add9fc0e3fd937c1dfe863b66b0c5686e28bebf8039c7ab86a"
+        "fileHash": "sha256-a0b0084769965aac53df3c2b1d33a474b0d4d5c1f5e3c0b79fc7195c2a055bab"
     },
     {
         "url": "https://raw.githubusercontent.com/abod1232/Testa/builds/Aflaam.cs3",
@@ -358,6 +338,27 @@
         "fileHash": "sha256-048fc02cd74f7d43a2618a563a17c3727a2a801accb20f9e1cf13ef6e68619ef"
     },
     {
+        "url": "https://raw.githubusercontent.com/abod1232/Testa/builds/Egy.cs3",
+        "status": 1,
+        "version": 1,
+        "name": "Egy",
+        "internalName": "Egy",
+        "authors": [
+            "Abodabodd"
+        ],
+        "description": "",
+        "fileSize": 44104,
+        "repositoryUrl": "https://github.com/abod1232/Testa",
+        "language": "ar",
+        "tvTypes": [
+            "TvSeries",
+            "Movie"
+        ],
+        "iconUrl": "https://3esk.onl/wp-content/uploads/2021/01/3isk-logo.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-e290a234465a54e63ac658dcced4b698de544ab3c3d667c1417000261e7f52c7"
+    },
+    {
         "url": "https://raw.githubusercontent.com/abod1232/Testa/builds/Egydead.cs3",
         "status": 1,
         "version": 1,
@@ -625,7 +626,7 @@
             "Abodabodd"
         ],
         "description": "",
-        "fileSize": 28702,
+        "fileSize": 30175,
         "repositoryUrl": "https://github.com/abod1232/Testa",
         "language": "ar",
         "tvTypes": [
@@ -634,7 +635,7 @@
         ],
         "iconUrl": "https://web8.topcinema.cam/wp-content/uploads/2023/05/cropped-icon-32x32.png",
         "apiVersion": 1,
-        "fileHash": "sha256-04fe8195714a8ef8c38545ad8c135b219dfa2b1e2728ba70da82aa509964f69c"
+        "fileHash": "sha256-6cdf04e1b95b4bf1136787fc8afd203cc477d43d920c39ff3b2088027b5c4613"
     },
     {
         "url": "https://raw.githubusercontent.com/abod1232/Testa/builds/TukTukcima.cs3",
@@ -776,7 +777,7 @@
             "Abodabodd"
         ],
         "description": "",
-        "fileSize": 73906,
+        "fileSize": 51419,
         "repositoryUrl": "https://github.com/abod1232/Testa",
         "language": "ar",
         "tvTypes": [
@@ -785,7 +786,7 @@
         ],
         "iconUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ7AH2oC7LwumXRpHM8_WLpIFvDIfmS67jkjlhsCKpPaZdqcneigzUQX4g&s=10",
         "apiVersion": 1,
-        "fileHash": "sha256-82920869d407a954b22353155231f4f5aa345d39d5ad3a09ce0f73318d3e0f2d"
+        "fileHash": "sha256-e30771ef19bfad15ab1e7898ee856caaf171b7c32a5ca541d4f10e0f6a0f5a42"
     },
     {
         "url": "https://raw.githubusercontent.com/abod1232/Testa/builds/Yacintv.cs3",
