@@ -1,24 +1,4 @@
 [
-        {
-        "url": "https://github.com/abod1232/Testa/raw/refs/heads/builds/Egy.cs3",
-        "status": 1,
-        "version": 1,
-        "name": "egy",
-        "internalName": "egy",
-        "authors": [
-            "Abodabodd"
-        ],
-        "description": "",
-        "fileSize": 31165,
-        "repositoryUrl": "https://github.com/abod1232/Testa",
-        "language": "ar",
-        "tvTypes": [
-            "TvSeries",
-            "Movie"
-        ],
-        "iconUrl": "https://3esk.onl/wp-content/uploads/2021/01/3isk-logo.png",
-        "apiVersion": 1,
-    },
     {
         "url": "https://raw.githubusercontent.com/abod1232/Testa/builds/3isk.cs3",
         "status": 1,
@@ -356,6 +336,27 @@
         "iconUrl": "https://www.dima-toon.com/wp-content/uploads/2025/10/DimaToonlogo11.png",
         "apiVersion": 1,
         "fileHash": "sha256-048fc02cd74f7d43a2618a563a17c3727a2a801accb20f9e1cf13ef6e68619ef"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/abod1232/Testa/builds/Egy.cs3",
+        "status": 1,
+        "version": 1,
+        "name": "Egy",
+        "internalName": "Egy",
+        "authors": [
+            "Abodabodd"
+        ],
+        "description": "",
+        "fileSize": 49628,
+        "repositoryUrl": "https://github.com/abod1232/Testa",
+        "language": "ar",
+        "tvTypes": [
+            "TvSeries",
+            "Movie"
+        ],
+        "iconUrl": "https://3esk.onl/wp-content/uploads/2021/01/3isk-logo.png",
+        "apiVersion": 1,
+        "fileHash": "sha256-b96e940f9de194fd7dd5ce05df28b2bb3f19f887691102623b1f254e47f76bbb"
     },
     {
         "url": "https://raw.githubusercontent.com/abod1232/Testa/builds/Egydead.cs3",
