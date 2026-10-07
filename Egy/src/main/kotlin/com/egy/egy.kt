@@ -186,8 +186,6 @@ class EgyWatchProvider : MainAPI() {
             val link = video.link ?: return@forEach
             val serverName = video.server ?: "سيرفر"
             val customHeader = video.header ?: ""
-
-            // 1. فحص الروابط المباشرة الصريحة (MP4 أو M3U8)
             if (link.contains(".m3u8") || link.contains(".mp4")) {
                 callback.invoke(
                     newExtractorLink(name = serverName, source = name, url = link) {
@@ -197,12 +195,9 @@ class EgyWatchProvider : MainAPI() {
                 )
                 return@forEach
             }
-
-            // 2. مطابقة الرابط مع قواعد /hosts/config (تنظيف الريجيكس قبل الفحص)
             val matchedRule = hostsRules.firstOrNull { rule ->
                 val rawPattern = rule.regexPattern ?: return@firstOrNull false
                 try {
-                    // إزالة الـ Escaped Slashes (\/) لكي تقبلها لغة Java/Kotlin
                     val cleanPattern = rawPattern.replace("\\/", "/")
                     Regex(cleanPattern, RegexOption.IGNORE_CASE).containsMatchIn(link)
                 } catch (e: Exception) {
@@ -211,28 +206,18 @@ class EgyWatchProvider : MainAPI() {
             }
 
             var resolved = false
-
-            // 3. الأولوية الأولى: محاكاة BaseVedEasyPlex وإرسال POST إلى mawdhou3.com
             if (matchedRule != null) {
                 resolved = resolveWithBaseVedEngine(link, serverName, customHeader, matchedRule, callback)
             }
-
-            // 4. إذا لم ينجح سيرفر mawdhou3، نجرب مستخرجات كلاودستريم المدمجة
             if (!resolved) {
                 resolved = loadExtractor(link, subtitleCallback, callback)
             }
-
-            // 5. Fallback أخير للبحث عن الرابط داخل كود الصفحة
             if (!resolved) {
                 fallbackRegexExtract(link, serverName, customHeader, callback)
             }
         }
         return true
     }
-
-    // ==========================================
-    // محرك الفك عبر mawdhou3.com (كلاس BaseVedEasyPlex)
-    // ==========================================
 
     private suspend fun getHostsRules(): List<HostConfigItem> {
         if (cachedHostsConfig != null) return cachedHostsConfig!!
@@ -262,11 +247,7 @@ class EgyWatchProvider : MainAPI() {
 
             val userAgent = rule.useragent?.takeIf { it.isNotEmpty() } ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             val headers = mapOf("User-Agent" to userAgent, "Referer" to finalReferer)
-
-            // 1. جلب كود الـ HTML
             val html = app.get(link, headers = headers).text
-
-            // 2. التحقق من مسار الـ POST في mawdhou3.com
             val enabledParts = rule.enableded?.split("|") ?: emptyList()
             val isEnabled = enabledParts.getOrNull(0) == "TRUE"
             val postUrl = enabledParts.getOrNull(1)?.takeIf { it.startsWith("http") }
@@ -309,8 +290,6 @@ class EgyWatchProvider : MainAPI() {
                     }
                 }
             }
-
-            // 3. تجربة الـ Regex المباشر في حقل site إن لم يكن سيرفر POST
             val sitePattern = rule.site
             if (!sitePattern.isNullOrEmpty()) {
                 val cleanSitePattern = sitePattern.replace("\\/", "/")
@@ -359,13 +338,8 @@ class EgyWatchProvider : MainAPI() {
                 )
             }
         } catch (e: Exception) {
-            // تجاهل الخطأ
         }
     }
-
-    // ==========================================
-    // Data Classes
-    // ==========================================
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class HostConfigItem(
