@@ -1,4 +1,24 @@
 [
+        {
+        "url": "https://github.com/abod1232/Testa/raw/refs/heads/builds/Egy.cs3",
+        "status": 1,
+        "version": 1,
+        "name": "egy",
+        "internalName": "egy",
+        "authors": [
+            "Abodabodd"
+        ],
+        "description": "",
+        "fileSize": 31165,
+        "repositoryUrl": "https://github.com/abod1232/Testa",
+        "language": "ar",
+        "tvTypes": [
+            "TvSeries",
+            "Movie"
+        ],
+        "iconUrl": "https://3esk.onl/wp-content/uploads/2021/01/3isk-logo.png",
+        "apiVersion": 1,
+    },
     {
         "url": "https://raw.githubusercontent.com/abod1232/Testa/builds/3isk.cs3",
         "status": 1,
