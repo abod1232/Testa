@@ -17,6 +17,8 @@ class EgyWatchProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
 
     private val apiKey = "p2lbgWkFrykA4QyUmpHihzmc5BNzIABq"
+
+    // الترويسات الأساسية للتطبيق
     private val appHeaders = mapOf(
         "User-Agent" to "EasyPlex (Android 16; RMX5061; realme RE60ADL1; ar)",
         "packagename" to "com.linkletter.app",
@@ -47,7 +49,7 @@ class EgyWatchProvider : MainAPI() {
             }
         }
 
-        return HomePageResponse(homeItems)
+        return newHomePageResponse(homeItems)
     }
 
     override suspend fun search(query: String): List<SearchResponse>? {
@@ -55,6 +57,7 @@ class EgyWatchProvider : MainAPI() {
         val response = app.get(searchUrl, headers = appHeaders).parsedSafe<SearchData>()
 
         val results = mutableListOf<SearchResponse>()
+
         response?.movies?.forEach { toSearchResponse(it, "movie")?.let { res -> results.add(res) } }
         response?.series?.forEach { toSearchResponse(it, "serie")?.let { res -> results.add(res) } }
         response?.animes?.forEach { toSearchResponse(it, "anime")?.let { res -> results.add(res) } }
@@ -74,15 +77,19 @@ class EgyWatchProvider : MainAPI() {
                 this.posterUrl = res.posterPath
                 this.plot = res.overview
                 this.year = res.releaseDate?.substringBefore("-")?.toIntOrNull()
-                this.rating = res.voteAverage?.times(1000)?.toInt()
+                // التعديل هنا: تحويل التقييم إلى Score
+                this.score = res.voteAverage?.let { Score.from10(it) }
             }
         } else {
             val res = app.get("$mainUrl/series/show/$id/$apiKey", headers = appHeaders).parsedSafe<MediaDetail>() ?: return null
             val episodes = mutableListOf<Episode>()
+
+            // جلب المواسم والحلقات
             res.seasons?.forEach { season ->
                 val seasonRes = app.get("$mainUrl/series/season/${season.id}/$apiKey", headers = appHeaders).parsedSafe<SeasonDetail>()
                 seasonRes?.episodes?.forEach { ep ->
                     val epVideosJson = ep.videos?.toJson() ?: ""
+
                     episodes.add(
                         newEpisode(epVideosJson) {
                             this.name = ep.episodeName
@@ -97,7 +104,7 @@ class EgyWatchProvider : MainAPI() {
             newTvSeriesLoadResponse(res.title ?: "", url, TvType.TvSeries, episodes) {
                 this.posterUrl = res.posterPath
                 this.plot = res.overview
-                this.rating = res.voteAverage?.times(1000)?.toInt()
+                this.score = res.voteAverage?.let { Score.from10(it) }
             }
         }
     }
@@ -132,6 +139,10 @@ class EgyWatchProvider : MainAPI() {
         return true
     }
 
+    // ==========================================
+    // دوال مساعدة (Helpers)
+    // ==========================================
+
     private fun toSearchResponse(item: MediaItem, defaultType: String = ""): SearchResponse? {
         val title = item.title ?: item.name ?: return null
         val id = item.id ?: return null
@@ -149,6 +160,10 @@ class EgyWatchProvider : MainAPI() {
             }
         }
     }
+
+    // ==========================================
+    // Data Classes لترجمة ردود السيرفر (JSON)
+    // ==========================================
 
     data class HomeResponse(@JsonProperty("sections") val sections: List<Section>?)
     data class Section(@JsonProperty("title") val title: String?, @JsonProperty("type") val type: String?, @JsonProperty("data") val data: List<MediaItem>?)
