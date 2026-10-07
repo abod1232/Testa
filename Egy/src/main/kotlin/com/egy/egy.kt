@@ -29,6 +29,9 @@ class EgyWatchProvider : MainAPI() {
         "x-platform" to "android"
     )
 
+    // ذاكرة مؤقتة لحفظ قواعد الفك من /hosts/config
+    private var cachedHostsConfig: List<HostConfigItem>? = null
+
     override val mainPage = mainPageOf(
         "$mainUrl/media/homecontent/$apiKey" to "الصفحة الرئيسية"
     )
@@ -60,6 +63,7 @@ class EgyWatchProvider : MainAPI() {
 
                 val type = itemObj.optString("type").lowercase()
                 val posterPath = itemObj.optString("poster_path").takeIf { it.isNotEmpty() }
+
                 val directApiUrl = if (type == "movie") {
                     "$mainUrl/media/detail/$id/$apiKey"
                 } else {
@@ -152,7 +156,7 @@ class EgyWatchProvider : MainAPI() {
 
                     episodes.add(
                         newEpisode(epVideosJson) {
-                            this.name = ep.episodeName
+                            this.name = ep.name ?: ep.episodeName ?: "الحلقة ${ep.episodeNumber}"
                             this.season = season.seasonNumber
                             this.episode = ep.episodeNumber
                             this.posterUrl = ep.stillPath ?: ep.posterPath
@@ -176,28 +180,165 @@ class EgyWatchProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val videos = parseJson<List<Video>>(data)
+        val hostsRules = getHostsRules()
 
         videos.forEach { video ->
             val link = video.link ?: return@forEach
             val serverName = video.server ?: "Server"
+            val customHeader = video.header ?: ""
 
+            // 1. فحص الروابط المباشرة (MP4 أو M3U8)
             if (link.contains(".m3u8") || link.contains(".mp4")) {
                 callback.invoke(
-                    newExtractorLink(
-                        name = serverName,
-                        source = name,
-                        url = link,
-                    ) {
-                        referer = video.header ?: ""
+                    newExtractorLink(name = serverName, source = name, url = link) {
+                        referer = customHeader
                         quality = getQualityFromName(serverName)
                     }
                 )
+                return@forEach
+            }
+
+            // 2. تجربة مستخرجات كلاودستريم المدمجة أولاً (سريعة جداً)
+            val loaded = loadExtractor(link, subtitleCallback, callback)
+            if (loaded) return@forEach
+
+            // 3. مطابقة الرابط مع قواعد /hosts/config المخصصة
+            val matchedRule = hostsRules.firstOrNull { rule ->
+                val pattern = rule.regexPattern ?: return@firstOrNull false
+                try {
+                    Regex(pattern, RegexOption.IGNORE_CASE).containsMatchIn(link)
+                } catch (e: Exception) {
+                    false
+                }
+            }
+
+            if (matchedRule != null) {
+                resolveWithHostRule(link, serverName, matchedRule, callback)
             } else {
-                loadExtractor(link, subtitleCallback, callback)
+                // 4. Fallback عام للبحث عن الفيديو داخل الـ JS
+                fallbackRegexExtract(link, serverName, customHeader, callback)
             }
         }
         return true
     }
+
+    // ==========================================
+    // محرك تنفيذ قواعد /hosts/config
+    // ==========================================
+
+    private suspend fun getHostsRules(): List<HostConfigItem> {
+        if (cachedHostsConfig != null) return cachedHostsConfig!!
+        return try {
+            val res = app.get(
+                "$mainUrl/hosts/config",
+                headers = mapOf("User-Agent" to "okhttp/5.0.0-alpha.6", "Accept" to "application/json")
+            ).parsedSafe<List<HostConfigItem>>()
+            cachedHostsConfig = res ?: emptyList()
+            cachedHostsConfig!!
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    private suspend fun resolveWithHostRule(
+        link: String,
+        serverName: String,
+        rule: HostConfigItem,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        try {
+            val referer = rule.referer?.takeIf { it.isNotEmpty() } ?: link
+            val userAgent = rule.useragent?.takeIf { it.isNotEmpty() } ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            val headers = mapOf("User-Agent" to userAgent, "Referer" to referer)
+
+            // أ) الاستخراج عبر Regex من صفحة الـ HTML (حقل site)
+            val sitePattern = rule.site
+            if (!sitePattern.isNullOrEmpty()) {
+                val html = app.get(link, headers = headers).text
+                val regex = Regex("""sources.*(https?:[^"']+)"""", RegexOption.IGNORE_CASE)
+                val match = regex.find(html) ?: Regex("""file\s*:\s*["']([^"']+)["']""").find(html)
+
+                val streamUrl = match?.groups?.get(1)?.value
+                if (!streamUrl.isNullOrEmpty() && (streamUrl.startsWith("http://") || streamUrl.startsWith("https://"))) {
+                    callback.invoke(
+                        newExtractorLink(name = "$serverName (Direct)", source = name, url = streamUrl) {
+                            this.referer = referer
+                            this.quality = getQualityFromName(serverName)
+                        }
+                    )
+                    return
+                }
+            }
+
+            // ب) استدعاء سيرفر الفك المساعد (حقل urlsite)
+            val helperUrl = rule.urlsite
+            if (!helperUrl.isNullOrEmpty() && helperUrl.startsWith("http")) {
+                val targetApi = if (helperUrl.endsWith("=") || helperUrl.endsWith("api=")) {
+                    "$helperUrl$link"
+                } else {
+                    helperUrl
+                }
+                val apiRes = app.get(targetApi, headers = headers).text
+                val match = Regex("""(https?://[^\s"']+\.(?:m3u8|mp4)[^\s"']*)""").find(apiRes)
+                val extracted = match?.groups?.get(1)?.value
+
+                if (!extracted.isNullOrEmpty()) {
+                    callback.invoke(
+                        newExtractorLink(name = "$serverName (Helper)", source = name, url = extracted) {
+                            this.referer = referer
+                            this.quality = getQualityFromName(serverName)
+                        }
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            // تجاهل الخطأ لتفادي تعطل بقية السيرفرات
+        }
+    }
+
+    private suspend fun fallbackRegexExtract(
+        link: String,
+        serverName: String,
+        customHeader: String,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        try {
+            val headers = mapOf(
+                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Referer" to customHeader.ifEmpty { link }
+            )
+            val html = app.get(link, headers = headers).text
+            val videoRegex = Regex("""(?:file|src)\s*:\s*["'](https?://[^"']+\.(?:m3u8|mp4)[^"']*)["']""")
+            val match = videoRegex.find(html)
+            val extractedUrl = match?.groups?.get(1)?.value
+
+            if (extractedUrl != null) {
+                callback.invoke(
+                    newExtractorLink(name = "$serverName (Auto)", source = name, url = extractedUrl) {
+                        referer = link
+                        quality = getQualityFromName(serverName)
+                    }
+                )
+            }
+        } catch (e: Exception) {
+            // تجاهل الخطأ
+        }
+    }
+
+    // ==========================================
+    // Data Classes
+    // ==========================================
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    data class HostConfigItem(
+        @JsonProperty("host_id") val hostId: String?,
+        @JsonProperty("regex_pattern") val regexPattern: String?,
+        @JsonProperty("resolver_class") val resolverClass: String?,
+        @JsonProperty("site") val site: String?,
+        @JsonProperty("referer") val referer: String?,
+        @JsonProperty("urlsite") val urlsite: String?,
+        @JsonProperty("useragent") val useragent: String?
+    )
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class MediaDetail(
@@ -224,6 +365,7 @@ class EgyWatchProvider : MainAPI() {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class EpisodeItem(
+        @JsonProperty("name") val name: String?,
         @JsonProperty("episode_name") val episodeName: String?,
         @JsonProperty("episode_number") val episodeNumber: Int?,
         @JsonProperty("still_path") val stillPath: String?,
