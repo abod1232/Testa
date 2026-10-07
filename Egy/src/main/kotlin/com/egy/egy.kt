@@ -150,8 +150,6 @@ class EgyWatchProvider : MainAPI() {
         } else {
             val res = app.get(url, headers = appHeaders).parsedSafe<MediaDetail>() ?: return null
             val episodes = mutableListOf<Episode>()
-
-            // جلب جميع المواسم بالتوازي
             res.seasons?.parallelMap { season ->
                 val seasonId = season.id ?: return@parallelMap
                 val seasonRes = app.get("$mainUrl/series/season/$seasonId/$apiKey", headers = appHeaders).parsedSafe<SeasonDetail>()
@@ -193,14 +191,10 @@ class EgyWatchProvider : MainAPI() {
         }
 
         val hostsRules = getHostsRules()
-
-        // معالجة جميع السيرفرات بالتوازي
         videos.parallelMap { video ->
             val link = video.link ?: return@parallelMap
             val serverName = video.server ?: "سيرفر"
             val customHeader = video.header ?: ""
-
-            // 1. فحص الروابط المباشرة (MP4 أو M3U8)
             if (link.contains(".m3u8") || link.contains(".mp4")) {
                 callback.invoke(
                     newExtractorLink(name = serverName, source = name, url = link) {
@@ -210,8 +204,6 @@ class EgyWatchProvider : MainAPI() {
                 )
                 return@parallelMap
             }
-
-            // 2. مطابقة الرابط مع قواعد /hosts/config (تنظيف الريجيكس)
             val matchedRule = hostsRules.firstOrNull { rule ->
                 val rawPattern = rule.regexPattern ?: return@firstOrNull false
                 try {
@@ -223,18 +215,12 @@ class EgyWatchProvider : MainAPI() {
             }
 
             var resolved = false
-
-            // 3. فك الرابط عبر محرك BaseVedEasyPlex (دعم GET و POST)
             if (matchedRule != null) {
                 resolved = resolveWithBaseVedEngine(link, serverName, customHeader, matchedRule, callback)
             }
-
-            // 4. تجربة مستخرجات كلاودستريم المدمجة كبديل
             if (!resolved) {
                 resolved = loadExtractor(link, subtitleCallback, callback)
             }
-
-            // 5. Fallback أخير للبحث داخل الـ HTML
             if (!resolved) {
                 fallbackRegexExtract(link, serverName, customHeader, callback)
             }
@@ -243,17 +229,9 @@ class EgyWatchProvider : MainAPI() {
         return true
     }
 
-    // ==========================================
-    // دالة المعالجة المتوازية (Parallel Coroutines)
-    // ==========================================
-
     private suspend fun <A, B> Iterable<A>.parallelMap(f: suspend (A) -> B): List<B> = coroutineScope {
         map { async { f(it) } }.awaitAll()
     }
-
-    // ==========================================
-    // محرك الفك عبر mawdhou3.com (BaseVedEasyPlex Engine)
-    // ==========================================
 
     private suspend fun getHostsRules(): List<HostConfigItem> {
         if (cachedHostsConfig != null) return cachedHostsConfig!!
@@ -291,8 +269,6 @@ class EgyWatchProvider : MainAPI() {
             val isPostEnabled = enabledParts.getOrNull(0) == "TRUE"
             val postUrl = enabledParts.getOrNull(1)?.takeIf { it.startsWith("http") }
             val urlSite = rule.urlsite
-
-            // الحالة 1: الفك عبر GET السريع (مثل Uqload و Vidnest)
             if (!isPostEnabled && !urlSite.isNullOrEmpty() && (urlSite.endsWith("=") || urlSite.endsWith("api="))) {
                 val getApiUrl = "$urlSite$link"
                 val apiRes = app.get(getApiUrl, headers = mapOf("User-Agent" to "okhttp/5.0.0-alpha.6")).text
@@ -323,8 +299,6 @@ class EgyWatchProvider : MainAPI() {
                     }
                 }
             }
-
-            // الحالة 2: الفك عبر POST مع إرسال كود الـ HTML (مثل Vidtube و Upzur)
             if (isPostEnabled && postUrl != null) {
                 val html = app.get(link, headers = headers).text
                 val postHeaders = mapOf(
@@ -364,8 +338,6 @@ class EgyWatchProvider : MainAPI() {
                     }
                 }
             }
-
-            // الحالة 3: الاستخراج المحلي المباشر عبر الـ Regex في حقل site
             val sitePattern = rule.site
             if (!sitePattern.isNullOrEmpty()) {
                 val html = app.get(link, headers = headers).text
@@ -416,13 +388,8 @@ class EgyWatchProvider : MainAPI() {
                 )
             }
         } catch (e: Exception) {
-            // تجاهل الخطأ
         }
     }
-
-    // ==========================================
-    // Data Classes
-    // ==========================================
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class HostConfigItem(
