@@ -14,7 +14,7 @@ import java.net.URLEncoder
 
 class EgyWatchProvider : MainAPI() {
     override var mainUrl = "https://rn62mwg.com/egywatchapp/public/api"
-    override var name = "EgyWatch"
+    override var name = "EgyWatch2"
     override val hasMainPage = true
     override var lang = "ar"
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
