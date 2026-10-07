@@ -197,12 +197,8 @@ class EgyWatchProvider : MainAPI() {
             val link = video.link ?: return@parallelMap
             val serverName = video.server ?: "سيرفر"
             val customHeader = video.header ?: ""
-
-            // تنظيف واستخراج الترويسات الصحيحة
             val parsedHeaders = parseHeaderString(customHeader, link)
             val cleanReferer = parsedHeaders["Referer"] ?: parsedHeaders["referer"] ?: link
-
-            // 1. فحص الروابط المباشرة (MP4 أو M3U8)
             if (link.contains(".m3u8") || link.contains(".mp4")) {
                 callback.invoke(
                     newExtractorLink(name = serverName, source = name, url = link) {
@@ -213,8 +209,6 @@ class EgyWatchProvider : MainAPI() {
                 )
                 return@parallelMap
             }
-
-            // 2. مطابقة الرابط مع قواعد /hosts/config
             val matchedRule = hostsRules.firstOrNull { rule ->
                 val rawPattern = rule.regexPattern ?: return@firstOrNull false
                 try {
@@ -226,18 +220,12 @@ class EgyWatchProvider : MainAPI() {
             }
 
             var resolved = false
-
-            // 3. فك الرابط عبر محرك BaseVedEasyPlex
             if (matchedRule != null) {
                 resolved = resolveWithBaseVedEngine(link, serverName, customHeader, matchedRule, callback)
             }
-
-            // 4. تجربة مستخرجات كلاودستريم المدمجة كبديل
             if (!resolved) {
                 resolved = loadExtractor(link, subtitleCallback, callback)
             }
-
-            // 5. Fallback أخير للبحث داخل الـ HTML
             if (!resolved) {
                 fallbackRegexExtract(link, serverName, cleanReferer, callback)
             }
@@ -246,18 +234,12 @@ class EgyWatchProvider : MainAPI() {
         return true
     }
 
-    // ==========================================
-    // دالة تنظيف وتفكيك الترويسات (Header Parser)
-    // ==========================================
-
     private fun parseHeaderString(headerStr: String?, defaultReferer: String): Map<String, String> {
         val headersMap = mutableMapOf<String, String>()
         if (headerStr.isNullOrEmpty()) {
             if (defaultReferer.isNotEmpty()) headersMap["Referer"] = defaultReferer
             return headersMap
         }
-
-        // تفكيك ترويسات مثل: origin:https://...|referer:https://...
         if (headerStr.contains("|") || headerStr.contains(":")) {
             val parts = headerStr.split("|")
             for (part in parts) {
@@ -266,7 +248,6 @@ class EgyWatchProvider : MainAPI() {
                     val key = part.substring(0, colonIdx).trim()
                     val value = part.substring(colonIdx + 1).trim()
                     if (key.isNotEmpty() && value.isNotEmpty()) {
-                        // تعديل الحروف الكبيرة للترويسات القياسية
                         val formattedKey = when (key.lowercase()) {
                             "referer" -> "Referer"
                             "origin" -> "Origin"
@@ -278,13 +259,9 @@ class EgyWatchProvider : MainAPI() {
                 }
             }
         }
-
-        // إذا كان الرابط مكتوباً بشكل مباشر
         if (headersMap.isEmpty() && headerStr.startsWith("http")) {
             headersMap["Referer"] = headerStr.trim()
         }
-
-        // التأكد من وجود Referer نظيف دائماً
         if (!headersMap.containsKey("Referer")) {
             headersMap["Referer"] = defaultReferer
         }
@@ -295,10 +272,6 @@ class EgyWatchProvider : MainAPI() {
     private suspend fun <A, B> Iterable<A>.parallelMap(f: suspend (A) -> B): List<B> = coroutineScope {
         map { async { f(it) } }.awaitAll()
     }
-
-    // ==========================================
-    // محرك الفك عبر mawdhou3.com (BaseVedEasyPlex Engine)
-    // ==========================================
 
     private suspend fun getHostsRules(): List<HostConfigItem> {
         if (cachedHostsConfig != null) return cachedHostsConfig!!
@@ -337,8 +310,6 @@ class EgyWatchProvider : MainAPI() {
             val isPostEnabled = enabledParts.getOrNull(0) == "TRUE"
             val postUrl = enabledParts.getOrNull(1)?.takeIf { it.startsWith("http") }
             val urlSite = rule.urlsite
-
-            // الحالة 1: الفك عبر GET السريع (مثل Uqload و Vidnest)
             if (!isPostEnabled && !urlSite.isNullOrEmpty() && (urlSite.endsWith("=") || urlSite.endsWith("api="))) {
                 val getApiUrl = "$urlSite$link"
                 val apiRes = app.get(getApiUrl, headers = mapOf("User-Agent" to "okhttp/5.0.0-alpha.6")).text
@@ -370,8 +341,6 @@ class EgyWatchProvider : MainAPI() {
                     }
                 }
             }
-
-            // الحالة 2: الفك عبر POST مع إرسال كود الـ HTML (مثل Vidtube و Upzur)
             if (isPostEnabled && postUrl != null) {
                 val html = app.get(link, headers = requestHeaders).text
                 val postHeaders = mapOf(
@@ -412,8 +381,6 @@ class EgyWatchProvider : MainAPI() {
                     }
                 }
             }
-
-            // الحالة 3: الاستخراج المحلي المباشر عبر الـ Regex في حقل site
             val sitePattern = rule.site
             if (!sitePattern.isNullOrEmpty()) {
                 val html = app.get(link, headers = requestHeaders).text
@@ -465,13 +432,8 @@ class EgyWatchProvider : MainAPI() {
                 )
             }
         } catch (e: Exception) {
-            // تجاهل الخطأ
         }
     }
-
-    // ==========================================
-    // Data Classes
-    // ==========================================
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class HostConfigItem(
