@@ -51,8 +51,6 @@ class EgyWatchProvider : MainAPI() {
             val searchResponses = mutableListOf<SearchResponse>()
             for (j in 0 until dataArray.length()) {
                 val itemObj = dataArray.optJSONObject(j) ?: continue
-                
-                // استخدام featured_id إن وجد لأنه المعرف الحقيقي للمسلسلات والأفلام في السلايدر
                 val id = itemObj.optInt("featured_id", 0).takeIf { it > 0 }
                     ?: itemObj.optInt("id", -1).takeIf { it != -1 }
                     ?: continue
@@ -62,8 +60,6 @@ class EgyWatchProvider : MainAPI() {
 
                 val type = itemObj.optString("type").lowercase()
                 val posterPath = itemObj.optString("poster_path").takeIf { it.isNotEmpty() }
-
-                // وضع الرابط المباشر للـ API لتفادي أخطاء الـ Split
                 val directApiUrl = if (type == "movie") {
                     "$mainUrl/media/detail/$id/$apiKey"
                 } else {
@@ -133,7 +129,6 @@ class EgyWatchProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse? {
-        // الفحص مباشرة من الرابط لمعرفة إذا كان فيلماً أو مسلسلاً
         return if (url.contains("/media/detail/")) {
             val res = app.get(url, headers = appHeaders).parsedSafe<MediaDetail>() ?: return null
             val videosJson = res.videos?.toJson() ?: ""
@@ -145,7 +140,6 @@ class EgyWatchProvider : MainAPI() {
                 this.score = res.voteAverage?.let { Score.from10(it) }
             }
         } else {
-            // هنا يطلب الرابط الصحيح مثل: /series/show/7600/apiKey
             val res = app.get(url, headers = appHeaders).parsedSafe<MediaDetail>() ?: return null
             val episodes = mutableListOf<Episode>()
 
@@ -204,10 +198,6 @@ class EgyWatchProvider : MainAPI() {
         }
         return true
     }
-
-    // ==========================================
-    // Data Classes
-    // ==========================================
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class MediaDetail(
