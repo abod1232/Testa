@@ -14,7 +14,7 @@ import java.net.URLEncoder
 
 class EgyWatchProvider : MainAPI() {
     override var mainUrl = "https://rn62mwg.com/egywatchapp/public/api"
-    override var name = "EgyWatch2"
+    override var name = "EgyWatch"
     override val hasMainPage = true
     override var lang = "ar"
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
@@ -28,6 +28,7 @@ class EgyWatchProvider : MainAPI() {
         "x-app-id" to "Egywatch-mobile",
         "x-platform" to "android"
     )
+
     private var cachedHostsConfig: List<HostConfigItem>? = null
 
     override val mainPage = mainPageOf(
@@ -52,6 +53,7 @@ class EgyWatchProvider : MainAPI() {
             val searchResponses = mutableListOf<SearchResponse>()
             for (j in 0 until dataArray.length()) {
                 val itemObj = dataArray.optJSONObject(j) ?: continue
+                
                 val id = itemObj.optInt("featured_id", 0).takeIf { it > 0 }
                     ?: itemObj.optInt("id", -1).takeIf { it != -1 }
                     ?: continue
@@ -61,6 +63,7 @@ class EgyWatchProvider : MainAPI() {
 
                 val type = itemObj.optString("type").lowercase()
                 val posterPath = itemObj.optString("poster_path").takeIf { it.isNotEmpty() }
+
                 val directApiUrl = if (type == "movie") {
                     "$mainUrl/media/detail/$id/$apiKey"
                 } else {
@@ -183,6 +186,8 @@ class EgyWatchProvider : MainAPI() {
             val link = video.link ?: return@forEach
             val serverName = video.server ?: "سيرفر"
             val customHeader = video.header ?: ""
+
+            // 1. فحص الروابط المباشرة الصريحة (MP4 أو M3U8)
             if (link.contains(".m3u8") || link.contains(".mp4")) {
                 callback.invoke(
                     newExtractorLink(name = serverName, source = name, url = link) {
@@ -192,25 +197,42 @@ class EgyWatchProvider : MainAPI() {
                 )
                 return@forEach
             }
-            val loaded = loadExtractor(link, subtitleCallback, callback)
-            if (loaded) return@forEach
+
+            // 2. مطابقة الرابط مع قواعد /hosts/config (تنظيف الريجيكس قبل الفحص)
             val matchedRule = hostsRules.firstOrNull { rule ->
-                val pattern = rule.regexPattern ?: return@firstOrNull false
+                val rawPattern = rule.regexPattern ?: return@firstOrNull false
                 try {
-                    Regex(pattern, RegexOption.IGNORE_CASE).containsMatchIn(link)
+                    // إزالة الـ Escaped Slashes (\/) لكي تقبلها لغة Java/Kotlin
+                    val cleanPattern = rawPattern.replace("\\/", "/")
+                    Regex(cleanPattern, RegexOption.IGNORE_CASE).containsMatchIn(link)
                 } catch (e: Exception) {
                     false
                 }
             }
 
+            var resolved = false
+
+            // 3. الأولوية الأولى: محاكاة BaseVedEasyPlex وإرسال POST إلى mawdhou3.com
             if (matchedRule != null) {
-                resolveWithBaseVedEngine(link, serverName, customHeader, matchedRule, callback)
-            } else {
+                resolved = resolveWithBaseVedEngine(link, serverName, customHeader, matchedRule, callback)
+            }
+
+            // 4. إذا لم ينجح سيرفر mawdhou3، نجرب مستخرجات كلاودستريم المدمجة
+            if (!resolved) {
+                resolved = loadExtractor(link, subtitleCallback, callback)
+            }
+
+            // 5. Fallback أخير للبحث عن الرابط داخل كود الصفحة
+            if (!resolved) {
                 fallbackRegexExtract(link, serverName, customHeader, callback)
             }
         }
         return true
     }
+
+    // ==========================================
+    // محرك الفك عبر mawdhou3.com (كلاس BaseVedEasyPlex)
+    // ==========================================
 
     private suspend fun getHostsRules(): List<HostConfigItem> {
         if (cachedHostsConfig != null) return cachedHostsConfig!!
@@ -232,18 +254,23 @@ class EgyWatchProvider : MainAPI() {
         customHeader: String,
         rule: HostConfigItem,
         callback: (ExtractorLink) -> Unit
-    ) {
-        try {
+    ): Boolean {
+        return try {
             val finalReferer = customHeader.takeIf { it.isNotEmpty() }
                 ?: rule.referer?.takeIf { it.isNotEmpty() }
                 ?: link
 
             val userAgent = rule.useragent?.takeIf { it.isNotEmpty() } ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             val headers = mapOf("User-Agent" to userAgent, "Referer" to finalReferer)
+
+            // 1. جلب كود الـ HTML
             val html = app.get(link, headers = headers).text
+
+            // 2. التحقق من مسار الـ POST في mawdhou3.com
             val enabledParts = rule.enableded?.split("|") ?: emptyList()
             val isEnabled = enabledParts.getOrNull(0) == "TRUE"
             val postUrl = enabledParts.getOrNull(1)?.takeIf { it.startsWith("http") }
+
             if (isEnabled && postUrl != null) {
                 val postHeaders = mapOf(
                     "Content-Type" to "application/x-www-form-urlencoded",
@@ -255,12 +282,13 @@ class EgyWatchProvider : MainAPI() {
                     data = mapOf("content" to html, "url" to link),
                     headers = postHeaders
                 ).text
+
                 val jsonRes = JSONObject(postResponse)
                 if (jsonRes.optString("status") == "success") {
                     val filteredContent = jsonRes.optJSONArray("filtered_content")
                     val qualityArray = jsonRes.optJSONArray("Quality")
 
-                    if (filteredContent != null) {
+                    if (filteredContent != null && filteredContent.length() > 0) {
                         for (i in 0 until filteredContent.length()) {
                             val streamUrl = filteredContent.optString(i)
                             if (streamUrl.isNotEmpty()) {
@@ -277,12 +305,15 @@ class EgyWatchProvider : MainAPI() {
                                 )
                             }
                         }
-                        return
+                        return true
                     }
                 }
             }
+
+            // 3. تجربة الـ Regex المباشر في حقل site إن لم يكن سيرفر POST
             val sitePattern = rule.site
             if (!sitePattern.isNullOrEmpty()) {
+                val cleanSitePattern = sitePattern.replace("\\/", "/")
                 val regex = Regex("""sources.*(https?:[^"']+)"""", RegexOption.IGNORE_CASE)
                 val match = regex.find(html) ?: Regex("""file\s*:\s*["']([^"']+)["']""").find(html)
 
@@ -294,11 +325,12 @@ class EgyWatchProvider : MainAPI() {
                             this.quality = getQualityFromName(serverName)
                         }
                     )
-                    return
+                    return true
                 }
             }
-
+            false
         } catch (e: Exception) {
+            false
         }
     }
 
@@ -327,8 +359,13 @@ class EgyWatchProvider : MainAPI() {
                 )
             }
         } catch (e: Exception) {
+            // تجاهل الخطأ
         }
     }
+
+    // ==========================================
+    // Data Classes
+    // ==========================================
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class HostConfigItem(
