@@ -17,8 +17,6 @@ class EgyWatchProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
 
     private val apiKey = "p2lbgWkFrykA4QyUmpHihzmc5BNzIABq"
-
-    // الترويسات الأساسية للتطبيق
     private val appHeaders = mapOf(
         "User-Agent" to "EasyPlex (Android 16; RMX5061; realme RE60ADL1; ar)",
         "packagename" to "com.linkletter.app",
@@ -77,14 +75,11 @@ class EgyWatchProvider : MainAPI() {
                 this.posterUrl = res.posterPath
                 this.plot = res.overview
                 this.year = res.releaseDate?.substringBefore("-")?.toIntOrNull()
-                // التعديل هنا: تحويل التقييم إلى Score
                 this.score = res.voteAverage?.let { Score.from10(it) }
             }
         } else {
             val res = app.get("$mainUrl/series/show/$id/$apiKey", headers = appHeaders).parsedSafe<MediaDetail>() ?: return null
             val episodes = mutableListOf<Episode>()
-
-            // جلب المواسم والحلقات
             res.seasons?.forEach { season ->
                 val seasonRes = app.get("$mainUrl/series/season/${season.id}/$apiKey", headers = appHeaders).parsedSafe<SeasonDetail>()
                 seasonRes?.episodes?.forEach { ep ->
@@ -139,10 +134,6 @@ class EgyWatchProvider : MainAPI() {
         return true
     }
 
-    // ==========================================
-    // دوال مساعدة (Helpers)
-    // ==========================================
-
     private fun toSearchResponse(item: MediaItem, defaultType: String = ""): SearchResponse? {
         val title = item.title ?: item.name ?: return null
         val id = item.id ?: return null
@@ -160,10 +151,6 @@ class EgyWatchProvider : MainAPI() {
             }
         }
     }
-
-    // ==========================================
-    // Data Classes لترجمة ردود السيرفر (JSON)
-    // ==========================================
 
     data class HomeResponse(@JsonProperty("sections") val sections: List<Section>?)
     data class Section(@JsonProperty("title") val title: String?, @JsonProperty("type") val type: String?, @JsonProperty("data") val data: List<MediaItem>?)
