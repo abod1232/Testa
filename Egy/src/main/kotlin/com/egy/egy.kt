@@ -44,8 +44,6 @@ class EgyWatchProvider : MainAPI() {
         for (i in 0 until sectionsArray.length()) {
             val sectionObj = sectionsArray.optJSONObject(i) ?: continue
             val title = sectionObj.optString("title").trim().ifEmpty { sectionObj.optString("type") }
-            
-            // قراءة المصفوفة فقط وتجاهل الكائنات الفردية كالإعلانات
             val dataArray = sectionObj.optJSONArray("data") ?: continue
 
             val searchResponses = mutableListOf<SearchResponse>()
@@ -80,7 +78,6 @@ class EgyWatchProvider : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse>? {
-        // ترميز الرابط لحل مشكلة الرمز |
         val encodedQuery = URLEncoder.encode("$query|vide", "UTF-8")
         val searchUrl = "$mainUrl/search/$encodedQuery/$apiKey"
         val responseText = app.get(searchUrl, headers = appHeaders).text
@@ -188,10 +185,6 @@ class EgyWatchProvider : MainAPI() {
         }
         return true
     }
-
-    // ==========================================
-    // Data Classes لتفاصيل المشاهدة
-    // ==========================================
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class MediaDetail(
