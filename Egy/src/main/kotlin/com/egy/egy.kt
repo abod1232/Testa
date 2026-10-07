@@ -24,7 +24,9 @@ class EgyWatchProvider : MainAPI() {
     private val appHeaders = mapOf(
         "User-Agent" to "EasyPlex (Android 16; RMX5061; realme RE60ADL1; ar)",
         "packagename" to "com.linkletter.app",
-        "Accept" to "application/json"
+        "Accept" to "application/json",
+        "x-app-id" to "Egywatch-mobile",
+        "x-platform" to "android"
     )
 
     override val mainPage = mainPageOf(
@@ -49,20 +51,31 @@ class EgyWatchProvider : MainAPI() {
             val searchResponses = mutableListOf<SearchResponse>()
             for (j in 0 until dataArray.length()) {
                 val itemObj = dataArray.optJSONObject(j) ?: continue
-                val id = itemObj.optInt("id", -1).takeIf { it != -1 } ?: continue
+                
+                // استخدام featured_id إن وجد لأنه المعرف الحقيقي للمسلسلات والأفلام في السلايدر
+                val id = itemObj.optInt("featured_id", 0).takeIf { it > 0 }
+                    ?: itemObj.optInt("id", -1).takeIf { it != -1 }
+                    ?: continue
+
                 val itemTitle = itemObj.optString("title").ifEmpty { itemObj.optString("name") }
                 if (itemTitle.isEmpty()) continue
 
                 val type = itemObj.optString("type").lowercase()
                 val posterPath = itemObj.optString("poster_path").takeIf { it.isNotEmpty() }
 
-                val url = "egywatch://$type/$id"
+                // وضع الرابط المباشر للـ API لتفادي أخطاء الـ Split
+                val directApiUrl = if (type == "movie") {
+                    "$mainUrl/media/detail/$id/$apiKey"
+                } else {
+                    "$mainUrl/series/show/$id/$apiKey"
+                }
+
                 val searchRes = if (type == "movie") {
-                    newMovieSearchResponse(itemTitle, url, TvType.Movie) {
+                    newMovieSearchResponse(itemTitle, directApiUrl, TvType.Movie) {
                         this.posterUrl = posterPath
                     }
                 } else {
-                    newTvSeriesSearchResponse(itemTitle, url, TvType.TvSeries) {
+                    newTvSeriesSearchResponse(itemTitle, directApiUrl, TvType.TvSeries) {
                         this.posterUrl = posterPath
                     }
                 }
@@ -97,13 +110,18 @@ class EgyWatchProvider : MainAPI() {
                 val type = item.optString("type").lowercase().ifEmpty { defaultType }
                 val posterPath = item.optString("poster_path").takeIf { it.isNotEmpty() }
 
-                val url = "egywatch://$type/$id"
+                val directApiUrl = if (type == "movie") {
+                    "$mainUrl/media/detail/$id/$apiKey"
+                } else {
+                    "$mainUrl/series/show/$id/$apiKey"
+                }
+
                 val res = if (type == "movie") {
-                    newMovieSearchResponse(title, url, TvType.Movie) {
+                    newMovieSearchResponse(title, directApiUrl, TvType.Movie) {
                         this.posterUrl = posterPath
                     }
                 } else {
-                    newTvSeriesSearchResponse(title, url, TvType.TvSeries) {
+                    newTvSeriesSearchResponse(title, directApiUrl, TvType.TvSeries) {
                         this.posterUrl = posterPath
                     }
                 }
@@ -115,25 +133,26 @@ class EgyWatchProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse? {
-        val type = url.split("/")[2]
-        val id = url.split("/")[3]
-
-        return if (type == "movie") {
-            val res = app.get("$mainUrl/media/detail/$id/$apiKey", headers = appHeaders).parsedSafe<MediaDetail>() ?: return null
+        // الفحص مباشرة من الرابط لمعرفة إذا كان فيلماً أو مسلسلاً
+        return if (url.contains("/media/detail/")) {
+            val res = app.get(url, headers = appHeaders).parsedSafe<MediaDetail>() ?: return null
             val videosJson = res.videos?.toJson() ?: ""
 
-            newMovieLoadResponse(res.title ?: "", url, TvType.Movie, videosJson) {
+            newMovieLoadResponse(res.title ?: res.name ?: "", url, TvType.Movie, videosJson) {
                 this.posterUrl = res.posterPath
                 this.plot = res.overview
                 this.year = res.releaseDate?.substringBefore("-")?.toIntOrNull()
                 this.score = res.voteAverage?.let { Score.from10(it) }
             }
         } else {
-            val res = app.get("$mainUrl/series/show/$id/$apiKey", headers = appHeaders).parsedSafe<MediaDetail>() ?: return null
+            // هنا يطلب الرابط الصحيح مثل: /series/show/7600/apiKey
+            val res = app.get(url, headers = appHeaders).parsedSafe<MediaDetail>() ?: return null
             val episodes = mutableListOf<Episode>()
 
             res.seasons?.forEach { season ->
-                val seasonRes = app.get("$mainUrl/series/season/${season.id}/$apiKey", headers = appHeaders).parsedSafe<SeasonDetail>()
+                val seasonId = season.id ?: return@forEach
+                val seasonRes = app.get("$mainUrl/series/season/$seasonId/$apiKey", headers = appHeaders).parsedSafe<SeasonDetail>()
+                
                 seasonRes?.episodes?.forEach { ep ->
                     val epVideosJson = ep.videos?.toJson() ?: ""
 
@@ -148,7 +167,7 @@ class EgyWatchProvider : MainAPI() {
                 }
             }
 
-            newTvSeriesLoadResponse(res.title ?: "", url, TvType.TvSeries, episodes) {
+            newTvSeriesLoadResponse(res.name ?: res.title ?: "", url, TvType.TvSeries, episodes) {
                 this.posterUrl = res.posterPath
                 this.plot = res.overview
                 this.score = res.voteAverage?.let { Score.from10(it) }
@@ -186,6 +205,10 @@ class EgyWatchProvider : MainAPI() {
         return true
     }
 
+    // ==========================================
+    // Data Classes
+    // ==========================================
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class MediaDetail(
         @JsonProperty("id") val id: Int?,
@@ -194,6 +217,7 @@ class EgyWatchProvider : MainAPI() {
         @JsonProperty("overview") val overview: String?,
         @JsonProperty("poster_path") val posterPath: String?,
         @JsonProperty("release_date") val releaseDate: String?,
+        @JsonProperty("first_air_date") val firstAirDate: String?,
         @JsonProperty("vote_average") val voteAverage: Double?,
         @JsonProperty("videos") val videos: List<Video>?,
         @JsonProperty("seasons") val seasons: List<Season>?
