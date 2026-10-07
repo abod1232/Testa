@@ -181,8 +181,6 @@ class EgyWatchProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         Log.d("EgyWatch", "========== Start loadLinks ==========")
-        
-        // إصلاح تحويل المصفوفة بأمان
         val videos = try {
             parseJson<Array<Video>>(data).toList()
         } catch (e: Exception) {
@@ -199,8 +197,6 @@ class EgyWatchProvider : MainAPI() {
             val customHeader = video.header ?: ""
 
             Log.d("EgyWatch", "Processing server: [$serverName] -> $link")
-
-            // 1. فحص الروابط المباشرة (MP4 أو M3U8)
             if (link.contains(".m3u8") || link.contains(".mp4")) {
                 Log.d("EgyWatch", "Found direct media link: $link")
                 callback.invoke(
@@ -211,8 +207,6 @@ class EgyWatchProvider : MainAPI() {
                 )
                 return@forEach
             }
-
-            // 2. مطابقة الرابط مع قواعد /hosts/config
             val matchedRule = hostsRules.firstOrNull { rule ->
                 val rawPattern = rule.regexPattern ?: return@firstOrNull false
                 try {
@@ -231,14 +225,10 @@ class EgyWatchProvider : MainAPI() {
             } else {
                 Log.d("EgyWatch", "No host rule matched for $link")
             }
-
-            // 3. تجربة مستخرجات كلاودستريم المدمجة كبديل
             if (!resolved) {
                 Log.d("EgyWatch", "Trying native Cloudstream extractor for $link")
                 resolved = loadExtractor(link, subtitleCallback, callback)
             }
-
-            // 4. Fallback أخير للبحث المباشر داخل الـ HTML
             if (!resolved) {
                 Log.d("EgyWatch", "Executing regex fallback for $link")
                 fallbackRegexExtract(link, serverName, customHeader, callback)
@@ -249,10 +239,6 @@ class EgyWatchProvider : MainAPI() {
         return true
     }
 
-    // ==========================================
-    // محرك الفك عبر mawdhou3.com (كلاس BaseVedEasyPlex)
-    // ==========================================
-
     private suspend fun getHostsRules(): List<HostConfigItem> {
         if (cachedHostsConfig != null) return cachedHostsConfig!!
         return try {
@@ -260,8 +246,6 @@ class EgyWatchProvider : MainAPI() {
                 "$mainUrl/hosts/config",
                 headers = mapOf("User-Agent" to "okhttp/5.0.0-alpha.6", "Accept" to "application/json")
             ).text
-            
-            // قراءة المصفوفة كـ Array لتفادي خطأ LinkedHashMap ClassCastException
             val array = parseJson<Array<HostConfigItem>>(text).toList()
             Log.d("EgyWatch", "Loaded ${array.size} rules from /hosts/config")
             cachedHostsConfig = array
@@ -286,13 +270,9 @@ class EgyWatchProvider : MainAPI() {
 
             val userAgent = rule.useragent?.takeIf { it.isNotEmpty() } ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             val headers = mapOf("User-Agent" to userAgent, "Referer" to finalReferer)
-
-            // 1. جلب كود الـ HTML
             Log.d("EgyWatch", "Fetching HTML from: $link")
             val html = app.get(link, headers = headers).text
             Log.d("EgyWatch", "HTML fetched successfully, length: ${html.length}")
-
-            // 2. التحقق من مسار الـ POST في mawdhou3.com
             val enabledParts = rule.enableded?.split("|") ?: emptyList()
             val isEnabled = enabledParts.getOrNull(0) == "TRUE"
             val postUrl = enabledParts.getOrNull(1)?.takeIf { it.startsWith("http") }
@@ -339,8 +319,6 @@ class EgyWatchProvider : MainAPI() {
                     }
                 }
             }
-
-            // 3. تجربة الـ Regex المباشر في حقل site إن لم يكن سيرفر POST
             val sitePattern = rule.site
             if (!sitePattern.isNullOrEmpty()) {
                 val cleanSitePattern = sitePattern.replace("\\/", "/")
@@ -395,10 +373,6 @@ class EgyWatchProvider : MainAPI() {
             Log.e("EgyWatch", "Fallback regex error: ${e.message}")
         }
     }
-
-    // ==========================================
-    // Data Classes
-    // ==========================================
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class HostConfigItem(
