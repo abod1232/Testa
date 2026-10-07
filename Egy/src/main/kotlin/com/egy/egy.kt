@@ -1,5 +1,6 @@
 package com.egy
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
@@ -8,6 +9,8 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.getQualityFromName
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.newExtractorLink
+import org.json.JSONObject
+import java.net.URLEncoder
 
 class EgyWatchProvider : MainAPI() {
     override var mainUrl = "https://rn62mwg.com/egywatchapp/public/api"
@@ -17,6 +20,7 @@ class EgyWatchProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
 
     private val apiKey = "p2lbgWkFrykA4QyUmpHihzmc5BNzIABq"
+
     private val appHeaders = mapOf(
         "User-Agent" to "EasyPlex (Android 16; RMX5061; realme RE60ADL1; ar)",
         "packagename" to "com.linkletter.app",
@@ -31,15 +35,40 @@ class EgyWatchProvider : MainAPI() {
         page: Int,
         request: MainPageRequest
     ): HomePageResponse? {
-        val response = app.get(request.data, headers = appHeaders).parsedSafe<HomeResponse>()
+        val responseText = app.get(request.data, headers = appHeaders).text
+        val json = JSONObject(responseText)
+        val sectionsArray = json.optJSONArray("sections") ?: return null
+
         val homeItems = mutableListOf<HomePageList>()
 
-        response?.sections?.forEach { section ->
-            val title = section.title.takeIf { !it.isNullOrEmpty() } ?: section.type ?: "أخرى"
-            val elements = section.data ?: return@forEach
+        for (i in 0 until sectionsArray.length()) {
+            val sectionObj = sectionsArray.optJSONObject(i) ?: continue
+            val title = sectionObj.optString("title").trim().ifEmpty { sectionObj.optString("type") }
+            
+            // قراءة المصفوفة فقط وتجاهل الكائنات الفردية كالإعلانات
+            val dataArray = sectionObj.optJSONArray("data") ?: continue
 
-            val searchResponses = elements.mapNotNull { item ->
-                toSearchResponse(item)
+            val searchResponses = mutableListOf<SearchResponse>()
+            for (j in 0 until dataArray.length()) {
+                val itemObj = dataArray.optJSONObject(j) ?: continue
+                val id = itemObj.optInt("id", -1).takeIf { it != -1 } ?: continue
+                val itemTitle = itemObj.optString("title").ifEmpty { itemObj.optString("name") }
+                if (itemTitle.isEmpty()) continue
+
+                val type = itemObj.optString("type").lowercase()
+                val posterPath = itemObj.optString("poster_path").takeIf { it.isNotEmpty() }
+
+                val url = "egywatch://$type/$id"
+                val searchRes = if (type == "movie") {
+                    newMovieSearchResponse(itemTitle, url, TvType.Movie) {
+                        this.posterUrl = posterPath
+                    }
+                } else {
+                    newTvSeriesSearchResponse(itemTitle, url, TvType.TvSeries) {
+                        this.posterUrl = posterPath
+                    }
+                }
+                searchResponses.add(searchRes)
             }
 
             if (searchResponses.isNotEmpty()) {
@@ -51,14 +80,39 @@ class EgyWatchProvider : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse>? {
-        val searchUrl = "$mainUrl/search/${query}|vide/$apiKey"
-        val response = app.get(searchUrl, headers = appHeaders).parsedSafe<SearchData>()
+        // ترميز الرابط لحل مشكلة الرمز |
+        val encodedQuery = URLEncoder.encode("$query|vide", "UTF-8")
+        val searchUrl = "$mainUrl/search/$encodedQuery/$apiKey"
+        val responseText = app.get(searchUrl, headers = appHeaders).text
+        val json = JSONObject(responseText)
 
         val results = mutableListOf<SearchResponse>()
+        val categories = listOf("movies" to "movie", "series" to "serie", "animes" to "anime")
 
-        response?.movies?.forEach { toSearchResponse(it, "movie")?.let { res -> results.add(res) } }
-        response?.series?.forEach { toSearchResponse(it, "serie")?.let { res -> results.add(res) } }
-        response?.animes?.forEach { toSearchResponse(it, "anime")?.let { res -> results.add(res) } }
+        for ((key, defaultType) in categories) {
+            val array = json.optJSONArray(key) ?: continue
+            for (i in 0 until array.length()) {
+                val item = array.optJSONObject(i) ?: continue
+                val id = item.optInt("id", -1).takeIf { it != -1 } ?: continue
+                val title = item.optString("title").ifEmpty { item.optString("name") }
+                if (title.isEmpty()) continue
+
+                val type = item.optString("type").lowercase().ifEmpty { defaultType }
+                val posterPath = item.optString("poster_path").takeIf { it.isNotEmpty() }
+
+                val url = "egywatch://$type/$id"
+                val res = if (type == "movie") {
+                    newMovieSearchResponse(title, url, TvType.Movie) {
+                        this.posterUrl = posterPath
+                    }
+                } else {
+                    newTvSeriesSearchResponse(title, url, TvType.TvSeries) {
+                        this.posterUrl = posterPath
+                    }
+                }
+                results.add(res)
+            }
+        }
 
         return results
     }
@@ -80,6 +134,7 @@ class EgyWatchProvider : MainAPI() {
         } else {
             val res = app.get("$mainUrl/series/show/$id/$apiKey", headers = appHeaders).parsedSafe<MediaDetail>() ?: return null
             val episodes = mutableListOf<Episode>()
+
             res.seasons?.forEach { season ->
                 val seasonRes = app.get("$mainUrl/series/season/${season.id}/$apiKey", headers = appHeaders).parsedSafe<SeasonDetail>()
                 seasonRes?.episodes?.forEach { ep ->
@@ -134,41 +189,11 @@ class EgyWatchProvider : MainAPI() {
         return true
     }
 
-    private fun toSearchResponse(item: MediaItem, defaultType: String = ""): SearchResponse? {
-        val title = item.title ?: item.name ?: return null
-        val id = item.id ?: return null
-        val type = item.type?.lowercase() ?: defaultType
+    // ==========================================
+    // Data Classes لتفاصيل المشاهدة
+    // ==========================================
 
-        val url = "egywatch://$type/$id"
-
-        return if (type == "movie") {
-            newMovieSearchResponse(title, url, TvType.Movie) {
-                this.posterUrl = item.posterPath
-            }
-        } else {
-            newTvSeriesSearchResponse(title, url, TvType.TvSeries) {
-                this.posterUrl = item.posterPath
-            }
-        }
-    }
-
-    data class HomeResponse(@JsonProperty("sections") val sections: List<Section>?)
-    data class Section(@JsonProperty("title") val title: String?, @JsonProperty("type") val type: String?, @JsonProperty("data") val data: List<MediaItem>?)
-
-    data class SearchData(
-        @JsonProperty("movies") val movies: List<MediaItem>?,
-        @JsonProperty("series") val series: List<MediaItem>?,
-        @JsonProperty("animes") val animes: List<MediaItem>?
-    )
-
-    data class MediaItem(
-        @JsonProperty("id") val id: Int?,
-        @JsonProperty("title") val title: String?,
-        @JsonProperty("name") val name: String?,
-        @JsonProperty("type") val type: String?,
-        @JsonProperty("poster_path") val posterPath: String?
-    )
-
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class MediaDetail(
         @JsonProperty("id") val id: Int?,
         @JsonProperty("title") val title: String?,
@@ -181,13 +206,16 @@ class EgyWatchProvider : MainAPI() {
         @JsonProperty("seasons") val seasons: List<Season>?
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class Season(
         @JsonProperty("id") val id: Int?,
         @JsonProperty("season_number") val seasonNumber: Int?
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class SeasonDetail(@JsonProperty("episodes") val episodes: List<EpisodeItem>?)
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class EpisodeItem(
         @JsonProperty("episode_name") val episodeName: String?,
         @JsonProperty("episode_number") val episodeNumber: Int?,
@@ -196,6 +224,7 @@ class EgyWatchProvider : MainAPI() {
         @JsonProperty("videos") val videos: List<Video>?
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class Video(
         @JsonProperty("server") val server: String?,
         @JsonProperty("link") val link: String?,
