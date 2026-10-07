@@ -28,8 +28,6 @@ class EgyWatchProvider : MainAPI() {
         "x-app-id" to "Egywatch-mobile",
         "x-platform" to "android"
     )
-
-    // ذاكرة مؤقتة لحفظ قواعد الفك من /hosts/config
     private var cachedHostsConfig: List<HostConfigItem>? = null
 
     override val mainPage = mainPageOf(
@@ -186,8 +184,6 @@ class EgyWatchProvider : MainAPI() {
             val link = video.link ?: return@forEach
             val serverName = video.server ?: "Server"
             val customHeader = video.header ?: ""
-
-            // 1. فحص الروابط المباشرة (MP4 أو M3U8)
             if (link.contains(".m3u8") || link.contains(".mp4")) {
                 callback.invoke(
                     newExtractorLink(name = serverName, source = name, url = link) {
@@ -197,12 +193,8 @@ class EgyWatchProvider : MainAPI() {
                 )
                 return@forEach
             }
-
-            // 2. تجربة مستخرجات كلاودستريم المدمجة أولاً (سريعة جداً)
             val loaded = loadExtractor(link, subtitleCallback, callback)
             if (loaded) return@forEach
-
-            // 3. مطابقة الرابط مع قواعد /hosts/config المخصصة
             val matchedRule = hostsRules.firstOrNull { rule ->
                 val pattern = rule.regexPattern ?: return@firstOrNull false
                 try {
@@ -215,16 +207,11 @@ class EgyWatchProvider : MainAPI() {
             if (matchedRule != null) {
                 resolveWithHostRule(link, serverName, matchedRule, callback)
             } else {
-                // 4. Fallback عام للبحث عن الفيديو داخل الـ JS
                 fallbackRegexExtract(link, serverName, customHeader, callback)
             }
         }
         return true
     }
-
-    // ==========================================
-    // محرك تنفيذ قواعد /hosts/config
-    // ==========================================
 
     private suspend fun getHostsRules(): List<HostConfigItem> {
         if (cachedHostsConfig != null) return cachedHostsConfig!!
@@ -250,8 +237,6 @@ class EgyWatchProvider : MainAPI() {
             val referer = rule.referer?.takeIf { it.isNotEmpty() } ?: link
             val userAgent = rule.useragent?.takeIf { it.isNotEmpty() } ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             val headers = mapOf("User-Agent" to userAgent, "Referer" to referer)
-
-            // أ) الاستخراج عبر Regex من صفحة الـ HTML (حقل site)
             val sitePattern = rule.site
             if (!sitePattern.isNullOrEmpty()) {
                 val html = app.get(link, headers = headers).text
@@ -269,8 +254,6 @@ class EgyWatchProvider : MainAPI() {
                     return
                 }
             }
-
-            // ب) استدعاء سيرفر الفك المساعد (حقل urlsite)
             val helperUrl = rule.urlsite
             if (!helperUrl.isNullOrEmpty() && helperUrl.startsWith("http")) {
                 val targetApi = if (helperUrl.endsWith("=") || helperUrl.endsWith("api=")) {
@@ -292,7 +275,6 @@ class EgyWatchProvider : MainAPI() {
                 }
             }
         } catch (e: Exception) {
-            // تجاهل الخطأ لتفادي تعطل بقية السيرفرات
         }
     }
 
@@ -321,13 +303,8 @@ class EgyWatchProvider : MainAPI() {
                 )
             }
         } catch (e: Exception) {
-            // تجاهل الخطأ
         }
     }
-
-    // ==========================================
-    // Data Classes
-    // ==========================================
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class HostConfigItem(
