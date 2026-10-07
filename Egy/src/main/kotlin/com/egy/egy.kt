@@ -4,6 +4,7 @@ import android.util.Log
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.mvvm.apmap
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
@@ -15,7 +16,7 @@ import java.net.URLEncoder
 
 class EgyWatchProvider : MainAPI() {
     override var mainUrl = "https://rn62mwg.com/egywatchapp/public/api"
-    override var name = "EgyWatch3"
+    override var name = "EgyWatch"
     override val hasMainPage = true
     override var lang = "ar"
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
@@ -148,8 +149,9 @@ class EgyWatchProvider : MainAPI() {
             val res = app.get(url, headers = appHeaders).parsedSafe<MediaDetail>() ?: return null
             val episodes = mutableListOf<Episode>()
 
-            res.seasons?.forEach { season ->
-                val seasonId = season.id ?: return@forEach
+            // جلب جميع المواسم بالتوازي لتسريع فتح المسلسل
+            res.seasons?.apmap { season ->
+                val seasonId = season.id ?: return@apmap
                 val seasonRes = app.get("$mainUrl/series/season/$seasonId/$apiKey", headers = appHeaders).parsedSafe<SeasonDetail>()
                 
                 seasonRes?.episodes?.forEach { ep ->
@@ -180,33 +182,32 @@ class EgyWatchProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        Log.d("EgyWatch", "========== Start loadLinks ==========")
         val videos = try {
             parseJson<Array<Video>>(data).toList()
         } catch (e: Exception) {
-            Log.e("EgyWatch", "Failed to parse videos JSON: ${e.message}")
             emptyList()
         }
 
         val hostsRules = getHostsRules()
-        Log.d("EgyWatch", "Total available host rules: ${hostsRules.size}")
 
-        videos.forEach { video ->
-            val link = video.link ?: return@forEach
+        // استخدام apmap لتشغيل جميع السيرفرات في نفس اللحظة بالتوازي
+        videos.apmap { video ->
+            val link = video.link ?: return@apmap
             val serverName = video.server ?: "سيرفر"
             val customHeader = video.header ?: ""
 
-            Log.d("EgyWatch", "Processing server: [$serverName] -> $link")
+            // 1. فحص الروابط المباشرة
             if (link.contains(".m3u8") || link.contains(".mp4")) {
-                Log.d("EgyWatch", "Found direct media link: $link")
                 callback.invoke(
                     newExtractorLink(name = serverName, source = name, url = link) {
                         referer = customHeader
                         quality = getQualityFromName(serverName)
                     }
                 )
-                return@forEach
+                return@apmap
             }
+
+            // 2. مطابقة الرابط مع قواعد /hosts/config
             val matchedRule = hostsRules.firstOrNull { rule ->
                 val rawPattern = rule.regexPattern ?: return@firstOrNull false
                 try {
@@ -219,25 +220,28 @@ class EgyWatchProvider : MainAPI() {
 
             var resolved = false
 
+            // 3. الأولوية الأولى: الفك عبر mawdhou3.com
             if (matchedRule != null) {
-                Log.d("EgyWatch", "Matched host rule: [${matchedRule.hostId}] for $link")
                 resolved = resolveWithBaseVedEngine(link, serverName, customHeader, matchedRule, callback)
-            } else {
-                Log.d("EgyWatch", "No host rule matched for $link")
             }
+
+            // 4. تجربة مستخرجات كلاودستريم المدمجة كبديل
             if (!resolved) {
-                Log.d("EgyWatch", "Trying native Cloudstream extractor for $link")
                 resolved = loadExtractor(link, subtitleCallback, callback)
             }
+
+            // 5. Fallback أخير للبحث داخل الـ HTML
             if (!resolved) {
-                Log.d("EgyWatch", "Executing regex fallback for $link")
                 fallbackRegexExtract(link, serverName, customHeader, callback)
             }
         }
-        
-        Log.d("EgyWatch", "========== End loadLinks ==========")
+
         return true
     }
+
+    // ==========================================
+    // محرك الفك عبر mawdhou3.com (كلاس BaseVedEasyPlex)
+    // ==========================================
 
     private suspend fun getHostsRules(): List<HostConfigItem> {
         if (cachedHostsConfig != null) return cachedHostsConfig!!
@@ -246,12 +250,11 @@ class EgyWatchProvider : MainAPI() {
                 "$mainUrl/hosts/config",
                 headers = mapOf("User-Agent" to "okhttp/5.0.0-alpha.6", "Accept" to "application/json")
             ).text
+            
             val array = parseJson<Array<HostConfigItem>>(text).toList()
-            Log.d("EgyWatch", "Loaded ${array.size} rules from /hosts/config")
             cachedHostsConfig = array
             cachedHostsConfig!!
         } catch (e: Exception) {
-            Log.e("EgyWatch", "Error loading /hosts/config: ${e.message}", e)
             emptyList()
         }
     }
@@ -270,15 +273,16 @@ class EgyWatchProvider : MainAPI() {
 
             val userAgent = rule.useragent?.takeIf { it.isNotEmpty() } ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             val headers = mapOf("User-Agent" to userAgent, "Referer" to finalReferer)
-            Log.d("EgyWatch", "Fetching HTML from: $link")
+
+            // 1. جلب كود الـ HTML
             val html = app.get(link, headers = headers).text
-            Log.d("EgyWatch", "HTML fetched successfully, length: ${html.length}")
+
+            // 2. التحقق من مسار الـ POST في mawdhou3.com
             val enabledParts = rule.enableded?.split("|") ?: emptyList()
             val isEnabled = enabledParts.getOrNull(0) == "TRUE"
             val postUrl = enabledParts.getOrNull(1)?.takeIf { it.startsWith("http") }
 
             if (isEnabled && postUrl != null) {
-                Log.d("EgyWatch", "Sending POST to mawdhou3 resolver: $postUrl")
                 val postHeaders = mapOf(
                     "Content-Type" to "application/x-www-form-urlencoded",
                     "User-Agent" to "okhttp/5.0.0-alpha.6"
@@ -290,8 +294,6 @@ class EgyWatchProvider : MainAPI() {
                     headers = postHeaders
                 ).text
 
-                Log.d("EgyWatch", "mawdhou3 response: $postResponse")
-
                 val jsonRes = JSONObject(postResponse)
                 if (jsonRes.optString("status") == "success") {
                     val filteredContent = jsonRes.optJSONArray("filtered_content")
@@ -302,7 +304,6 @@ class EgyWatchProvider : MainAPI() {
                             val streamUrl = filteredContent.optString(i)
                             if (streamUrl.isNotEmpty()) {
                                 val qualityStr = qualityArray?.optString(i) ?: "Normal"
-                                Log.d("EgyWatch", "Emitting link: [$qualityStr] -> $streamUrl")
                                 callback.invoke(
                                     newExtractorLink(
                                         name = "$serverName ($qualityStr)",
@@ -319,6 +320,8 @@ class EgyWatchProvider : MainAPI() {
                     }
                 }
             }
+
+            // 3. تجربة الـ Regex المباشر في حقل site إن لم يكن سيرفر POST
             val sitePattern = rule.site
             if (!sitePattern.isNullOrEmpty()) {
                 val cleanSitePattern = sitePattern.replace("\\/", "/")
@@ -327,7 +330,6 @@ class EgyWatchProvider : MainAPI() {
 
                 val streamUrl = match?.groups?.get(1)?.value
                 if (!streamUrl.isNullOrEmpty() && (streamUrl.startsWith("http://") || streamUrl.startsWith("https://"))) {
-                    Log.d("EgyWatch", "Extracted direct stream via Regex: $streamUrl")
                     callback.invoke(
                         newExtractorLink(name = "$serverName (Direct)", source = name, url = streamUrl) {
                             this.referer = finalReferer
@@ -339,7 +341,6 @@ class EgyWatchProvider : MainAPI() {
             }
             false
         } catch (e: Exception) {
-            Log.e("EgyWatch", "Error in resolveWithBaseVedEngine: ${e.message}", e)
             false
         }
     }
@@ -361,7 +362,6 @@ class EgyWatchProvider : MainAPI() {
             val extractedUrl = match?.groups?.get(1)?.value
 
             if (extractedUrl != null) {
-                Log.d("EgyWatch", "Fallback extracted URL: $extractedUrl")
                 callback.invoke(
                     newExtractorLink(name = "$serverName (Auto)", source = name, url = extractedUrl) {
                         referer = link
@@ -370,9 +370,13 @@ class EgyWatchProvider : MainAPI() {
                 )
             }
         } catch (e: Exception) {
-            Log.e("EgyWatch", "Fallback regex error: ${e.message}")
+            // تجاهل الخطأ
         }
     }
+
+    // ==========================================
+    // Data Classes
+    // ==========================================
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class HostConfigItem(
