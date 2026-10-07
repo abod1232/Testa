@@ -91,7 +91,6 @@ class EgyWatchProvider : MainAPI() {
 
         return newHomePageResponse(homeItems)
     }
-
     override suspend fun search(query: String): List<SearchResponse>? {
         val encodedQuery = URLEncoder.encode("$query|vide", "UTF-8")
         val searchUrl = "$mainUrl/search/$encodedQuery/$apiKey"
