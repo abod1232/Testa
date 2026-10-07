@@ -150,8 +150,6 @@ class EgyWatchProvider : MainAPI() {
         } else {
             val res = app.get(url, headers = appHeaders).parsedSafe<MediaDetail>() ?: return null
             val episodes = mutableListOf<Episode>()
-
-            // جلب جميع المواسم بالتوازي عبر Coroutines القياسية
             res.seasons?.parallelMap { season ->
                 val seasonId = season.id ?: return@parallelMap
                 val seasonRes = app.get("$mainUrl/series/season/$seasonId/$apiKey", headers = appHeaders).parsedSafe<SeasonDetail>()
@@ -193,14 +191,10 @@ class EgyWatchProvider : MainAPI() {
         }
 
         val hostsRules = getHostsRules()
-
-        // تشغيل فك جميع السيرفرات بالتوازي وبدون أي تأخير
         videos.parallelMap { video ->
             val link = video.link ?: return@parallelMap
             val serverName = video.server ?: "سيرفر"
             val customHeader = video.header ?: ""
-
-            // 1. فحص الروابط المباشرة
             if (link.contains(".m3u8") || link.contains(".mp4")) {
                 callback.invoke(
                     newExtractorLink(name = serverName, source = name, url = link) {
@@ -210,8 +204,6 @@ class EgyWatchProvider : MainAPI() {
                 )
                 return@parallelMap
             }
-
-            // 2. مطابقة الرابط مع قواعد /hosts/config
             val matchedRule = hostsRules.firstOrNull { rule ->
                 val rawPattern = rule.regexPattern ?: return@firstOrNull false
                 try {
@@ -223,18 +215,12 @@ class EgyWatchProvider : MainAPI() {
             }
 
             var resolved = false
-
-            // 3. الأولوية الأولى: الفك عبر mawdhou3.com
             if (matchedRule != null) {
                 resolved = resolveWithBaseVedEngine(link, serverName, customHeader, matchedRule, callback)
             }
-
-            // 4. تجربة مستخرجات كلاودستريم المدمجة كبديل
             if (!resolved) {
                 resolved = loadExtractor(link, subtitleCallback, callback)
             }
-
-            // 5. Fallback أخير للبحث داخل الـ HTML
             if (!resolved) {
                 fallbackRegexExtract(link, serverName, customHeader, callback)
             }
@@ -243,17 +229,9 @@ class EgyWatchProvider : MainAPI() {
         return true
     }
 
-    // ==========================================
-    // دالة المعالجة المتوازية (Parallel Map Helper)
-    // ==========================================
-
     private suspend fun <A, B> Iterable<A>.parallelMap(f: suspend (A) -> B): List<B> = coroutineScope {
         map { async { f(it) } }.awaitAll()
     }
-
-    // ==========================================
-    // محرك الفك عبر mawdhou3.com (كلاس BaseVedEasyPlex)
-    // ==========================================
 
     private suspend fun getHostsRules(): List<HostConfigItem> {
         if (cachedHostsConfig != null) return cachedHostsConfig!!
@@ -286,11 +264,7 @@ class EgyWatchProvider : MainAPI() {
 
             val userAgent = rule.useragent?.takeIf { it.isNotEmpty() } ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             val headers = mapOf("User-Agent" to userAgent, "Referer" to finalReferer)
-
-            // 1. جلب كود الـ HTML
             val html = app.get(link, headers = headers).text
-
-            // 2. التحقق من مسار الـ POST في mawdhou3.com
             val enabledParts = rule.enableded?.split("|") ?: emptyList()
             val isEnabled = enabledParts.getOrNull(0) == "TRUE"
             val postUrl = enabledParts.getOrNull(1)?.takeIf { it.startsWith("http") }
@@ -333,8 +307,6 @@ class EgyWatchProvider : MainAPI() {
                     }
                 }
             }
-
-            // 3. تجربة الـ Regex المباشر في حقل site إن لم يكن سيرفر POST
             val sitePattern = rule.site
             if (!sitePattern.isNullOrEmpty()) {
                 val cleanSitePattern = sitePattern.replace("\\/", "/")
@@ -383,13 +355,8 @@ class EgyWatchProvider : MainAPI() {
                 )
             }
         } catch (e: Exception) {
-            // تجاهل الخطأ
         }
     }
-
-    // ==========================================
-    // Data Classes
-    // ==========================================
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class HostConfigItem(
