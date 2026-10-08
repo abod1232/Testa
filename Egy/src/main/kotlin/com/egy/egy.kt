@@ -197,11 +197,7 @@ class EgyWatchProvider : MainAPI() {
             val link = video.link ?: return@parallelMap
             val serverName = video.server ?: "سيرفر"
             val customHeader = video.header ?: ""
-
-            // تنظيف الترويسة واستخراج الرابط الصافي
             val cleanReferer = cleanRefererString(customHeader, link)
-
-            // 1. فحص الروابط المباشرة (MP4 أو M3U8)
             if (link.contains(".m3u8") || link.contains(".mp4")) {
                 callback.invoke(
                     newExtractorLink(name = serverName, source = name, url = link) {
@@ -211,8 +207,6 @@ class EgyWatchProvider : MainAPI() {
                 )
                 return@parallelMap
             }
-
-            // 2. مطابقة الرابط مع قواعد /hosts/config
             val matchedRule = hostsRules.firstOrNull { rule ->
                 val rawPattern = rule.regexPattern ?: return@firstOrNull false
                 try {
@@ -240,8 +234,6 @@ class EgyWatchProvider : MainAPI() {
 
         return true
     }
-
-    // تنظيف ترويسات مثل origin:...|referer:...
     private fun cleanRefererString(headerStr: String, defaultLink: String): String {
         return when {
             headerStr.contains("referer:") -> headerStr.substringAfter("referer:").substringBefore("|").trim()
@@ -293,8 +285,6 @@ class EgyWatchProvider : MainAPI() {
             val isEnabled = enabledParts.getOrNull(0) == "TRUE"
             val postUrl = enabledParts.getOrNull(1)?.takeIf { it.startsWith("http") }
             val urlSite = rule.urlsite
-
-            // 1. الفك عبر GET السريع (مثل Uqload و Vidnest)
             if (!isEnabled && !urlSite.isNullOrEmpty() && (urlSite.endsWith("=") || urlSite.endsWith("api="))) {
                 val getApiUrl = "$urlSite$link"
                 val apiRes = app.get(getApiUrl, headers = mapOf("User-Agent" to "okhttp/5.0.0-alpha.6")).text
@@ -321,8 +311,6 @@ class EgyWatchProvider : MainAPI() {
                     }
                 }
             }
-
-            // 2. الفك عبر POST مع HTML (مثل Vidtube و Upzur)
             if (isEnabled && postUrl != null) {
                 val html = app.get(link, headers = headers).text
                 val postHeaders = mapOf(
@@ -362,8 +350,6 @@ class EgyWatchProvider : MainAPI() {
                     }
                 }
             }
-
-            // 3. الاستخراج عبر الـ Regex الداخلي (حقل site)
             val sitePattern = rule.site
             if (!sitePattern.isNullOrEmpty()) {
                 val html = app.get(link, headers = headers).text
@@ -417,10 +403,6 @@ class EgyWatchProvider : MainAPI() {
         } catch (e: Exception) {
         }
     }
-
-    // ==========================================
-    // Data Classes
-    // ==========================================
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class HostConfigItem(
