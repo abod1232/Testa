@@ -229,13 +229,23 @@ class EgyWatchProvider : MainAPI() {
 
         return true
     }
+    // تنظيف الترويسات والتأكد أن الـ Referer يبدأ بـ http حصراً
     private fun cleanRefererString(headerStr: String, defaultLink: String): String {
-        return when {
-            headerStr.contains("referer:") -> headerStr.substringAfter("referer:").substringBefore("|").trim()
-            headerStr.contains("origin:") -> headerStr.substringAfter("origin:").substringBefore("|").trim()
-            headerStr.contains("|") -> headerStr.substringBefore("|").trim()
-            headerStr.startsWith("http") -> headerStr.trim()
-            else -> defaultLink
+        val candidate = when {
+            headerStr.contains("referer:", ignoreCase = true) -> 
+                headerStr.substringAfter("referer:", ignoreCase = true).substringBefore("|").trim()
+            headerStr.contains("origin:", ignoreCase = true) -> 
+                headerStr.substringAfter("origin:", ignoreCase = true).substringBefore("|").trim()
+            headerStr.startsWith("http://") || headerStr.startsWith("https://") -> 
+                headerStr.substringBefore("|").trim()
+            else -> ""
+        }
+        
+        // إذا لم يكن رابطاً حقيقياً يبدأ بـ http، استخدم رابط الصفحة الأصلي
+        return if (candidate.startsWith("http://") || candidate.startsWith("https://")) {
+            candidate
+        } else {
+            defaultLink
         }
     }
 
