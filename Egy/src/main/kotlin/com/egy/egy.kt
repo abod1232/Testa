@@ -229,16 +229,11 @@ class EgyWatchProvider : MainAPI() {
 
         return true
     }
-    // تنظيف واستخراج رابط الـ Referer الصحيح بأمان 100%
     private fun cleanRefererString(headerStr: String, defaultLink: String): String {
         if (headerStr.isEmpty()) return defaultLink
-
-        // استخراج الرابط المسبوق بـ referer: أو origin:
         val match = Regex("""(?:referer|origin)\s*:\s*(https?://[^|]+)""", RegexOption.IGNORE_CASE).find(headerStr)
         val extracted = match?.groups?.get(1)?.value?.trim()
         if (!extracted.isNullOrEmpty()) return extracted
-
-        // إذا كان الرابط مكتوباً بشكل مباشر
         val direct = headerStr.substringBefore("|").trim()
         if (direct.startsWith("http://") || direct.startsWith("https://")) return direct
 
