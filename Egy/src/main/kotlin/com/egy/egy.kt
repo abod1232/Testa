@@ -57,6 +57,7 @@ class EgyWatchProvider : MainAPI() {
             val searchResponses = mutableListOf<SearchResponse>()
             for (j in 0 until dataArray.length()) {
                 val itemObj = dataArray.optJSONObject(j) ?: continue
+                
                 val id = itemObj.optInt("featured_id", 0).takeIf { it > 0 }
                     ?: itemObj.optInt("id", -1).takeIf { it != -1 }
                     ?: continue
@@ -149,6 +150,7 @@ class EgyWatchProvider : MainAPI() {
         } else {
             val res = app.get(url, headers = appHeaders).parsedSafe<MediaDetail>() ?: return null
             val episodes = mutableListOf<Episode>()
+
             res.seasons?.parallelMap { season ->
                 val seasonId = season.id ?: return@parallelMap
                 val seasonRes = app.get("$mainUrl/series/season/$seasonId/$apiKey", headers = appHeaders).parsedSafe<SeasonDetail>()
@@ -195,6 +197,8 @@ class EgyWatchProvider : MainAPI() {
             val link = video.link ?: return@parallelMap
             val serverName = video.server ?: "سيرفر"
             val customHeader = video.header ?: ""
+
+            // 1. مطابقة الرابط مع قواعد /hosts/config أولاً
             val matchedRule = hostsRules.firstOrNull { rule ->
                 val rawPattern = rule.regexPattern ?: return@firstOrNull false
                 try {
@@ -205,43 +209,72 @@ class EgyWatchProvider : MainAPI() {
                 }
             }
 
+            // استخراج Referer الحقيقي فقط إذا طُلب صراحةً، وإلا تركه فارغاً
+            val explicitReferer = getExplicitReferer(customHeader, matchedRule?.referer)
+
             var resolved = false
+
+            // 2. فك الرابط عبر محرك BaseVedEasyPlex (إذا طابق قاعدة)
             if (matchedRule != null) {
                 resolved = resolveWithBaseVedEngine(link, serverName, customHeader, matchedRule, callback)
             }
+
+            // 3. إذا لم يطابق قاعدة، وكان رابط مباشر صريح
             if (!resolved && (link.contains(".m3u8") || link.contains(".mp4"))) {
-                val cleanReferer = cleanRefererString(customHeader, link)
                 callback.invoke(
                     newExtractorLink(name = serverName, source = name, url = link) {
-                        this.referer = cleanReferer
+                        this.referer = explicitReferer
                         this.quality = getQualityFromName(serverName)
                     }
                 )
                 return@parallelMap
             }
+
+            // 4. تجربة مستخرجات كلاودستريم المدمجة
             if (!resolved) {
                 resolved = loadExtractor(link, subtitleCallback, callback)
             }
+
+            // 5. Fallback أخير للبحث المباشر داخل الـ HTML
             if (!resolved) {
-                fallbackRegexExtract(link, serverName, customHeader, callback)
+                fallbackRegexExtract(link, serverName, explicitReferer, callback)
             }
         }
 
         return true
     }
-    private fun cleanRefererString(headerStr: String, defaultLink: String): String {
-        if (headerStr.isEmpty()) return defaultLink
-        val match = Regex("""(?:referer|origin)\s*:\s*(https?://[^|]+)""", RegexOption.IGNORE_CASE).find(headerStr)
-        val extracted = match?.groups?.get(1)?.value?.trim()
-        if (!extracted.isNullOrEmpty()) return extracted
-        val direct = headerStr.substringBefore("|").trim()
-        if (direct.startsWith("http://") || direct.startsWith("https://")) return direct
 
-        return defaultLink
+    // ==========================================
+    // دالة استخراج الـ Referer الصريح فقط دون أي افتراضات
+    // ==========================================
+
+    private fun getExplicitReferer(customHeader: String?, ruleReferer: String?): String {
+        // 1. فحص إذا كان موجوداً داخل ترويسة الفيديو القادمة من الـ API
+        if (!customHeader.isNullOrEmpty()) {
+            val match = Regex("""(?:referer|origin)\s*:\s*(https?://[^|]+)""", RegexOption.IGNORE_CASE).find(customHeader)
+            val extracted = match?.groups?.get(1)?.value?.trim()
+            if (!extracted.isNullOrEmpty()) return extracted
+
+            val direct = customHeader.substringBefore("|").trim()
+            if (direct.startsWith("http://") || direct.startsWith("https://")) return direct
+        }
+
+        // 2. فحص إذا كان محدداً في قاعدة السيرفر داخل /hosts/config
+        if (!ruleReferer.isNullOrEmpty() && (ruleReferer.startsWith("http://") || ruleReferer.startsWith("https://"))) {
+            return ruleReferer.trim()
+        }
+
+        // 3. إذا لم يطلبه السيرفر صراحة، يُترك فارغاً تماماً
+        return ""
     }
+
     private suspend fun <A, B> Iterable<A>.parallelMap(f: suspend (A) -> B): List<B> = coroutineScope {
         map { async { f(it) } }.awaitAll()
     }
+
+    // ==========================================
+    // محرك الفك عبر mawdhou3.com (BaseVedEasyPlex Engine)
+    // ==========================================
 
     private suspend fun getHostsRules(): List<HostConfigItem> {
         if (cachedHostsConfig != null) return cachedHostsConfig!!
@@ -267,19 +300,21 @@ class EgyWatchProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         return try {
-            val finalReferer = customHeader.takeIf { it.isNotEmpty() }
-                ?: rule.referer?.takeIf { it.isNotEmpty() }
-                ?: link
-
-            val cleanReferer = cleanRefererString(finalReferer, link)
+            val explicitReferer = getExplicitReferer(customHeader, rule.referer)
 
             val userAgent = rule.useragent?.takeIf { it.isNotEmpty() } ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            val headers = mapOf("User-Agent" to userAgent, "Referer" to cleanReferer)
+            
+            val headers = mutableMapOf("User-Agent" to userAgent)
+            if (explicitReferer.isNotEmpty()) {
+                headers["Referer"] = explicitReferer
+            }
 
             val enabledParts = rule.enableded?.split("|") ?: emptyList()
             val isEnabled = enabledParts.getOrNull(0) == "TRUE"
             val postUrl = enabledParts.getOrNull(1)?.takeIf { it.startsWith("http") }
             val urlSite = rule.urlsite
+
+            // 1. الفك عبر GET السريع (مثل Uqload و Vidnest)
             if (!isEnabled && !urlSite.isNullOrEmpty() && (urlSite.endsWith("=") || urlSite.endsWith("api="))) {
                 val getApiUrl = "$urlSite$link"
                 val apiRes = app.get(getApiUrl, headers = mapOf("User-Agent" to "okhttp/5.0.0-alpha.6")).text
@@ -296,7 +331,7 @@ class EgyWatchProvider : MainAPI() {
                                 val qualityStr = qualityArray?.optString(i) ?: "Normal"
                                 callback.invoke(
                                     newExtractorLink(name = "$serverName ($qualityStr)", source = name, url = streamUrl) {
-                                        this.referer = cleanReferer
+                                        this.referer = explicitReferer
                                         this.quality = getQualityFromName(qualityStr)
                                     }
                                 )
@@ -306,6 +341,8 @@ class EgyWatchProvider : MainAPI() {
                     }
                 }
             }
+
+            // 2. الفك عبر POST مع إرسال كود الـ HTML (مثل Vidtube و dramaramadanPost لـ seriesmp4)
             if (isEnabled && postUrl != null) {
                 val html = app.get(link, headers = headers).text
                 val postHeaders = mapOf(
@@ -335,7 +372,7 @@ class EgyWatchProvider : MainAPI() {
                                         source = name,
                                         url = streamUrl
                                     ) {
-                                        this.referer = cleanReferer
+                                        this.referer = explicitReferer
                                         this.quality = getQualityFromName(qualityStr)
                                     }
                                 )
@@ -345,6 +382,8 @@ class EgyWatchProvider : MainAPI() {
                     }
                 }
             }
+
+            // 3. الاستخراج عبر الـ Regex الداخلي (حقل site)
             val sitePattern = rule.site
             if (!sitePattern.isNullOrEmpty()) {
                 val html = app.get(link, headers = headers).text
@@ -356,7 +395,7 @@ class EgyWatchProvider : MainAPI() {
                 if (!streamUrl.isNullOrEmpty() && (streamUrl.startsWith("http://") || streamUrl.startsWith("https://"))) {
                     callback.invoke(
                         newExtractorLink(name = "$serverName (Direct)", source = name, url = streamUrl) {
-                            this.referer = cleanReferer
+                            this.referer = explicitReferer
                             this.quality = getQualityFromName(serverName)
                         }
                     )
@@ -373,15 +412,15 @@ class EgyWatchProvider : MainAPI() {
     private suspend fun fallbackRegexExtract(
         link: String,
         serverName: String,
-        customHeader: String,
+        explicitReferer: String,
         callback: (ExtractorLink) -> Unit
     ) {
         try {
-            val cleanReferer = cleanRefererString(customHeader, link)
-            val headers = mapOf(
-                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Referer" to cleanReferer
-            )
+            val headers = mutableMapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            if (explicitReferer.isNotEmpty()) {
+                headers["Referer"] = explicitReferer
+            }
+
             val html = app.get(link, headers = headers).text
             val videoRegex = Regex("""(?:file|src)\s*:\s*["'](https?://[^"']+\.(?:m3u8|mp4)[^"']*)["']""")
             val match = videoRegex.find(html)
@@ -390,7 +429,7 @@ class EgyWatchProvider : MainAPI() {
             if (extractedUrl != null) {
                 callback.invoke(
                     newExtractorLink(name = "$serverName (Auto)", source = name, url = extractedUrl) {
-                        this.referer = cleanReferer
+                        this.referer = explicitReferer
                         this.quality = getQualityFromName(serverName)
                     }
                 )
@@ -398,6 +437,10 @@ class EgyWatchProvider : MainAPI() {
         } catch (e: Exception) {
         }
     }
+
+    // ==========================================
+    // Data Classes
+    // ==========================================
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class HostConfigItem(
