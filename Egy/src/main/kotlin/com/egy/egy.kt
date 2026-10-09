@@ -101,8 +101,6 @@ class EgyWatchProvider : MainAPI() {
         val json = JSONObject(responseText)
 
         val results = mutableListOf<SearchResponse>()
-
-        // 1. قراءة مصفوفة "search" الحقيقية التي يرجعها السيرفر
         val searchArray = json.optJSONArray("search")
         if (searchArray != null) {
             for (i in 0 until searchArray.length()) {
@@ -133,8 +131,6 @@ class EgyWatchProvider : MainAPI() {
             }
             return results
         }
-
-        // 2. Fallback احتياطي في حال أرجع السيرفر أسماء أخرى
         val categories = listOf("movies" to "movie", "series" to "serie", "animes" to "anime")
         for ((key, defaultType) in categories) {
             val array = json.optJSONArray(key) ?: continue
