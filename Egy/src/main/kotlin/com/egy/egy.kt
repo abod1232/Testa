@@ -101,8 +101,41 @@ class EgyWatchProvider : MainAPI() {
         val json = JSONObject(responseText)
 
         val results = mutableListOf<SearchResponse>()
-        val categories = listOf("movies" to "movie", "series" to "serie", "animes" to "anime")
 
+        // 1. قراءة مصفوفة "search" الحقيقية التي يرجعها السيرفر
+        val searchArray = json.optJSONArray("search")
+        if (searchArray != null) {
+            for (i in 0 until searchArray.length()) {
+                val item = searchArray.optJSONObject(i) ?: continue
+                val id = item.optInt("id", -1).takeIf { it != -1 } ?: continue
+                val title = item.optString("title").ifEmpty { item.optString("name") }
+                if (title.isEmpty()) continue
+
+                val type = item.optString("type").lowercase()
+                val posterPath = item.optString("poster_path").takeIf { it.isNotEmpty() }
+
+                val directApiUrl = if (type == "movie") {
+                    "$mainUrl/media/detail/$id/$apiKey"
+                } else {
+                    "$mainUrl/series/show/$id/$apiKey"
+                }
+
+                val res = if (type == "movie") {
+                    newMovieSearchResponse(title, directApiUrl, TvType.Movie) {
+                        this.posterUrl = posterPath
+                    }
+                } else {
+                    newTvSeriesSearchResponse(title, directApiUrl, TvType.TvSeries) {
+                        this.posterUrl = posterPath
+                    }
+                }
+                results.add(res)
+            }
+            return results
+        }
+
+        // 2. Fallback احتياطي في حال أرجع السيرفر أسماء أخرى
+        val categories = listOf("movies" to "movie", "series" to "serie", "animes" to "anime")
         for ((key, defaultType) in categories) {
             val array = json.optJSONArray(key) ?: continue
             for (i in 0 until array.length()) {
