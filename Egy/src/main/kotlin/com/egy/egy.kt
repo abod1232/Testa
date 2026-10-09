@@ -229,23 +229,21 @@ class EgyWatchProvider : MainAPI() {
 
         return true
     }
+    // تنظيف واستخراج رابط الـ Referer الصحيح بأمان 100%
     private fun cleanRefererString(headerStr: String, defaultLink: String): String {
-        val candidate = when {
-            headerStr.contains("referer:", ignoreCase = true) -> 
-                headerStr.substringAfter("referer:", ignoreCase = true).substringBefore("|").trim()
-            headerStr.contains("origin:", ignoreCase = true) -> 
-                headerStr.substringAfter("origin:", ignoreCase = true).substringBefore("|").trim()
-            headerStr.startsWith("http://") || headerStr.startsWith("https://") -> 
-                headerStr.substringBefore("|").trim()
-            else -> ""
-        }
-        return if (candidate.startsWith("http://") || candidate.startsWith("https://")) {
-            candidate
-        } else {
-            defaultLink
-        }
-    }
+        if (headerStr.isEmpty()) return defaultLink
 
+        // استخراج الرابط المسبوق بـ referer: أو origin:
+        val match = Regex("""(?:referer|origin)\s*:\s*(https?://[^|]+)""", RegexOption.IGNORE_CASE).find(headerStr)
+        val extracted = match?.groups?.get(1)?.value?.trim()
+        if (!extracted.isNullOrEmpty()) return extracted
+
+        // إذا كان الرابط مكتوباً بشكل مباشر
+        val direct = headerStr.substringBefore("|").trim()
+        if (direct.startsWith("http://") || direct.startsWith("https://")) return direct
+
+        return defaultLink
+    }
     private suspend fun <A, B> Iterable<A>.parallelMap(f: suspend (A) -> B): List<B> = coroutineScope {
         map { async { f(it) } }.awaitAll()
     }
