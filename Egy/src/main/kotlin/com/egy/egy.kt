@@ -36,9 +36,9 @@ class EgyWatchProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime, TvType.Live)
 
     private val defaultUrl = "https://rn62mwg.com/egywatchapp/public/api"
-    private val apiKey = "p2lbgWkFrykA4QyUmpHihzmc5BNzIABq"
-    private val fbApiKey = "AIzaSyAGdOTZqB2qjBExaLFBTdv0WoMtBB2M_bU"
-    private val fbAppId = "1:1076822460914:android:67cfb6408c74566297836b"
+    private val apiKey = "API_KEY_PLACEHOLDER"
+    private val fbApiKey = "FB_API_KEY_PLACEHOLDER"
+    private val fbAppId = "FB_APP_ID_PLACEHOLDER"
     private val fbProjectId = "egy-watch-new"
     private val fbProjectNumber = "1076822460914"
     private val fbPackageName = "com.linkletter.app"
