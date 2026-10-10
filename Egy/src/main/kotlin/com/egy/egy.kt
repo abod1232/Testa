@@ -57,6 +57,7 @@ class EgyWatchProvider : MainAPI() {
             val searchResponses = mutableListOf<SearchResponse>()
             for (j in 0 until dataArray.length()) {
                 val itemObj = dataArray.optJSONObject(j) ?: continue
+                
                 val id = itemObj.optInt("featured_id", 0).takeIf { it > 0 }
                     ?: itemObj.optInt("id", -1).takeIf { it != -1 }
                     ?: continue
@@ -100,6 +101,7 @@ class EgyWatchProvider : MainAPI() {
         val json = JSONObject(responseText)
 
         val results = mutableListOf<SearchResponse>()
+
         val searchArray = json.optJSONArray("search")
         if (searchArray != null) {
             for (i in 0 until searchArray.length()) {
@@ -130,36 +132,6 @@ class EgyWatchProvider : MainAPI() {
             }
             return results
         }
-        val categories = listOf("movies" to "movie", "series" to "serie", "animes" to "anime")
-        for ((key, defaultType) in categories) {
-            val array = json.optJSONArray(key) ?: continue
-            for (i in 0 until array.length()) {
-                val item = array.optJSONObject(i) ?: continue
-                val id = item.optInt("id", -1).takeIf { it != -1 } ?: continue
-                val title = item.optString("title").ifEmpty { item.optString("name") }
-                if (title.isEmpty()) continue
-
-                val type = item.optString("type").lowercase().ifEmpty { defaultType }
-                val posterPath = item.optString("poster_path").takeIf { it.isNotEmpty() }
-
-                val directApiUrl = if (type == "movie") {
-                    "$mainUrl/media/detail/$id/$apiKey"
-                } else {
-                    "$mainUrl/series/show/$id/$apiKey"
-                }
-
-                val res = if (type == "movie") {
-                    newMovieSearchResponse(title, directApiUrl, TvType.Movie) {
-                        this.posterUrl = posterPath
-                    }
-                } else {
-                    newTvSeriesSearchResponse(title, directApiUrl, TvType.TvSeries) {
-                        this.posterUrl = posterPath
-                    }
-                }
-                results.add(res)
-            }
-        }
 
         return results
     }
@@ -178,6 +150,7 @@ class EgyWatchProvider : MainAPI() {
         } else {
             val res = app.get(url, headers = appHeaders).parsedSafe<MediaDetail>() ?: return null
             val episodes = mutableListOf<Episode>()
+
             res.seasons?.parallelMap { season ->
                 val seasonId = season.id ?: return@parallelMap
                 val seasonRes = app.get("$mainUrl/series/season/$seasonId/$apiKey", headers = appHeaders).parsedSafe<SeasonDetail>()
@@ -224,6 +197,8 @@ class EgyWatchProvider : MainAPI() {
             val link = video.link ?: return@parallelMap
             val serverName = video.server ?: "سيرفر"
             val customHeader = video.header ?: ""
+
+            // 1. فحص روابط Cloudflare Workers المباشرة
             if (link.contains("cdnlink.developer-pro.workers.dev")) {
                 callback.invoke(
                     newExtractorLink(name = serverName, source = name, url = link) {
@@ -232,12 +207,14 @@ class EgyWatchProvider : MainAPI() {
                 )
                 return@parallelMap
             }
+
+            // 2. مطابقة الرابط مع قواعد /hosts/config
             val matchedRule = hostsRules.firstOrNull { rule ->
                 val rawPattern = rule.regexPattern ?: return@firstOrNull false
                 try {
                     val cleanPattern = rawPattern
                         .replace("\\/", "/")
-                        .replace("googlefasV", "googlefas[A-Za-z]") // دعم جميع نطاقات جوجل فوتوز
+                        .replace("googlefasV", "googlefas[A-Za-z]") // دعم جميع نطاقات جوجل
                     Regex(cleanPattern, RegexOption.IGNORE_CASE).containsMatchIn(link)
                 } catch (e: Exception) {
                     false
@@ -247,9 +224,13 @@ class EgyWatchProvider : MainAPI() {
             val explicitReferer = getExplicitReferer(customHeader, matchedRule?.referer)
 
             var resolved = false
+
+            // 3. فك الرابط عبر محرك BaseVedEasyPlex (دعم POST و GET)
             if (matchedRule != null) {
                 resolved = resolveWithBaseVedEngine(link, serverName, customHeader, matchedRule, callback)
             }
+
+            // 4. إذا لم يطابق قاعدة، وكان رابط مباشر صريح
             if (!resolved && (link.contains(".m3u8") || link.contains(".mp4"))) {
                 callback.invoke(
                     newExtractorLink(name = serverName, source = name, url = link) {
@@ -259,9 +240,13 @@ class EgyWatchProvider : MainAPI() {
                 )
                 return@parallelMap
             }
+
+            // 5. تجربة مستخرجات كلاودستريم المدمجة
             if (!resolved) {
                 resolved = loadExtractor(link, subtitleCallback, callback)
             }
+
+            // 6. Fallback أخير للبحث داخل الـ HTML
             if (!resolved) {
                 fallbackRegexExtract(link, serverName, explicitReferer, callback)
             }
@@ -269,6 +254,7 @@ class EgyWatchProvider : MainAPI() {
 
         return true
     }
+
     private fun getExplicitReferer(customHeader: String?, ruleReferer: String?): String {
         if (!customHeader.isNullOrEmpty()) {
             val match = Regex("""(?:referer|origin)\s*:\s*(https?://[^|]+)""", RegexOption.IGNORE_CASE).find(customHeader)
@@ -306,6 +292,10 @@ class EgyWatchProvider : MainAPI() {
         }
     }
 
+    // ==========================================
+    // محرك الفك المصحح بدقة 100%
+    // ==========================================
+
     private suspend fun resolveWithBaseVedEngine(
         link: String,
         serverName: String,
@@ -324,36 +314,12 @@ class EgyWatchProvider : MainAPI() {
             }
 
             val enabledParts = rule.enableded?.split("|") ?: emptyList()
-            val isEnabled = enabledParts.getOrNull(0) == "TRUE"
+            // الرابط بعد الـ | يعتبر POST فقط إذا كان يبدأ بـ http
             val postUrl = enabledParts.getOrNull(1)?.takeIf { it.startsWith("http") }
             val urlSite = rule.urlsite
-            if (!isEnabled && !urlSite.isNullOrEmpty() && (urlSite.endsWith("=") || urlSite.endsWith("api="))) {
-                val getApiUrl = "$urlSite$link"
-                val apiRes = app.get(getApiUrl, headers = mapOf("User-Agent" to "okhttp/5.0.0-alpha.6")).text
-                val jsonRes = JSONObject(apiRes)
 
-                if (jsonRes.optString("status") == "success") {
-                    val filteredContent = jsonRes.optJSONArray("filtered_content")
-                    val qualityArray = jsonRes.optJSONArray("Quality")
-
-                    if (filteredContent != null && filteredContent.length() > 0) {
-                        for (i in 0 until filteredContent.length()) {
-                            val streamUrl = filteredContent.optString(i)
-                            if (streamUrl.isNotEmpty()) {
-                                val qualityStr = qualityArray?.optString(i) ?: "Normal"
-                                callback.invoke(
-                                    newExtractorLink(name = "$serverName ($qualityStr)", source = name, url = streamUrl) {
-                                        this.referer = explicitReferer
-                                        this.quality = getQualityFromName(qualityStr)
-                                    }
-                                )
-                            }
-                        }
-                        return true
-                    }
-                }
-            }
-            if (isEnabled && postUrl != null) {
+            // 1. الأولوية الأولى للـ POST (مثل vidtubepost.php و dramaramadanPost.php)
+            if (postUrl != null) {
                 val html = app.get(link, headers = headers).text
                 val postHeaders = mapOf(
                     "Content-Type" to "application/x-www-form-urlencoded",
@@ -392,6 +358,36 @@ class EgyWatchProvider : MainAPI() {
                     }
                 }
             }
+
+            // 2. الفك عبر GET السريع (يشمل سيرفرات جوجل extract_qualite.php?url= وسيرفرات uqload.php?api=)
+            if (!urlSite.isNullOrEmpty() && (urlSite.endsWith("=") || urlSite.endsWith("api="))) {
+                val getApiUrl = "$urlSite$link"
+                val apiRes = app.get(getApiUrl, headers = mapOf("User-Agent" to "okhttp/5.0.0-alpha.6")).text
+                val jsonRes = JSONObject(apiRes)
+
+                if (jsonRes.optString("status") == "success") {
+                    val filteredContent = jsonRes.optJSONArray("filtered_content")
+                    val qualityArray = jsonRes.optJSONArray("Quality")
+
+                    if (filteredContent != null && filteredContent.length() > 0) {
+                        for (i in 0 until filteredContent.length()) {
+                            val streamUrl = filteredContent.optString(i)
+                            if (streamUrl.isNotEmpty()) {
+                                val qualityStr = qualityArray?.optString(i) ?: "Normal"
+                                callback.invoke(
+                                    newExtractorLink(name = "$serverName ($qualityStr)", source = name, url = streamUrl) {
+                                        this.referer = explicitReferer
+                                        this.quality = getQualityFromName(qualityStr)
+                                    }
+                                )
+                            }
+                        }
+                        return true
+                    }
+                }
+            }
+
+            // 3. الاستخراج عبر الـ Regex الداخلي (حقل site) في حال لم يكن رابط API
             val sitePattern = rule.site
             if (!sitePattern.isNullOrEmpty()) {
                 val html = app.get(link, headers = headers).text
@@ -445,6 +441,10 @@ class EgyWatchProvider : MainAPI() {
         } catch (e: Exception) {
         }
     }
+
+    // ==========================================
+    // Data Classes
+    // ==========================================
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class HostConfigItem(
