@@ -300,6 +300,8 @@ class EgyWatchProvider : MainAPI() {
             val enabledParts = rule.enableded?.split("|") ?: emptyList()
             val postUrl = enabledParts.getOrNull(1)?.takeIf { it.startsWith("http") }
             val urlSite = rule.urlsite
+
+            // 1. الفك عبر POST مع إرسال كود الـ HTML (مثل Vidtube)
             if (postUrl != null) {
                 val html = app.get(link, headers = headers).text
                 val postHeaders = mapOf(
@@ -313,58 +315,23 @@ class EgyWatchProvider : MainAPI() {
                     headers = postHeaders
                 ).text
 
-                val jsonRes = JSONObject(postResponse)
-                if (jsonRes.optString("status") == "success") {
-                    val filteredContent = jsonRes.optJSONArray("filtered_content")
-                    val qualityArray = jsonRes.optJSONArray("Quality")
-
-                    if (filteredContent != null && filteredContent.length() > 0) {
-                        for (i in 0 until filteredContent.length()) {
-                            val streamUrl = filteredContent.optString(i)
-                            if (streamUrl.isNotEmpty()) {
-                                val qualityStr = qualityArray?.optString(i) ?: "Normal"
-                                callback.invoke(
-                                    newExtractorLink(
-                                        name = "$serverName ($qualityStr)",
-                                        source = name,
-                                        url = streamUrl
-                                    ) {
-                                        this.referer = explicitReferer
-                                        this.quality = getQualityFromName(qualityStr)
-                                    }
-                                )
-                            }
-                        }
-                        return true
-                    }
+                if (parseAndEmitLinks(postResponse, serverName, explicitReferer, callback)) {
+                    return true
                 }
             }
+
+            // 2. الفك عبر GET السريع (يشمل سيرفرات جوجل aminegoogle و uqload)
             if (!urlSite.isNullOrEmpty() && (urlSite.endsWith("=") || urlSite.endsWith("api="))) {
                 val getApiUrl = "$urlSite$link"
                 val apiRes = app.get(getApiUrl, headers = mapOf("User-Agent" to "okhttp/5.0.0-alpha.6")).text
-                val jsonRes = JSONObject(apiRes)
-
-                if (jsonRes.optString("status") == "success") {
-                    val filteredContent = jsonRes.optJSONArray("filtered_content")
-                    val qualityArray = jsonRes.optJSONArray("Quality")
-
-                    if (filteredContent != null && filteredContent.length() > 0) {
-                        for (i in 0 until filteredContent.length()) {
-                            val streamUrl = filteredContent.optString(i)
-                            if (streamUrl.isNotEmpty()) {
-                                val qualityStr = qualityArray?.optString(i) ?: "Normal"
-                                callback.invoke(
-                                    newExtractorLink(name = "$serverName ($qualityStr)", source = name, url = streamUrl) {
-                                        this.referer = explicitReferer
-                                        this.quality = getQualityFromName(qualityStr)
-                                    }
-                                )
-                            }
-                        }
-                        return true
-                    }
+                
+                // قراءة الرد سواء كان JSON أو أسطر نصية (file:...,label:...)
+                if (parseAndEmitLinks(apiRes, serverName, explicitReferer, callback)) {
+                    return true
                 }
             }
+
+            // 3. الاستخراج عبر الـ Regex الداخلي (حقل site) من صفحة الـ HTML مباشرة
             val sitePattern = rule.site
             if (!sitePattern.isNullOrEmpty()) {
                 val html = app.get(link, headers = headers).text
@@ -388,6 +355,76 @@ class EgyWatchProvider : MainAPI() {
         } catch (e: Exception) {
             false
         }
+    }
+
+    // ==========================================
+    // دالة فك واستخراج الروابط (تدعم JSON وتدعم الأسطر النصية file:...,label:...)
+    // ==========================================
+
+    private fun parseAndEmitLinks(
+        responseBody: String,
+        serverName: String,
+        referer: String,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        var foundAny = false
+
+        // أ) التحقق من النمط النصي الصريح: file:"...",label:"..." (مثل سيرفرات جوجل)
+        val textMatches = Regex("""file\s*:\s*["']([^"']+)["']\s*,\s*label\s*:\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+            .findAll(responseBody).toList()
+
+        if (textMatches.isNotEmpty()) {
+            for (match in textMatches) {
+                val streamUrl = match.groups[1]?.value ?: continue
+                val qualityStr = match.groups[2]?.value ?: "Auto"
+
+                callback.invoke(
+                    newExtractorLink(
+                        name = "$serverName ($qualityStr)",
+                        source = name,
+                        url = streamUrl
+                    ) {
+                        this.referer = referer
+                        this.quality = getQualityFromName(qualityStr)
+                    }
+                )
+                foundAny = true
+            }
+            if (foundAny) return true
+        }
+
+        // ب) التحقق من نمط كائن JSON (مثل vidtube و dramaramadanPost)
+        try {
+            val jsonRes = JSONObject(responseBody)
+            if (jsonRes.optString("status") == "success") {
+                val filteredContent = jsonRes.optJSONArray("filtered_content")
+                val qualityArray = jsonRes.optJSONArray("Quality")
+
+                if (filteredContent != null && filteredContent.length() > 0) {
+                    for (i in 0 until filteredContent.length()) {
+                        val streamUrl = filteredContent.optString(i)
+                        if (streamUrl.isNotEmpty()) {
+                            val qualityStr = qualityArray?.optString(i) ?: "Normal"
+                            callback.invoke(
+                                newExtractorLink(
+                                    name = "$serverName ($qualityStr)",
+                                    source = name,
+                                    url = streamUrl
+                                ) {
+                                    this.referer = referer
+                                    this.quality = getQualityFromName(qualityStr)
+                                }
+                            )
+                            foundAny = true
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            // ليس كائن JSON
+        }
+
+        return foundAny
     }
 
     private suspend fun fallbackRegexExtract(
