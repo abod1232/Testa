@@ -197,8 +197,6 @@ class EgyWatchProvider : MainAPI() {
             val link = video.link ?: return@parallelMap
             val serverName = video.server ?: "سيرفر"
             val customHeader = video.header ?: ""
-
-            // 1. فحص روابط Cloudflare Workers المباشرة
             if (link.contains("cdnlink.developer-pro.workers.dev")) {
                 callback.invoke(
                     newExtractorLink(name = serverName, source = name, url = link) {
@@ -207,8 +205,6 @@ class EgyWatchProvider : MainAPI() {
                 )
                 return@parallelMap
             }
-
-            // 2. مطابقة الرابط مع قواعد /hosts/config
             val matchedRule = hostsRules.firstOrNull { rule ->
                 val rawPattern = rule.regexPattern ?: return@firstOrNull false
                 try {
@@ -224,13 +220,9 @@ class EgyWatchProvider : MainAPI() {
             val explicitReferer = getExplicitReferer(customHeader, matchedRule?.referer)
 
             var resolved = false
-
-            // 3. فك الرابط عبر محرك BaseVedEasyPlex (دعم POST و GET)
             if (matchedRule != null) {
                 resolved = resolveWithBaseVedEngine(link, serverName, customHeader, matchedRule, callback)
             }
-
-            // 4. إذا لم يطابق قاعدة، وكان رابط مباشر صريح
             if (!resolved && (link.contains(".m3u8") || link.contains(".mp4"))) {
                 callback.invoke(
                     newExtractorLink(name = serverName, source = name, url = link) {
@@ -240,13 +232,9 @@ class EgyWatchProvider : MainAPI() {
                 )
                 return@parallelMap
             }
-
-            // 5. تجربة مستخرجات كلاودستريم المدمجة
             if (!resolved) {
                 resolved = loadExtractor(link, subtitleCallback, callback)
             }
-
-            // 6. Fallback أخير للبحث داخل الـ HTML
             if (!resolved) {
                 fallbackRegexExtract(link, serverName, explicitReferer, callback)
             }
@@ -292,10 +280,6 @@ class EgyWatchProvider : MainAPI() {
         }
     }
 
-    // ==========================================
-    // محرك الفك المصحح بدقة 100%
-    // ==========================================
-
     private suspend fun resolveWithBaseVedEngine(
         link: String,
         serverName: String,
@@ -314,11 +298,8 @@ class EgyWatchProvider : MainAPI() {
             }
 
             val enabledParts = rule.enableded?.split("|") ?: emptyList()
-            // الرابط بعد الـ | يعتبر POST فقط إذا كان يبدأ بـ http
             val postUrl = enabledParts.getOrNull(1)?.takeIf { it.startsWith("http") }
             val urlSite = rule.urlsite
-
-            // 1. الأولوية الأولى للـ POST (مثل vidtubepost.php و dramaramadanPost.php)
             if (postUrl != null) {
                 val html = app.get(link, headers = headers).text
                 val postHeaders = mapOf(
@@ -358,8 +339,6 @@ class EgyWatchProvider : MainAPI() {
                     }
                 }
             }
-
-            // 2. الفك عبر GET السريع (يشمل سيرفرات جوجل extract_qualite.php?url= وسيرفرات uqload.php?api=)
             if (!urlSite.isNullOrEmpty() && (urlSite.endsWith("=") || urlSite.endsWith("api="))) {
                 val getApiUrl = "$urlSite$link"
                 val apiRes = app.get(getApiUrl, headers = mapOf("User-Agent" to "okhttp/5.0.0-alpha.6")).text
@@ -386,8 +365,6 @@ class EgyWatchProvider : MainAPI() {
                     }
                 }
             }
-
-            // 3. الاستخراج عبر الـ Regex الداخلي (حقل site) في حال لم يكن رابط API
             val sitePattern = rule.site
             if (!sitePattern.isNullOrEmpty()) {
                 val html = app.get(link, headers = headers).text
@@ -441,10 +418,6 @@ class EgyWatchProvider : MainAPI() {
         } catch (e: Exception) {
         }
     }
-
-    // ==========================================
-    // Data Classes
-    // ==========================================
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class HostConfigItem(
