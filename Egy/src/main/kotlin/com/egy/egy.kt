@@ -21,7 +21,7 @@ class EgyWatchProvider : MainAPI() {
     override var name = "EgyWatch"
     override val hasMainPage = true
     override var lang = "ar"
-    override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
+    override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime, TvType.Live)
 
     private val apiKey = "p2lbgWkFrykA4QyUmpHihzmc5BNzIABq"
 
@@ -52,6 +52,7 @@ class EgyWatchProvider : MainAPI() {
         for (i in 0 until sectionsArray.length()) {
             val sectionObj = sectionsArray.optJSONObject(i) ?: continue
             val title = sectionObj.optString("title").trim().ifEmpty { sectionObj.optString("type") }
+            val sectionType = sectionObj.optString("type").lowercase()
             val dataArray = sectionObj.optJSONArray("data") ?: continue
 
             val searchResponses = mutableListOf<SearchResponse>()
@@ -65,21 +66,33 @@ class EgyWatchProvider : MainAPI() {
                 val itemTitle = itemObj.optString("title").ifEmpty { itemObj.optString("name") }
                 if (itemTitle.isEmpty()) continue
 
-                val type = itemObj.optString("type").lowercase()
-                val posterPath = itemObj.optString("poster_path").takeIf { it.isNotEmpty() }
+                val rawType = itemObj.optString("type").lowercase()
+                
+                // حل مشكلة صور الممثلين (profile_path)
+                val posterPath = itemObj.optString("poster_path").ifEmpty { 
+                    itemObj.optString("profile_path") 
+                }.takeIf { it.isNotEmpty() }
 
-                val directApiUrl = if (type == "movie") {
-                    "$mainUrl/media/detail/$id/$apiKey"
-                } else {
-                    "$mainUrl/series/show/$id/$apiKey"
+                // توجيه كل قسم لرابط التفاصيل الصحيح
+                val directApiUrl = when {
+                    sectionType == "channels" || rawType == "channel" -> "$mainUrl/stream/show/$id/$apiKey"
+                    sectionType == "collections" -> "$mainUrl/collections/media/show/$id"
+                    sectionType == "actors" -> "$mainUrl/filmographie/detail/$id/$apiKey"
+                    rawType == "movie" -> "$mainUrl/media/detail/$id/$apiKey"
+                    else -> "$mainUrl/series/show/$id/$apiKey"
                 }
 
-                val searchRes = if (type == "movie") {
-                    newMovieSearchResponse(itemTitle, directApiUrl, TvType.Movie) {
+                val searchRes = when {
+                    sectionType == "channels" -> newMovieSearchResponse(itemTitle, directApiUrl, TvType.Live) {
                         this.posterUrl = posterPath
                     }
-                } else {
-                    newTvSeriesSearchResponse(itemTitle, directApiUrl, TvType.TvSeries) {
+                    sectionType == "collections" || sectionType == "actors" -> newTvSeriesSearchResponse(itemTitle, directApiUrl, TvType.TvSeries) {
+                        this.posterUrl = posterPath
+                    }
+                    rawType == "movie" -> newMovieSearchResponse(itemTitle, directApiUrl, TvType.Movie) {
+                        this.posterUrl = posterPath
+                    }
+                    else -> newTvSeriesSearchResponse(itemTitle, directApiUrl, TvType.TvSeries) {
                         this.posterUrl = posterPath
                     }
                 }
@@ -137,45 +150,133 @@ class EgyWatchProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse? {
-        return if (url.contains("/media/detail/")) {
+        // 1. فتح قنوات البث المباشر والمباريات (/stream/show/)
+        if (url.contains("/stream/show/")) {
             val res = app.get(url, headers = appHeaders).parsedSafe<MediaDetail>() ?: return null
             val videosJson = res.videos?.toJson() ?: ""
 
-            newMovieLoadResponse(res.title ?: res.name ?: "", url, TvType.Movie, videosJson) {
+            return newMovieLoadResponse(res.name ?: res.title ?: "بث مباشر", url, TvType.Live, videosJson) {
+                this.posterUrl = res.posterPath
+                this.plot = res.overview
+            }
+        }
+
+        // 2. فتح سلاسل الأفلام (/collections/media/show/) - جلب حتى 3 صفحات
+        if (url.contains("/collections/media/show/")) {
+            val episodes = mutableListOf<Episode>()
+            var collectionName = "سلسلة أفلام"
+            var poster: String? = null
+
+            for (page in 1..3) {
+                val pageRes = app.get("$url?page=$page", headers = appHeaders).text
+                val json = JSONObject(pageRes)
+                val dataArray = json.optJSONArray("data") ?: break
+                if (dataArray.length() == 0) break
+
+                for (i in 0 until dataArray.length()) {
+                    val m = dataArray.optJSONObject(i) ?: continue
+                    val mId = m.optInt("id")
+                    val mTitle = m.optString("name").ifEmpty { m.optString("title") }
+                    val mPoster = m.optString("poster_path")
+                    if (poster == null) poster = mPoster
+
+                    val movieApiUrl = "$mainUrl/media/detail/$mId/$apiKey"
+                    episodes.add(
+                        newEpisode(movieApiUrl) {
+                            this.name = mTitle
+                            this.episode = episodes.size + 1
+                            this.posterUrl = mPoster
+                        }
+                    )
+                }
+
+                val lastPage = json.optInt("last_page", 1)
+                if (page >= lastPage) break
+            }
+
+            return newTvSeriesLoadResponse(collectionName, url, TvType.Movie, episodes) {
+                this.posterUrl = poster
+            }
+        }
+
+        // 3. فتح صفحة وأفلام الممثلين (/filmographie/detail/) - جلب حتى 3 صفحات
+        if (url.contains("/filmographie/detail/")) {
+            val actorId = url.substringAfter("/detail/").substringBefore("/")
+            val castInfo = app.get("$mainUrl/cast/detail/$actorId/$apiKey", headers = appHeaders).parsedSafe<MediaDetail>()
+
+            val episodes = mutableListOf<Episode>()
+            for (page in 1..3) {
+                val pageRes = app.get("$url?page=$page", headers = appHeaders).text
+                val json = JSONObject(pageRes)
+                val dataArray = json.optJSONArray("data") ?: break
+                if (dataArray.length() == 0) break
+
+                for (i in 0 until dataArray.length()) {
+                    val m = dataArray.optJSONObject(i) ?: continue
+                    val mId = m.optInt("id")
+                    val mTitle = m.optString("name").ifEmpty { m.optString("title") }
+                    val mPoster = m.optString("poster_path")
+
+                    val movieApiUrl = "$mainUrl/media/detail/$mId/$apiKey"
+                    episodes.add(
+                        newEpisode(movieApiUrl) {
+                            this.name = mTitle
+                            this.episode = episodes.size + 1
+                            this.posterUrl = mPoster
+                        }
+                    )
+                }
+                val lastPage = json.optInt("last_page", 1)
+                if (page >= lastPage) break
+            }
+
+            return newTvSeriesLoadResponse(castInfo?.name ?: "أفلام الممثل", url, TvType.TvSeries, episodes) {
+                this.posterUrl = castInfo?.profilePath ?: castInfo?.posterPath
+                this.plot = castInfo?.biography ?: "أعمال ومشاركات الممثل"
+            }
+        }
+
+        // 4. فتح الأفلام العادية (/media/detail/)
+        if (url.contains("/media/detail/")) {
+            val res = app.get(url, headers = appHeaders).parsedSafe<MediaDetail>() ?: return null
+            val videosJson = res.videos?.toJson() ?: ""
+
+            return newMovieLoadResponse(res.title ?: res.name ?: "", url, TvType.Movie, videosJson) {
                 this.posterUrl = res.posterPath
                 this.plot = res.overview
                 this.year = res.releaseDate?.substringBefore("-")?.toIntOrNull()
                 this.score = res.voteAverage?.let { Score.from10(it) }
             }
-        } else {
-            val res = app.get(url, headers = appHeaders).parsedSafe<MediaDetail>() ?: return null
-            val episodes = mutableListOf<Episode>()
+        }
 
-            res.seasons?.parallelMap { season ->
-                val seasonId = season.id ?: return@parallelMap
-                val seasonRes = app.get("$mainUrl/series/season/$seasonId/$apiKey", headers = appHeaders).parsedSafe<SeasonDetail>()
-                
-                seasonRes?.episodes?.forEach { ep ->
-                    val epVideosJson = ep.videos?.toJson() ?: ""
+        // 5. فتح المسلسلات العادية (/series/show/)
+        val res = app.get(url, headers = appHeaders).parsedSafe<MediaDetail>() ?: return null
+        val episodes = mutableListOf<Episode>()
 
-                    synchronized(episodes) {
-                        episodes.add(
-                            newEpisode(epVideosJson) {
-                                this.name = ep.name ?: ep.episodeName ?: "الحلقة ${ep.episodeNumber}"
-                                this.season = season.seasonNumber
-                                this.episode = ep.episodeNumber
-                                this.posterUrl = ep.stillPath ?: ep.posterPath
-                            }
-                        )
-                    }
+        res.seasons?.parallelMap { season ->
+            val seasonId = season.id ?: return@parallelMap
+            val seasonRes = app.get("$mainUrl/series/season/$seasonId/$apiKey", headers = appHeaders).parsedSafe<SeasonDetail>()
+            
+            seasonRes?.episodes?.forEach { ep ->
+                val epVideosJson = ep.videos?.toJson() ?: ""
+
+                synchronized(episodes) {
+                    episodes.add(
+                        newEpisode(epVideosJson) {
+                            this.name = ep.name ?: ep.episodeName ?: "الحلقة ${ep.episodeNumber}"
+                            this.season = season.seasonNumber
+                            this.episode = ep.episodeNumber
+                            this.posterUrl = ep.stillPath ?: ep.posterPath
+                        }
+                    )
                 }
             }
+        }
 
-            newTvSeriesLoadResponse(res.name ?: res.title ?: "", url, TvType.TvSeries, episodes) {
-                this.posterUrl = res.posterPath
-                this.plot = res.overview
-                this.score = res.voteAverage?.let { Score.from10(it) }
-            }
+        return newTvSeriesLoadResponse(res.name ?: res.title ?: "", url, TvType.TvSeries, episodes) {
+            this.posterUrl = res.posterPath
+            this.plot = res.overview
+            this.score = res.voteAverage?.let { Score.from10(it) }
         }
     }
 
@@ -185,10 +286,16 @@ class EgyWatchProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val videos = try {
-            parseJson<Array<Video>>(data).toList()
-        } catch (e: Exception) {
-            emptyList()
+        // إذا كان الرابط ممرراً من سلسلة أفلام أو ممثل كـ API، نجلب سيرفرات الفيلم أولاً
+        val videos = if (data.startsWith("http")) {
+            val res = app.get(data, headers = appHeaders).parsedSafe<MediaDetail>()
+            res?.videos ?: emptyList()
+        } else {
+            try {
+                parseJson<Array<Video>>(data).toList()
+            } catch (e: Exception) {
+                emptyList()
+            }
         }
 
         val hostsRules = getHostsRules()
@@ -198,6 +305,8 @@ class EgyWatchProvider : MainAPI() {
             val serverName = video.server ?: "سيرفر"
             val customHeader = video.header ?: ""
             val videoUserAgent = video.useragent ?: ""
+
+            // 1. فحص روابط Cloudflare Workers المباشرة
             if (link.contains("cdnlink.developer-pro.workers.dev")) {
                 callback.invoke(
                     newExtractorLink(name = serverName, source = name, url = link) {
@@ -206,6 +315,8 @@ class EgyWatchProvider : MainAPI() {
                 )
                 return@parallelMap
             }
+
+            // 2. مطابقة الرابط مع قواعد /hosts/config
             val matchedRule = hostsRules.firstOrNull { rule ->
                 val rawPattern = rule.regexPattern ?: return@firstOrNull false
                 try {
@@ -217,7 +328,10 @@ class EgyWatchProvider : MainAPI() {
                     false
                 }
             }
+
             val cleanHeaders = getCleanHeaders(customHeader, videoUserAgent, matchedRule?.referer)
+
+            // 3. فحص الروابط المباشرة الصريحة (MP4 أو M3U8)
             if (matchedRule == null && (link.contains(".m3u8") || link.contains(".mp4"))) {
                 callback.invoke(
                     newExtractorLink(name = serverName, source = name, url = link) {
@@ -230,12 +344,18 @@ class EgyWatchProvider : MainAPI() {
             }
 
             var resolved = false
+
+            // 4. فك الرابط عبر محرك BaseVedEasyPlex (دعم POST و GET)
             if (matchedRule != null) {
                 resolved = resolveWithBaseVedEngine(link, serverName, cleanHeaders, matchedRule, callback)
             }
+
+            // 5. تجربة مستخرجات كلاودستريم المدمجة كبديل
             if (!resolved) {
                 resolved = loadExtractor(link, subtitleCallback, callback)
             }
+
+            // 6. Fallback أخير للبحث داخل الـ HTML
             if (!resolved) {
                 fallbackRegexExtract(link, serverName, cleanHeaders, callback)
             }
@@ -250,13 +370,16 @@ class EgyWatchProvider : MainAPI() {
         ruleReferer: String?
     ): Map<String, String> {
         val headers = mutableMapOf<String, String>()
+
         val ua = rawUserAgent?.takeIf { it.isNotBlank() }
             ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         headers["user-agent"] = ua.trim()
+
         if (!rawHeader.isNullOrBlank()) {
             for (part in rawHeader.split("|")) {
                 val token = part.trim()
                 if (token.isEmpty()) continue
+
                 if (token.startsWith("http://", true) || token.startsWith("https://", true)) {
                     headers["referer"] = token
                 } else if (token.contains(":")) {
@@ -268,6 +391,7 @@ class EgyWatchProvider : MainAPI() {
                 }
             }
         }
+
         if (!headers.containsKey("referer") && !ruleReferer.isNullOrBlank() && ruleReferer.startsWith("http", true)) {
             headers["referer"] = ruleReferer.trim()
         }
@@ -306,6 +430,8 @@ class EgyWatchProvider : MainAPI() {
             val enabledParts = rule.enableded?.split("|") ?: emptyList()
             val postUrl = enabledParts.getOrNull(1)?.takeIf { it.startsWith("http") }
             val urlSite = rule.urlsite
+
+            // 1. الأولوية الأولى للـ POST
             if (postUrl != null) {
                 val html = app.get(link, headers = cleanHeaders).text
                 val postHeaders = mapOf(
@@ -323,6 +449,8 @@ class EgyWatchProvider : MainAPI() {
                     return true
                 }
             }
+
+            // 2. الفك عبر GET السريع
             if (!urlSite.isNullOrEmpty() && (urlSite.endsWith("=") || urlSite.endsWith("api="))) {
                 val getApiUrl = "$urlSite$link"
                 val apiRes = app.get(getApiUrl, headers = mapOf("User-Agent" to "okhttp/5.0.0-alpha.6")).text
@@ -330,6 +458,8 @@ class EgyWatchProvider : MainAPI() {
                     return true
                 }
             }
+
+            // 3. الاستخراج عبر الـ Regex الداخلي في حقل site
             val sitePattern = rule.site
             if (!sitePattern.isNullOrEmpty()) {
                 val html = app.get(link, headers = cleanHeaders).text
@@ -363,6 +493,8 @@ class EgyWatchProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         var foundAny = false
+
+        // أ) التحقق من النمط النصي file:"...",label:"..."
         val textMatches = Regex("""file\s*:\s*["']([^"']+)["']\s*,\s*label\s*:\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
             .findAll(responseBody).toList()
 
@@ -386,6 +518,8 @@ class EgyWatchProvider : MainAPI() {
             }
             if (foundAny) return true
         }
+
+        // ب) التحقق من نمط JSON
         try {
             val jsonRes = JSONObject(responseBody)
             if (jsonRes.optString("status") == "success") {
@@ -444,6 +578,10 @@ class EgyWatchProvider : MainAPI() {
         }
     }
 
+    // ==========================================
+    // Data Classes
+    // ==========================================
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class HostConfigItem(
         @JsonProperty("host_id") val hostId: String?,
@@ -462,6 +600,8 @@ class EgyWatchProvider : MainAPI() {
         @JsonProperty("title") val title: String?,
         @JsonProperty("name") val name: String?,
         @JsonProperty("overview") val overview: String?,
+        @JsonProperty("biography") val biography: String?,
+        @JsonProperty("profile_path") val profilePath: String?,
         @JsonProperty("poster_path") val posterPath: String?,
         @JsonProperty("release_date") val releaseDate: String?,
         @JsonProperty("first_air_date") val firstAirDate: String?,
