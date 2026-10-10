@@ -279,8 +279,6 @@ class EgyWatchProvider : MainAPI() {
             emptyList()
         }
     }
-
-    // التعديل: إضافة suspend للدالة
 private suspend fun parseAndEmitLinks(
     responseBody: String,
     serverName: String,
