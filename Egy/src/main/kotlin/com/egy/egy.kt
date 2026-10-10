@@ -198,6 +198,8 @@ class EgyWatchProvider : MainAPI() {
             val serverName = video.server ?: "سيرفر"
             val customHeader = video.header ?: ""
             val videoUserAgent = video.useragent ?: ""
+
+            // 1. فحص روابط Cloudflare Workers المباشرة
             if (link.contains("cdnlink.developer-pro.workers.dev")) {
                 callback.invoke(
                     newExtractorLink(name = serverName, source = name, url = link) {
@@ -206,6 +208,8 @@ class EgyWatchProvider : MainAPI() {
                 )
                 return@parallelMap
             }
+
+            // 2. مطابقة الرابط مع قواعد /hosts/config
             val matchedRule = hostsRules.firstOrNull { rule ->
                 val rawPattern = rule.regexPattern ?: return@firstOrNull false
                 try {
@@ -217,12 +221,16 @@ class EgyWatchProvider : MainAPI() {
                     false
                 }
             }
-            val streamHeaders = extractHeaders(customHeader, videoUserAgent, matchedRule?.referer)
+
+            // استخراج الترويسات الصحيحة المنظمة
+            val cleanHeaders = getCleanHeaders(customHeader, videoUserAgent, matchedRule?.referer)
+
+            // 3. فحص الروابط المباشرة الصريحة (MP4 أو M3U8)
             if (matchedRule == null && (link.contains(".m3u8") || link.contains(".mp4"))) {
                 callback.invoke(
                     newExtractorLink(name = serverName, source = name, url = link) {
-                        this.referer = streamHeaders["Referer"] ?: ""
-                        this.headers = streamHeaders
+                        this.referer = cleanHeaders["referer"] ?: ""
+                        this.headers = cleanHeaders
                         this.quality = getQualityFromName(serverName)
                     }
                 )
@@ -230,52 +238,64 @@ class EgyWatchProvider : MainAPI() {
             }
 
             var resolved = false
+
+            // 4. فك الرابط عبر محرك BaseVedEasyPlex (دعم POST و GET)
             if (matchedRule != null) {
-                resolved = resolveWithBaseVedEngine(link, serverName, streamHeaders, matchedRule, callback)
+                resolved = resolveWithBaseVedEngine(link, serverName, cleanHeaders, matchedRule, callback)
             }
+
+            // 5. تجربة مستخرجات كلاودستريم المدمجة كبديل
             if (!resolved) {
                 resolved = loadExtractor(link, subtitleCallback, callback)
             }
+
+            // 6. Fallback أخير للبحث داخل الـ HTML
             if (!resolved) {
-                fallbackRegexExtract(link, serverName, streamHeaders, callback)
+                fallbackRegexExtract(link, serverName, cleanHeaders, callback)
             }
         }
 
         return true
     }
 
-    private fun extractHeaders(
+    // ==========================================
+    // دالة استخراج الترويسات الموحدة والمنظمة
+    // ==========================================
+
+    private fun getCleanHeaders(
         rawHeader: String?,
         rawUserAgent: String?,
         ruleReferer: String?
     ): Map<String, String> {
         val headers = mutableMapOf<String, String>()
-        if (!rawUserAgent.isNullOrEmpty()) {
-            headers["User-Agent"] = rawUserAgent.trim()
-        }
-        if (!rawHeader.isNullOrEmpty()) {
-            val parts = rawHeader.split("|")
-            for (part in parts) {
-                val colonIndex = part.indexOf(":")
-                if (colonIndex != -1) {
-                    val key = part.substring(0, colonIndex).trim()
-                    val value = part.substring(colonIndex + 1).trim()
+
+        // 1. User-Agent واحد موحد بحروف صغيرة
+        val ua = rawUserAgent?.takeIf { it.isNotBlank() }
+            ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        headers["user-agent"] = ua.trim()
+
+        // 2. فك الترويسات
+        if (!rawHeader.isNullOrBlank()) {
+            for (part in rawHeader.split("|")) {
+                val token = part.trim()
+                if (token.isEmpty()) continue
+
+                // إذا كان رابطاً صريحاً (مثل https://vidtube.one/)
+                if (token.startsWith("http://", true) || token.startsWith("https://", true)) {
+                    headers["referer"] = token
+                } else if (token.contains(":")) {
+                    val key = token.substringBefore(":").trim().lowercase()
+                    val value = token.substringAfter(":").trim()
                     if (key.isNotEmpty() && value.isNotEmpty()) {
-                        val formattedKey = when (key.lowercase()) {
-                            "referer" -> "Referer"
-                            "origin" -> "Origin"
-                            "user-agent" -> "User-Agent"
-                            else -> key
-                        }
-                        headers[formattedKey] = value
+                        headers[key] = value
                     }
-                } else if (part.startsWith("http://") || part.startsWith("https://")) {
-                    headers["Referer"] = part.trim()
                 }
             }
         }
-        if (!headers.containsKey("Referer") && !ruleReferer.isNullOrEmpty() && ruleReferer.startsWith("http")) {
-            headers["Referer"] = ruleReferer.trim()
+
+        // 3. Fallback للـ Referer من قاعدة /hosts/config
+        if (!headers.containsKey("referer") && !ruleReferer.isNullOrBlank() && ruleReferer.startsWith("http", true)) {
+            headers["referer"] = ruleReferer.trim()
         }
 
         return headers
@@ -301,26 +321,25 @@ class EgyWatchProvider : MainAPI() {
         }
     }
 
+    // ==========================================
+    // محرك الفك عبر mawdhou3.com
+    // ==========================================
+
     private suspend fun resolveWithBaseVedEngine(
         link: String,
         serverName: String,
-        streamHeaders: Map<String, String>,
+        cleanHeaders: Map<String, String>,
         rule: HostConfigItem,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         return try {
-            val userAgent = streamHeaders["User-Agent"]
-                ?: rule.useragent?.takeIf { it.isNotEmpty() }
-                ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-
-            val requestHeaders = streamHeaders.toMutableMap()
-            requestHeaders["User-Agent"] = userAgent
-
             val enabledParts = rule.enableded?.split("|") ?: emptyList()
             val postUrl = enabledParts.getOrNull(1)?.takeIf { it.startsWith("http") }
             val urlSite = rule.urlsite
+
+            // 1. الأولوية الأولى للـ POST
             if (postUrl != null) {
-                val html = app.get(link, headers = requestHeaders).text
+                val html = app.get(link, headers = cleanHeaders).text
                 val postHeaders = mapOf(
                     "Content-Type" to "application/x-www-form-urlencoded",
                     "User-Agent" to "okhttp/5.0.0-alpha.6"
@@ -332,20 +351,24 @@ class EgyWatchProvider : MainAPI() {
                     headers = postHeaders
                 ).text
 
-                if (parseAndEmitLinks(postResponse, serverName, streamHeaders, callback)) {
+                if (parseAndEmitLinks(postResponse, serverName, cleanHeaders, callback)) {
                     return true
                 }
             }
+
+            // 2. الفك عبر GET السريع
             if (!urlSite.isNullOrEmpty() && (urlSite.endsWith("=") || urlSite.endsWith("api="))) {
                 val getApiUrl = "$urlSite$link"
                 val apiRes = app.get(getApiUrl, headers = mapOf("User-Agent" to "okhttp/5.0.0-alpha.6")).text
-                if (parseAndEmitLinks(apiRes, serverName, streamHeaders, callback)) {
+                if (parseAndEmitLinks(apiRes, serverName, cleanHeaders, callback)) {
                     return true
                 }
             }
+
+            // 3. الاستخراج عبر الـ Regex الداخلي في حقل site
             val sitePattern = rule.site
             if (!sitePattern.isNullOrEmpty()) {
-                val html = app.get(link, headers = requestHeaders).text
+                val html = app.get(link, headers = cleanHeaders).text
                 val cleanSitePattern = sitePattern.replace("\\/", "/")
                 val regex = Regex("""sources.*(https?:[^"']+)"""", RegexOption.IGNORE_CASE)
                 val match = regex.find(html) ?: Regex("""file\s*:\s*["']([^"']+)["']""").find(html)
@@ -354,8 +377,8 @@ class EgyWatchProvider : MainAPI() {
                 if (!streamUrl.isNullOrEmpty() && (streamUrl.startsWith("http://") || streamUrl.startsWith("https://"))) {
                     callback.invoke(
                         newExtractorLink(name = "$serverName (Direct)", source = name, url = streamUrl) {
-                            this.referer = streamHeaders["Referer"] ?: ""
-                            this.headers = streamHeaders
+                            this.referer = cleanHeaders["referer"] ?: ""
+                            this.headers = cleanHeaders
                             this.quality = getQualityFromName(serverName)
                         }
                     )
@@ -372,10 +395,12 @@ class EgyWatchProvider : MainAPI() {
     private suspend fun parseAndEmitLinks(
         responseBody: String,
         serverName: String,
-        streamHeaders: Map<String, String>,
+        cleanHeaders: Map<String, String>,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         var foundAny = false
+
+        // أ) التحقق من النمط النصي file:"...",label:"..."
         val textMatches = Regex("""file\s*:\s*["']([^"']+)["']\s*,\s*label\s*:\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
             .findAll(responseBody).toList()
 
@@ -390,8 +415,8 @@ class EgyWatchProvider : MainAPI() {
                         source = name,
                         url = streamUrl
                     ) {
-                        this.referer = streamHeaders["Referer"] ?: ""
-                        this.headers = streamHeaders
+                        this.referer = cleanHeaders["referer"] ?: ""
+                        this.headers = cleanHeaders
                         this.quality = getQualityFromName(qualityStr)
                     }
                 )
@@ -399,6 +424,8 @@ class EgyWatchProvider : MainAPI() {
             }
             if (foundAny) return true
         }
+
+        // ب) التحقق من نمط JSON
         try {
             val jsonRes = JSONObject(responseBody)
             if (jsonRes.optString("status") == "success") {
@@ -416,8 +443,8 @@ class EgyWatchProvider : MainAPI() {
                                     source = name,
                                     url = streamUrl
                                 ) {
-                                    this.referer = streamHeaders["Referer"] ?: ""
-                                    this.headers = streamHeaders
+                                    this.referer = cleanHeaders["referer"] ?: ""
+                                    this.headers = cleanHeaders
                                     this.quality = getQualityFromName(qualityStr)
                                 }
                             )
@@ -435,15 +462,11 @@ class EgyWatchProvider : MainAPI() {
     private suspend fun fallbackRegexExtract(
         link: String,
         serverName: String,
-        streamHeaders: Map<String, String>,
+        cleanHeaders: Map<String, String>,
         callback: (ExtractorLink) -> Unit
     ) {
         try {
-            val userAgent = streamHeaders["User-Agent"] ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            val headers = streamHeaders.toMutableMap()
-            headers["User-Agent"] = userAgent
-
-            val html = app.get(link, headers = headers).text
+            val html = app.get(link, headers = cleanHeaders).text
             val videoRegex = Regex("""(?:file|src)\s*:\s*["'](https?://[^"']+\.(?:m3u8|mp4)[^"']*)["']""")
             val match = videoRegex.find(html)
             val extractedUrl = match?.groups?.get(1)?.value
@@ -451,8 +474,8 @@ class EgyWatchProvider : MainAPI() {
             if (extractedUrl != null) {
                 callback.invoke(
                     newExtractorLink(name = "$serverName (Auto)", source = name, url = extractedUrl) {
-                        this.referer = streamHeaders["Referer"] ?: ""
-                        this.headers = streamHeaders
+                        this.referer = cleanHeaders["referer"] ?: ""
+                        this.headers = cleanHeaders
                         this.quality = getQualityFromName(serverName)
                     }
                 )
@@ -460,6 +483,10 @@ class EgyWatchProvider : MainAPI() {
         } catch (e: Exception) {
         }
     }
+
+    // ==========================================
+    // Data Classes
+    // ==========================================
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class HostConfigItem(
