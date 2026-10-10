@@ -280,13 +280,13 @@ class EgyWatchProvider : MainAPI() {
         }
     }
 
-    private suspend fun resolveWithBaseVedEngine(
-        link: String,
-        serverName: String,
-        customHeader: String,
-        rule: HostConfigItem,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean {
+    // التعديل: إضافة suspend للدالة
+private suspend fun parseAndEmitLinks(
+    responseBody: String,
+    serverName: String,
+    referer: String,
+    callback: (ExtractorLink) -> Unit
+): Boolean {
         return try {
             val explicitReferer = getExplicitReferer(customHeader, rule.referer)
 
