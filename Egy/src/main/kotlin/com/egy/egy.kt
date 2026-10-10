@@ -24,7 +24,6 @@ import java.net.URLEncoder
 import java.security.SecureRandom
 
 class EgyWatchProvider : MainAPI() {
-    // جلب الرابط المخزن محلياً، أو استخدام الرابط الافتراضي كـ Fallback
     override var mainUrl: String
         get() = getKey<String>("EGYWATCH_SAVED_MAIN_URL") ?: defaultUrl
         set(value) {
@@ -38,8 +37,6 @@ class EgyWatchProvider : MainAPI() {
 
     private val defaultUrl = "https://rn62mwg.com/egywatchapp/public/api"
     private val apiKey = "p2lbgWkFrykA4QyUmpHihzmc5BNzIABq"
-
-    // بيانات فايربيس الثابتة
     private val fbApiKey = "AIzaSyAGdOTZqB2qjBExaLFBTdv0WoMtBB2M_bU"
     private val fbAppId = "1:1076822460914:android:67cfb6408c74566297836b"
     private val fbProjectId = "egy-watch-new"
@@ -65,17 +62,13 @@ class EgyWatchProvider : MainAPI() {
         page: Int,
         request: MainPageRequest
     ): HomePageResponse? {
-        // [1] إطلاق الفحص في الخلفية فوراً بدون انتظار (Non-blocking)
         CoroutineScope(Dispatchers.IO).launch {
             checkAndUpdateUrlFromFirebase()
         }
-
-        // [2] جلب الصفحة الرئيسية مباشرة باستخدام الرابط الحالي
         val currentApiUrl = "$mainUrl/media/homecontent/$apiKey"
         val responseText = try {
             app.get(currentApiUrl, headers = appHeaders).text
         } catch (e: Exception) {
-            // في حال فشل الرابط تماماً، نجرب الرابط الافتراضي فوراً
             app.get("$defaultUrl/media/homecontent/$apiKey", headers = appHeaders).text
         }
 
@@ -139,17 +132,11 @@ class EgyWatchProvider : MainAPI() {
 
         return newHomePageResponse(homeItems)
     }
-
-    // ========================================================
-    // دالة فحص وتحديث الرابط من فايربيس في الخلفية
-    // ========================================================
     private suspend fun checkAndUpdateUrlFromFirebase() {
         try {
             val savedEtag = getKey<String>("EGYWATCH_SAVED_ETAG")
             var savedToken = getKey<String>("EGYWATCH_SAVED_AUTH_TOKEN")
             var savedFid = getKey<String>("EGYWATCH_SAVED_FID")
-
-            // 1. إذا لم يكن لدينا معرف جهاز، ننشئ جهاز جديد وتوكن جديد
             if (savedToken.isNullOrEmpty() || savedFid.isNullOrEmpty()) {
                 val newFid = generateFid()
                 val installUrl = "https://firebaseinstallations.googleapis.com/v1/projects/$fbProjectId/installations"
@@ -179,8 +166,6 @@ class EgyWatchProvider : MainAPI() {
                     return
                 }
             }
-
-            // 2. إرسال طلب الفحص إلى Remote Config
             val configUrl = "https://firebaseremoteconfig.googleapis.com/v1/projects/$fbProjectNumber/namespaces/firebase:fetch"
             val configHeaders = mutableMapOf(
                 "X-Goog-Api-Key" to fbApiKey,
@@ -190,8 +175,6 @@ class EgyWatchProvider : MainAPI() {
                 "Content-Type" to "application/json",
                 "Accept" to "application/json"
             )
-
-            // إرفاق ETag إن وجد للتحقق السريع
             if (!savedEtag.isNullOrEmpty()) {
                 configHeaders["If-None-Match"] = savedEtag
             }
@@ -206,8 +189,6 @@ class EgyWatchProvider : MainAPI() {
             )
 
             val configResponse = app.post(configUrl, headers = configHeaders, json = configPayload)
-
-            // 3. تحليل الرد
             if (configResponse.code == 200) {
                 val json = JSONObject(configResponse.text)
                 val state = json.optString("state")
@@ -217,11 +198,8 @@ class EgyWatchProvider : MainAPI() {
                     val rawUrl = entries?.optString("EgywatchV5") ?: entries?.optString("EgywatchV5_fallback")
 
                     if (!rawUrl.isNullOrEmpty()) {
-                        // إزالة الشرطة المائلة الأخيرة لتوحيد الروابط
                         val cleanUrl = rawUrl.trim().removeSuffix("/")
                         mainUrl = cleanUrl // سيتم تخزينه وحفظه للمرات القادمة تلقائياً
-
-                        // حفظ الـ ETag الجديد
                         configResponse.headers["etag"]?.let { newEtag ->
                             setKey("EGYWATCH_SAVED_ETAG", newEtag)
                         }
@@ -699,10 +677,6 @@ class EgyWatchProvider : MainAPI() {
         } catch (e: Exception) {
         }
     }
-
-    // ==========================================
-    // Data Classes
-    // ==========================================
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class HostConfigItem(
