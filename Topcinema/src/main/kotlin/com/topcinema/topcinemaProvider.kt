@@ -281,8 +281,6 @@ class TopCinemaProvider : MainAPI() {
         val response = app.get(url, headers = getDynamicHeaders(currentBaseUrl), referer = currentBaseUrl)
         val html = response.text
         val document = response.document
-
-        // 1. معالجة صفحة أزرار التحميل (/d/) واستخراج كل جودة كسيرفر مستقل
         val downloadButtons = document.select("a[href*='/d/']")
         if (downloadButtons.isNotEmpty()) {
             downloadButtons.amap { btn ->
@@ -302,8 +300,6 @@ class TopCinemaProvider : MainAPI() {
 
                     if (finalDirectUrl.isNotBlank() && (finalDirectUrl.startsWith("http") || finalDirectUrl.contains(".mp4"))) {
                         val cleanDirectUrl = finalDirectUrl.replace(Regex("""[&?]referer=.*"""), "")
-                        
-                        // جعل كل جودة سيرفراً مستقلاً
                         val serverTitle = "Vidtube $qualityText"
 
                         callback(newExtractorLink(
@@ -321,8 +317,6 @@ class TopCinemaProvider : MainAPI() {
             }
             return
         }
-
-        // 2. معالجة مشغل الفيديو (Packer JS) واستخراج كل جودة كسيرفر مستقل
         val packerRegex = Regex(
             """eval\(function\(p,a,c,k,e,d\)\{.*?\}\(\s*(['"])(.*?)\1\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])(.*?)\5\.split""",
             setOf(RegexOption.DOT_MATCHES_ALL)
@@ -366,8 +360,6 @@ class TopCinemaProvider : MainAPI() {
         files.forEachIndexed { index, fileUrl ->
             val label = labels.getOrNull(index) ?: "Auto"
             val cleanFileUrl = fileUrl.replace(Regex("""[&?]referer=.*"""), "")
-            
-            // جعل كل جودة سيرفراً مستقلاً
             val serverTitle = "Vidtube $label"
 
             try {
