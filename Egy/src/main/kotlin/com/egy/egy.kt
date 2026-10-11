@@ -1,48 +1,29 @@
 package com.egy
 
-import android.util.Base64
 import android.util.Log
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
-import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.getQualityFromName
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.newExtractorLink
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.net.URLEncoder
-import java.security.SecureRandom
 
 class EgyWatchProvider : MainAPI() {
-    override var mainUrl: String
-        get() = getKey<String>("EGYWATCH_SAVED_MAIN_URL") ?: defaultUrl
-        set(value) {
-            setKey("EGYWATCH_SAVED_MAIN_URL", value)
-        }
-
+    override var mainUrl = "https://rn62mwg.com/egywatchapp/public/api"
     override var name = "EgyWatch"
     override val hasMainPage = true
     override var lang = "ar"
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime, TvType.Live)
 
-    private val defaultUrl = "https://rn62mwg.com/egywatchapp/public/api"
-    private val apiKey = "API_KEY_PLACEHOLDER"
-    private val fbApiKey = "FB_API_KEY_PLACEHOLDER"
-    private val fbAppId = "FB_APP_ID_PLACEHOLDER"
-    private val fbProjectId = "egy-watch-new"
-    private val fbProjectNumber = "1076822460914"
-    private val fbPackageName = "com.linkletter.app"
-    private val fbCertSha1 = "26B02D233509F4AECF56980032343456CEAB722A"
+    private val apiKey = "p2lbgWkFrykA4QyUmpHihzmc5BNzIABq"
 
     private val appHeaders = mapOf(
         "User-Agent" to "EasyPlex (Android 16; RMX5061; realme RE60ADL1; ar)",
@@ -55,23 +36,14 @@ class EgyWatchProvider : MainAPI() {
     private var cachedHostsConfig: List<HostConfigItem>? = null
 
     override val mainPage = mainPageOf(
-        "home" to "الصفحة الرئيسية"
+        "$mainUrl/media/homecontent/$apiKey" to "الصفحة الرئيسية"
     )
 
     override suspend fun getMainPage(
         page: Int,
         request: MainPageRequest
     ): HomePageResponse? {
-        CoroutineScope(Dispatchers.IO).launch {
-            checkAndUpdateUrlFromFirebase()
-        }
-        val currentApiUrl = "$mainUrl/media/homecontent/$apiKey"
-        val responseText = try {
-            app.get(currentApiUrl, headers = appHeaders).text
-        } catch (e: Exception) {
-            app.get("$defaultUrl/media/homecontent/$apiKey", headers = appHeaders).text
-        }
-
+        val responseText = app.get(request.data, headers = appHeaders).text
         val json = JSONObject(responseText)
         val sectionsArray = json.optJSONArray("sections") ?: return null
 
@@ -86,7 +58,7 @@ class EgyWatchProvider : MainAPI() {
             val searchResponses = mutableListOf<SearchResponse>()
             for (j in 0 until dataArray.length()) {
                 val itemObj = dataArray.optJSONObject(j) ?: continue
-
+                
                 val id = itemObj.optInt("featured_id", 0).takeIf { it > 0 }
                     ?: itemObj.optInt("id", -1).takeIf { it != -1 }
                     ?: continue
@@ -95,11 +67,13 @@ class EgyWatchProvider : MainAPI() {
                 if (itemTitle.isEmpty()) continue
 
                 val rawType = itemObj.optString("type").lowercase()
-
-                val posterPath = itemObj.optString("poster_path").ifEmpty {
-                    itemObj.optString("profile_path")
+                
+                // حل مشكلة صور الممثلين (profile_path)
+                val posterPath = itemObj.optString("poster_path").ifEmpty { 
+                    itemObj.optString("profile_path") 
                 }.takeIf { it.isNotEmpty() }
 
+                // توجيه كل قسم لرابط التفاصيل الصحيح
                 val directApiUrl = when {
                     sectionType == "channels" || rawType == "channel" -> "$mainUrl/stream/show/$id/$apiKey"
                     sectionType == "collections" -> "$mainUrl/collections/media/show/$id"
@@ -131,97 +105,6 @@ class EgyWatchProvider : MainAPI() {
         }
 
         return newHomePageResponse(homeItems)
-    }
-    private suspend fun checkAndUpdateUrlFromFirebase() {
-        try {
-            val savedEtag = getKey<String>("EGYWATCH_SAVED_ETAG")
-            var savedToken = getKey<String>("EGYWATCH_SAVED_AUTH_TOKEN")
-            var savedFid = getKey<String>("EGYWATCH_SAVED_FID")
-            if (savedToken.isNullOrEmpty() || savedFid.isNullOrEmpty()) {
-                val newFid = generateFid()
-                val installUrl = "https://firebaseinstallations.googleapis.com/v1/projects/$fbProjectId/installations"
-                val installHeaders = mapOf(
-                    "Content-Type" to "application/json",
-                    "Accept" to "application/json",
-                    "x-goog-api-key" to fbApiKey,
-                    "X-Android-Package" to fbPackageName,
-                    "X-Android-Cert" to fbCertSha1
-                )
-                val installPayload = mapOf(
-                    "fid" to newFid,
-                    "appId" to fbAppId,
-                    "authVersion" to "FIS_v2",
-                    "sdkVersion" to "a:17.0.1"
-                )
-
-                val installRes = app.post(installUrl, headers = installHeaders, json = installPayload).text
-                val token = JSONObject(installRes).optJSONObject("authToken")?.optString("token")
-
-                if (!token.isNullOrEmpty()) {
-                    savedToken = token
-                    savedFid = newFid
-                    setKey("EGYWATCH_SAVED_AUTH_TOKEN", token)
-                    setKey("EGYWATCH_SAVED_FID", newFid)
-                } else {
-                    return
-                }
-            }
-            val configUrl = "https://firebaseremoteconfig.googleapis.com/v1/projects/$fbProjectNumber/namespaces/firebase:fetch"
-            val configHeaders = mutableMapOf(
-                "X-Goog-Api-Key" to fbApiKey,
-                "X-Android-Package" to fbPackageName,
-                "X-Android-Cert" to fbCertSha1,
-                "X-Goog-Firebase-Installations-Auth" to savedToken,
-                "Content-Type" to "application/json",
-                "Accept" to "application/json"
-            )
-            if (!savedEtag.isNullOrEmpty()) {
-                configHeaders["If-None-Match"] = savedEtag
-            }
-
-            val configPayload = mapOf(
-                "appInstanceId" to savedFid,
-                "appId" to fbAppId,
-                "packageName" to fbPackageName,
-                "appInstanceIdToken" to savedToken,
-                "appVersion" to "5.0.0",
-                "appBuild" to "50"
-            )
-
-            val configResponse = app.post(configUrl, headers = configHeaders, json = configPayload)
-            if (configResponse.code == 200) {
-                val json = JSONObject(configResponse.text)
-                val state = json.optString("state")
-
-                if (state == "UPDATE") {
-                    val entries = json.optJSONObject("entries")
-                    val rawUrl = entries?.optString("EgywatchV5") ?: entries?.optString("EgywatchV5_fallback")
-
-                    if (!rawUrl.isNullOrEmpty()) {
-                        val cleanUrl = rawUrl.trim().removeSuffix("/")
-                        mainUrl = cleanUrl // سيتم تخزينه وحفظه للمرات القادمة تلقائياً
-                        configResponse.headers["etag"]?.let { newEtag ->
-                            setKey("EGYWATCH_SAVED_ETAG", newEtag)
-                        }
-                        Log.d("EgyWatch", "تم تحديث الرابط الجديد بنجاح إلى: $cleanUrl")
-                    }
-                } else if (state == "NO_CHANGE") {
-                    Log.d("EgyWatch", "الرابط لم يتغير على السيرفر.")
-                }
-            }
-        } catch (e: Exception) {
-            Log.e("EgyWatch", "خطأ أثناء محاولة تحديث رابط فايربيس: ${e.message}")
-        }
-    }
-
-    private fun generateFid(): String {
-        val randomBytes = ByteArray(17)
-        SecureRandom().nextBytes(randomBytes)
-        randomBytes[0] = ((0b01110000) or (randomBytes[0].toInt() and 0b00001111)).toByte()
-        return Base64.encodeToString(
-            randomBytes,
-            Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
-        ).take(22)
     }
 
     override suspend fun search(query: String): List<SearchResponse>? {
@@ -267,6 +150,7 @@ class EgyWatchProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse? {
+        // 1. فتح قنوات البث المباشر والمباريات (/stream/show/)
         if (url.contains("/stream/show/")) {
             val res = app.get(url, headers = appHeaders).parsedSafe<MediaDetail>() ?: return null
             val videosJson = res.videos?.toJson() ?: ""
@@ -277,6 +161,7 @@ class EgyWatchProvider : MainAPI() {
             }
         }
 
+        // 2. فتح سلاسل الأفلام (/collections/media/show/) - جلب حتى 3 صفحات
         if (url.contains("/collections/media/show/")) {
             val episodes = mutableListOf<Episode>()
             var collectionName = "سلسلة أفلام"
@@ -314,6 +199,7 @@ class EgyWatchProvider : MainAPI() {
             }
         }
 
+        // 3. فتح صفحة وأفلام الممثلين (/filmographie/detail/) - جلب حتى 3 صفحات
         if (url.contains("/filmographie/detail/")) {
             val actorId = url.substringAfter("/detail/").substringBefore("/")
             val castInfo = app.get("$mainUrl/cast/detail/$actorId/$apiKey", headers = appHeaders).parsedSafe<MediaDetail>()
@@ -350,6 +236,7 @@ class EgyWatchProvider : MainAPI() {
             }
         }
 
+        // 4. فتح الأفلام العادية (/media/detail/)
         if (url.contains("/media/detail/")) {
             val res = app.get(url, headers = appHeaders).parsedSafe<MediaDetail>() ?: return null
             val videosJson = res.videos?.toJson() ?: ""
@@ -362,13 +249,14 @@ class EgyWatchProvider : MainAPI() {
             }
         }
 
+        // 5. فتح المسلسلات العادية (/series/show/)
         val res = app.get(url, headers = appHeaders).parsedSafe<MediaDetail>() ?: return null
         val episodes = mutableListOf<Episode>()
 
         res.seasons?.parallelMap { season ->
             val seasonId = season.id ?: return@parallelMap
             val seasonRes = app.get("$mainUrl/series/season/$seasonId/$apiKey", headers = appHeaders).parsedSafe<SeasonDetail>()
-
+            
             seasonRes?.episodes?.forEach { ep ->
                 val epVideosJson = ep.videos?.toJson() ?: ""
 
@@ -398,6 +286,7 @@ class EgyWatchProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
+        // إذا كان الرابط ممرراً من سلسلة أفلام أو ممثل كـ API، نجلب سيرفرات الفيلم أولاً
         val videos = if (data.startsWith("http")) {
             val res = app.get(data, headers = appHeaders).parsedSafe<MediaDetail>()
             res?.videos ?: emptyList()
@@ -417,6 +306,7 @@ class EgyWatchProvider : MainAPI() {
             val customHeader = video.header ?: ""
             val videoUserAgent = video.useragent ?: ""
 
+            // 1. فحص روابط Cloudflare Workers المباشرة
             if (link.contains("cdnlink.developer-pro.workers.dev")) {
                 callback.invoke(
                     newExtractorLink(name = serverName, source = name, url = link) {
@@ -426,6 +316,7 @@ class EgyWatchProvider : MainAPI() {
                 return@parallelMap
             }
 
+            // 2. مطابقة الرابط مع قواعد /hosts/config
             val matchedRule = hostsRules.firstOrNull { rule ->
                 val rawPattern = rule.regexPattern ?: return@firstOrNull false
                 try {
@@ -440,6 +331,7 @@ class EgyWatchProvider : MainAPI() {
 
             val cleanHeaders = getCleanHeaders(customHeader, videoUserAgent, matchedRule?.referer)
 
+            // 3. فحص الروابط المباشرة الصريحة (MP4 أو M3U8)
             if (matchedRule == null && (link.contains(".m3u8") || link.contains(".mp4"))) {
                 callback.invoke(
                     newExtractorLink(name = serverName, source = name, url = link) {
@@ -453,14 +345,17 @@ class EgyWatchProvider : MainAPI() {
 
             var resolved = false
 
+            // 4. فك الرابط عبر محرك BaseVedEasyPlex (دعم POST و GET)
             if (matchedRule != null) {
                 resolved = resolveWithBaseVedEngine(link, serverName, cleanHeaders, matchedRule, callback)
             }
 
+            // 5. تجربة مستخرجات كلاودستريم المدمجة كبديل
             if (!resolved) {
                 resolved = loadExtractor(link, subtitleCallback, callback)
             }
 
+            // 6. Fallback أخير للبحث داخل الـ HTML
             if (!resolved) {
                 fallbackRegexExtract(link, serverName, cleanHeaders, callback)
             }
@@ -515,7 +410,7 @@ class EgyWatchProvider : MainAPI() {
                 "$mainUrl/hosts/config",
                 headers = mapOf("User-Agent" to "okhttp/5.0.0-alpha.6", "Accept" to "application/json")
             ).text
-
+            
             val array = parseJson<Array<HostConfigItem>>(text).toList()
             cachedHostsConfig = array
             cachedHostsConfig!!
@@ -536,6 +431,7 @@ class EgyWatchProvider : MainAPI() {
             val postUrl = enabledParts.getOrNull(1)?.takeIf { it.startsWith("http") }
             val urlSite = rule.urlsite
 
+            // 1. الأولوية الأولى للـ POST
             if (postUrl != null) {
                 val html = app.get(link, headers = cleanHeaders).text
                 val postHeaders = mapOf(
@@ -554,6 +450,7 @@ class EgyWatchProvider : MainAPI() {
                 }
             }
 
+            // 2. الفك عبر GET السريع
             if (!urlSite.isNullOrEmpty() && (urlSite.endsWith("=") || urlSite.endsWith("api="))) {
                 val getApiUrl = "$urlSite$link"
                 val apiRes = app.get(getApiUrl, headers = mapOf("User-Agent" to "okhttp/5.0.0-alpha.6")).text
@@ -562,6 +459,7 @@ class EgyWatchProvider : MainAPI() {
                 }
             }
 
+            // 3. الاستخراج عبر الـ Regex الداخلي في حقل site
             val sitePattern = rule.site
             if (!sitePattern.isNullOrEmpty()) {
                 val html = app.get(link, headers = cleanHeaders).text
@@ -596,6 +494,7 @@ class EgyWatchProvider : MainAPI() {
     ): Boolean {
         var foundAny = false
 
+        // أ) التحقق من النمط النصي file:"...",label:"..."
         val textMatches = Regex("""file\s*:\s*["']([^"']+)["']\s*,\s*label\s*:\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
             .findAll(responseBody).toList()
 
@@ -620,6 +519,7 @@ class EgyWatchProvider : MainAPI() {
             if (foundAny) return true
         }
 
+        // ب) التحقق من نمط JSON
         try {
             val jsonRes = JSONObject(responseBody)
             if (jsonRes.optString("status") == "success") {
@@ -677,6 +577,10 @@ class EgyWatchProvider : MainAPI() {
         } catch (e: Exception) {
         }
     }
+
+    // ==========================================
+    // Data Classes
+    // ==========================================
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class HostConfigItem(
