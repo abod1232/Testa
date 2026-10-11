@@ -31,6 +31,7 @@ class TopCinemaProvider : MainAPI() {
         "Accept-Language" to "ar-EG,ar;q=0.9,en-US;q=0.8,en;q=0.7",
         "Referer" to "$mainUrl/"
     )
+
     private suspend fun httpGet(url: String, referer: String? = null): org.jsoup.nodes.Document {
         return app.get(
             url,
@@ -82,6 +83,7 @@ class TopCinemaProvider : MainAPI() {
         }
         return newHomePageResponse(homePageList)
     }
+
     private fun toSearchResponse(element: Element): SearchResponse? {
         val link = element.selectFirst("a") ?: return null
         val href = link.attr("href")
@@ -98,7 +100,6 @@ class TopCinemaProvider : MainAPI() {
             isMovie -> newMovieSearchResponse(title, href, TvType.Movie) {
                 this.addPoster(posterUrl, headers = standardHeaders)
             }
-
             isSeries -> newTvSeriesSearchResponse(title, href, TvType.TvSeries) {
                 this.addPoster(posterUrl, headers = standardHeaders)
             }
@@ -132,11 +133,9 @@ class TopCinemaProvider : MainAPI() {
         val poster = document.selectFirst(".MainSingle .left .image img")?.attr("src")
         val plot = document.selectFirst(".story p")?.text()
         val tags = document.select(".RightTaxContent li:contains(نوع) a").map { it.text() }
-        val year =
-            document.selectFirst(".RightTaxContent li:contains(الصدور) a")?.text()?.toIntOrNull()
+        val year = document.selectFirst(".RightTaxContent li:contains(الصدور) a")?.text()?.toIntOrNull()
         val scoreValue = document.selectFirst(".imdbR span")?.text()?.toDoubleOrNull()
-        val actors =
-            document.select(".RightTaxContent li.actor a").map { Actor(it.text(), it.attr("href")) }
+        val actors = document.select(".RightTaxContent li.actor a").map { Actor(it.text(), it.attr("href")) }
 
         val isTvSeries = document.selectFirst("section.tabs") != null
 
@@ -147,27 +146,20 @@ class TopCinemaProvider : MainAPI() {
                 episodes = seasonsElements.amap { seasonLink ->
                     val seasonUrl = seasonLink.attr("href")
                     val seasonPoster = seasonLink.selectFirst("img")?.attr("src")
-                    val seasonNum =
-                        seasonLink.selectFirst(".epnum")?.text()?.replace("الموسم", "")?.trim()
-                            ?.toIntOrNull()
+                    val seasonNum = seasonLink.selectFirst(".epnum")?.text()?.replace("الموسم", "")?.trim()?.toIntOrNull()
 
                     val seasonDoc = httpGet(seasonUrl)
                     seasonDoc.select(".allepcont .row > a").map { ep ->
                         val epUrl = ep.attr("href")
                         val data = "$epUrl/watch/||$epUrl/download/"
                         val epTitle = ep.selectFirst("h2")?.text()
-                        val episodeNumber =
-                            ep.selectFirst(".epnum")?.text()?.replace("الحلقة", "")?.trim()
-                                ?.toIntOrNull()
-                        val episode = newEpisode(
-                            data = data
-                        ) {
+                        val episodeNumber = ep.selectFirst(".epnum")?.text()?.replace("الحلقة", "")?.trim()?.toIntOrNull()
+                        newEpisode(data = data) {
                             name = epTitle
                             season = seasonNum
                             episode = episodeNumber
                             posterUrl = seasonPoster
                         }
-                        episode // Return the modified episode object
                     }.reversed()
                 }.flatten()
             }
@@ -180,19 +172,14 @@ class TopCinemaProvider : MainAPI() {
                     val data = "$epUrl/watch/||$epUrl/download/"
                     val epTitle = ep.selectFirst("h2")?.text()
                     val epThumb = ep.selectFirst("img")?.attr("src")
-                    val episodeNumber =
-                        ep.selectFirst(".epnum")?.text()?.replace("الحلقة", "")?.trim()
-                            ?.toIntOrNull()
+                    val episodeNumber = ep.selectFirst(".epnum")?.text()?.replace("الحلقة", "")?.trim()?.toIntOrNull()
 
-                    val episode = newEpisode(
-                        data = data,
-                    ) {
+                    newEpisode(data = data) {
                         name = epTitle
                         season = seasonNumFromTitle
                         episode = episodeNumber
                         posterUrl = epThumb
                     }
-                    episode
                 }.reversed()
             }
 
@@ -214,18 +201,14 @@ class TopCinemaProvider : MainAPI() {
             }
         }
     }
+
     private val postHeaders = standardHeaders.plus(
         mapOf(
             "X-Requested-With" to "XMLHttpRequest",
             "Content-Type" to "application/x-www-form-urlencoded; charset=UTF-8",
-            "Accept" to "*/*" // <-- مهم لطلبات AJAX
+            "Accept" to "*/*"
         )
     )
-
-
-
-
-
 
     private fun unpackJs(p: String, a: Int, c: Int, k: List<String>): String {
         val digits = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -250,28 +233,27 @@ class TopCinemaProvider : MainAPI() {
         return Regex("([0-9A-Za-z]+)").replace(p) { m -> mapping[m.value] ?: m.value }
     }
 
-
-
     private fun unwrapPlayUrl(url: String): String {
-    return try {
-        if (url.contains("play.php?to=")) {
-            var decoded = java.net.URLDecoder.decode(url.substringAfter("play.php?to="), "UTF-8").trim()
-            if (decoded.contains("https://") && decoded.indexOf("https://") != decoded.lastIndexOf("https://")) {
-                decoded = decoded.substring(decoded.lastIndexOf("https://"))
-            }
-
-            if (decoded.startsWith("http")) decoded else "https:${decoded.trimStart(':')}"
-        } else url
-    } catch (e: Exception) { url }
+        return try {
+            if (url.contains("play.php?to=")) {
+                var decoded = java.net.URLDecoder.decode(url.substringAfter("play.php?to="), "UTF-8").trim()
+                if (decoded.contains("https://") && decoded.indexOf("https://") != decoded.lastIndexOf("https://")) {
+                    decoded = decoded.substring(decoded.lastIndexOf("https://"))
+                }
+                if (decoded.startsWith("http")) decoded else "https:${decoded.trimStart(':')}"
+            } else url
+        } catch (e: Exception) { url }
     }
+
     private fun getBaseUrl(url: String): String {
         return try {
             val uri = URI(url)
             "${uri.scheme}://${uri.authority}"
         } catch (e: Exception) {
-            mainUrl // في حال حدوث خطأ، نعود للرابط الأساسي
+            mainUrl
         }
     }
+
     private fun getDynamicHeaders(referer: String): Map<String, String> {
         return mapOf(
             "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Mobile Safari/537.36",
@@ -293,7 +275,50 @@ class TopCinemaProvider : MainAPI() {
     private suspend fun extractVidtube(url: String, currentBaseUrl: String, callback: (ExtractorLink) -> Unit) {
         try {
             Log.d("TopCinema", "[Vidtube] Loading: $url")
-            val response = app.get(url, headers = getDynamicHeaders(currentBaseUrl), referer = currentBaseUrl).text
+            val uri = URI(url)
+            val hostBase = "${uri.scheme}://${uri.host}"
+            
+            val response = app.get(url, headers = getDynamicHeaders(currentBaseUrl), referer = currentBaseUrl)
+            val html = response.text
+            val document = response.document
+
+            // 1. معالجة صفحة التحميل إذا كان الرابط يحتوي على أزرار /d/
+            val downloadButtons = document.select("a[href*='/d/']")
+            if (downloadButtons.isNotEmpty()) {
+                downloadButtons.amap { btn ->
+                    val href = btn.attr("href")
+                    val fullDownloadUrl = if (href.startsWith("http")) href else "$hostBase$href"
+                    val qualityText = btn.selectFirst("b")?.text()?.trim() ?: "Direct"
+
+                    try {
+                        val dlDoc = app.get(
+                            fullDownloadUrl,
+                            headers = getDynamicHeaders(url),
+                            referer = url,
+                            interceptor = cfInterceptor
+                        )
+                        val finalDirectUrl = dlDoc.document.selectFirst("a.btn-primary, a[href*='download'], a[href*='.mp4'], a[href*='.m3u8']")?.attr("href")
+                            ?: dlDoc.url
+
+                        if (finalDirectUrl.isNotBlank() && (finalDirectUrl.startsWith("http") || finalDirectUrl.contains(".mp4"))) {
+                            val cleanDirectUrl = finalDirectUrl.replace(Regex("""[&?]referer=.*"""), "")
+                            callback(newExtractorLink(
+                                source = name,
+                                name = "Vidtube - $qualityText",
+                                url = cleanDirectUrl
+                            ) {
+                                this.referer = "$hostBase/"
+                                this.quality = getQualityFromName(qualityText)
+                            })
+                        }
+                    } catch (e: Exception) {
+                        Log.e("TopCinema", "[Vidtube] Download page error: ${e.message}")
+                    }
+                }
+                return
+            }
+
+            // 2. معالجة مشغل الفيديو العادي بفك تشفير Packer
             val packerRegex = Regex(
                 """eval\(function\(p,a,c,k,e,d\)\{.*?\}\(\s*(['"])(.*?)\1\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])(.*?)\5\.split""",
                 setOf(RegexOption.DOT_MATCHES_ALL)
@@ -303,7 +328,7 @@ class TopCinemaProvider : MainAPI() {
             var c = 0
             var kList: List<String> = emptyList()
 
-            val match = packerRegex.find(response)
+            val match = packerRegex.find(html)
             if (match != null) {
                 try {
                     pRaw = match.groupValues[2]
@@ -311,42 +336,8 @@ class TopCinemaProvider : MainAPI() {
                     c = match.groupValues[4].toInt()
                     val kStr = match.groupValues[6]
                     kList = if (kStr.isEmpty()) emptyList() else kStr.split("|")
-                    Log.d("TopCinema", "[Vidtube] Regex parse OK -> a=$a c=$c k=${kList.size}")
                 } catch (e: Exception) {
                     Log.w("TopCinema", "[Vidtube] Regex parse partial failure: ${e.message}")
-                }
-            }
-            if (pRaw == null) {
-                try {
-                    val evalStart = response.indexOf("eval(function(p,a,c,k,e,d)")
-                    if (evalStart >= 0) {
-                        val sub = response.substring(evalStart)
-                        val lastSplitIdx = sub.lastIndexOf(".split('|')")
-                        if (lastSplitIdx > 0) {
-                            val beforeSplit = sub.substring(0, lastSplitIdx)
-                            val quoteIdx = beforeSplit.lastIndexOf("'")
-                            val quoteIdx2 = beforeSplit.lastIndexOf("\"")
-                            val idx = maxOf(quoteIdx, quoteIdx2)
-                            if (idx >= 0) {
-                                val kStr = beforeSplit.substring(idx + 1).trim()
-                                kList = if (kStr.isBlank()) emptyList() else kStr.split("|")
-                            }
-
-                            val tail = sub.substring(0, lastSplitIdx)
-                            val nums = Regex("""\(\s*(['"']).*?['"']\s*,\s*(\d+)\s*,\s*(\d+)\s*,""", RegexOption.DOT_MATCHES_ALL).find(tail)
-                            if (nums != null) {
-                                a = nums.groupValues[2].toIntOrNull() ?: a
-                                c = nums.groupValues[3].toIntOrNull() ?: c
-                            }
-
-                            val pCandidateMatch = Regex("""\(\s*(['"])(.*?)\1\s*,\s*$a\s*,\s*$c""", RegexOption.DOT_MATCHES_ALL).find(sub)
-                            if (pCandidateMatch != null) {
-                                pRaw = pCandidateMatch.groupValues[2]
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.w("TopCinema", "[Vidtube] fallback parse failed: ${e.message}")
                 }
             }
 
@@ -354,6 +345,7 @@ class TopCinemaProvider : MainAPI() {
                 Log.d("TopCinema", "[Vidtube] Could not extract p/a/c/k from page")
                 return
             }
+
             val p = pRaw.replace("\\'", "'")
             val safeA = if (a <= 0) 62 else minOf(a, 62)
             val safeC = if (c <= 0) kList.size.coerceAtLeast(0) else c
@@ -361,43 +353,38 @@ class TopCinemaProvider : MainAPI() {
             val unpacked = try {
                 unpackJs(p, safeA, safeC, kList)
             } catch (e: Exception) {
-                Log.e("TopCinema", "[Vidtube] unpackJs failed: ${e.message}")
                 ""
             }
+
             val fileRegex = Regex("""file\s*:\s*"(https?://[^"]+)"""")
             val labelRegex = Regex("""label\s*:\s*"([^"]+)"""")
 
             val files = fileRegex.findAll(unpacked).map { it.groupValues[1] }.toList()
             val labels = labelRegex.findAll(unpacked).map { it.groupValues[1] }.toList()
 
-            if (files.isEmpty()) {
-                Log.d("TopCinema", "[Vidtube] No files found after unpacking.")
-            }
-
             files.forEachIndexed { index, fileUrl ->
-    val label = labels.getOrNull(index) ?: "Auto"
-    try {
-        val cleanFileUrl = fileUrl.replace(Regex("""[&?]referer=.*"""), "")
-        val cleanReferer = "${URI(url).scheme}://${URI(url).host}/"
-
-        callback(newExtractorLink(
-            source = name,
-            name = "Vidtube - $label",
-            url = cleanFileUrl
-        ) {
-            this.referer = cleanReferer // إرسال الهوست الأساسي فقط
-            this.quality = getQualityFromName(label)
-        })
-        Log.d("TopCinema", "[Vidtube] Found Link: $label -> $cleanFileUrl")
-    } catch (e: Exception) {
-        Log.e("TopCinema", "[Vidtube] callback/newExtractorLink failed: ${e.message}")
-    }
-}
+                val label = labels.getOrNull(index) ?: "Auto"
+                try {
+                    val cleanFileUrl = fileUrl.replace(Regex("""[&?]referer=.*"""), "")
+                    callback(newExtractorLink(
+                        source = name,
+                        name = "Vidtube - $label",
+                        url = cleanFileUrl
+                    ) {
+                        this.referer = "$hostBase/"
+                        this.quality = getQualityFromName(label)
+                    })
+                    Log.d("TopCinema", "[Vidtube] Found Link: $label -> $cleanFileUrl")
+                } catch (e: Exception) {
+                    Log.e("TopCinema", "[Vidtube] callback failed: ${e.message}")
+                }
+            }
         } catch (e: Exception) {
-            Log.e("TopCinema", "[Vidtube] Connection/overall error: ${e.message}")
+            Log.e("TopCinema", "[Vidtube] Connection error: ${e.message}")
             logError(e)
         }
     }
+
     override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
         val extractedLinks = ConcurrentHashMap<String, String>()
 
@@ -418,8 +405,7 @@ class TopCinemaProvider : MainAPI() {
                     }
 
                     watchDoc.select(".watch--servers--list li.server--item").amap { server ->
-                        val ajaxUrl =
-                            "$finalBaseUrl/wp-content/themes/movies2023/Ajaxat/Single/Server.php"
+                        val ajaxUrl = "$finalBaseUrl/wp-content/themes/movies2023/Ajaxat/Single/Server.php"
                         val res = app.post(
                             ajaxUrl,
                             data = mapOf(
