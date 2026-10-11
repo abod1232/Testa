@@ -67,13 +67,9 @@ class EgyWatchProvider : MainAPI() {
                 if (itemTitle.isEmpty()) continue
 
                 val rawType = itemObj.optString("type").lowercase()
-                
-                // حل مشكلة صور الممثلين (profile_path)
                 val posterPath = itemObj.optString("poster_path").ifEmpty { 
                     itemObj.optString("profile_path") 
                 }.takeIf { it.isNotEmpty() }
-
-                // توجيه كل قسم لرابط التفاصيل الصحيح
                 val directApiUrl = when {
                     sectionType == "channels" || rawType == "channel" -> "$mainUrl/stream/show/$id/$apiKey"
                     sectionType == "collections" -> "$mainUrl/collections/media/show/$id"
@@ -150,7 +146,6 @@ class EgyWatchProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse? {
-        // 1. فتح قنوات البث المباشر والمباريات (/stream/show/)
         if (url.contains("/stream/show/")) {
             val res = app.get(url, headers = appHeaders).parsedSafe<MediaDetail>() ?: return null
             val videosJson = res.videos?.toJson() ?: ""
@@ -160,8 +155,6 @@ class EgyWatchProvider : MainAPI() {
                 this.plot = res.overview
             }
         }
-
-        // 2. فتح سلاسل الأفلام (/collections/media/show/) - جلب حتى 3 صفحات
         if (url.contains("/collections/media/show/")) {
             val episodes = mutableListOf<Episode>()
             var collectionName = "سلسلة أفلام"
@@ -198,8 +191,6 @@ class EgyWatchProvider : MainAPI() {
                 this.posterUrl = poster
             }
         }
-
-        // 3. فتح صفحة وأفلام الممثلين (/filmographie/detail/) - جلب حتى 3 صفحات
         if (url.contains("/filmographie/detail/")) {
             val actorId = url.substringAfter("/detail/").substringBefore("/")
             val castInfo = app.get("$mainUrl/cast/detail/$actorId/$apiKey", headers = appHeaders).parsedSafe<MediaDetail>()
@@ -235,8 +226,6 @@ class EgyWatchProvider : MainAPI() {
                 this.plot = castInfo?.biography ?: "أعمال ومشاركات الممثل"
             }
         }
-
-        // 4. فتح الأفلام العادية (/media/detail/)
         if (url.contains("/media/detail/")) {
             val res = app.get(url, headers = appHeaders).parsedSafe<MediaDetail>() ?: return null
             val videosJson = res.videos?.toJson() ?: ""
@@ -248,8 +237,6 @@ class EgyWatchProvider : MainAPI() {
                 this.score = res.voteAverage?.let { Score.from10(it) }
             }
         }
-
-        // 5. فتح المسلسلات العادية (/series/show/)
         val res = app.get(url, headers = appHeaders).parsedSafe<MediaDetail>() ?: return null
         val episodes = mutableListOf<Episode>()
 
@@ -286,7 +273,6 @@ class EgyWatchProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // إذا كان الرابط ممرراً من سلسلة أفلام أو ممثل كـ API، نجلب سيرفرات الفيلم أولاً
         val videos = if (data.startsWith("http")) {
             val res = app.get(data, headers = appHeaders).parsedSafe<MediaDetail>()
             res?.videos ?: emptyList()
@@ -305,8 +291,6 @@ class EgyWatchProvider : MainAPI() {
             val serverName = video.server ?: "سيرفر"
             val customHeader = video.header ?: ""
             val videoUserAgent = video.useragent ?: ""
-
-            // 1. فحص روابط Cloudflare Workers المباشرة
             if (link.contains("cdnlink.developer-pro.workers.dev")) {
                 callback.invoke(
                     newExtractorLink(name = serverName, source = name, url = link) {
@@ -315,8 +299,6 @@ class EgyWatchProvider : MainAPI() {
                 )
                 return@parallelMap
             }
-
-            // 2. مطابقة الرابط مع قواعد /hosts/config
             val matchedRule = hostsRules.firstOrNull { rule ->
                 val rawPattern = rule.regexPattern ?: return@firstOrNull false
                 try {
@@ -330,8 +312,6 @@ class EgyWatchProvider : MainAPI() {
             }
 
             val cleanHeaders = getCleanHeaders(customHeader, videoUserAgent, matchedRule?.referer)
-
-            // 3. فحص الروابط المباشرة الصريحة (MP4 أو M3U8)
             if (matchedRule == null && (link.contains(".m3u8") || link.contains(".mp4"))) {
                 callback.invoke(
                     newExtractorLink(name = serverName, source = name, url = link) {
@@ -344,18 +324,12 @@ class EgyWatchProvider : MainAPI() {
             }
 
             var resolved = false
-
-            // 4. فك الرابط عبر محرك BaseVedEasyPlex (دعم POST و GET)
             if (matchedRule != null) {
                 resolved = resolveWithBaseVedEngine(link, serverName, cleanHeaders, matchedRule, callback)
             }
-
-            // 5. تجربة مستخرجات كلاودستريم المدمجة كبديل
             if (!resolved) {
                 resolved = loadExtractor(link, subtitleCallback, callback)
             }
-
-            // 6. Fallback أخير للبحث داخل الـ HTML
             if (!resolved) {
                 fallbackRegexExtract(link, serverName, cleanHeaders, callback)
             }
@@ -430,8 +404,6 @@ class EgyWatchProvider : MainAPI() {
             val enabledParts = rule.enableded?.split("|") ?: emptyList()
             val postUrl = enabledParts.getOrNull(1)?.takeIf { it.startsWith("http") }
             val urlSite = rule.urlsite
-
-            // 1. الأولوية الأولى للـ POST
             if (postUrl != null) {
                 val html = app.get(link, headers = cleanHeaders).text
                 val postHeaders = mapOf(
@@ -449,8 +421,6 @@ class EgyWatchProvider : MainAPI() {
                     return true
                 }
             }
-
-            // 2. الفك عبر GET السريع
             if (!urlSite.isNullOrEmpty() && (urlSite.endsWith("=") || urlSite.endsWith("api="))) {
                 val getApiUrl = "$urlSite$link"
                 val apiRes = app.get(getApiUrl, headers = mapOf("User-Agent" to "okhttp/5.0.0-alpha.6")).text
@@ -458,8 +428,6 @@ class EgyWatchProvider : MainAPI() {
                     return true
                 }
             }
-
-            // 3. الاستخراج عبر الـ Regex الداخلي في حقل site
             val sitePattern = rule.site
             if (!sitePattern.isNullOrEmpty()) {
                 val html = app.get(link, headers = cleanHeaders).text
@@ -493,8 +461,6 @@ class EgyWatchProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         var foundAny = false
-
-        // أ) التحقق من النمط النصي file:"...",label:"..."
         val textMatches = Regex("""file\s*:\s*["']([^"']+)["']\s*,\s*label\s*:\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
             .findAll(responseBody).toList()
 
@@ -518,8 +484,6 @@ class EgyWatchProvider : MainAPI() {
             }
             if (foundAny) return true
         }
-
-        // ب) التحقق من نمط JSON
         try {
             val jsonRes = JSONObject(responseBody)
             if (jsonRes.optString("status") == "success") {
@@ -577,10 +541,6 @@ class EgyWatchProvider : MainAPI() {
         } catch (e: Exception) {
         }
     }
-
-    // ==========================================
-    // Data Classes
-    // ==========================================
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class HostConfigItem(
