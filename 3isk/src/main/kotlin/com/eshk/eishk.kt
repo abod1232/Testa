@@ -92,12 +92,11 @@ class FiveTVProvider : MainAPI() {
                 val epNum = Regex("""\d+""").find(epTitle)?.value?.toIntOrNull()
 
                 episodes.add(
-                    Episode(
-                        data = epHref,
-                        name = epTitle,
-                        episode = epNum
-                    )
-                )
+    newEpisode(epHref) {
+        this.name = epTitle
+        this.episode = epNum
+    }
+)
             }
             episodes.sortBy { it.episode }
 
