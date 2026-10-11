@@ -281,8 +281,6 @@ class TopCinemaProvider : MainAPI() {
             val response = app.get(url, headers = getDynamicHeaders(currentBaseUrl), referer = currentBaseUrl)
             val html = response.text
             val document = response.document
-
-            // 1. معالجة صفحة التحميل إذا كان الرابط يحتوي على أزرار /d/
             val downloadButtons = document.select("a[href*='/d/']")
             if (downloadButtons.isNotEmpty()) {
                 downloadButtons.amap { btn ->
@@ -317,8 +315,6 @@ class TopCinemaProvider : MainAPI() {
                 }
                 return
             }
-
-            // 2. معالجة مشغل الفيديو العادي بفك تشفير Packer
             val packerRegex = Regex(
                 """eval\(function\(p,a,c,k,e,d\)\{.*?\}\(\s*(['"])(.*?)\1\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])(.*?)\5\.split""",
                 setOf(RegexOption.DOT_MATCHES_ALL)
