@@ -272,114 +272,123 @@ class TopCinemaProvider : MainAPI() {
         )
     }
 
-    private suspend fun extractVidtube(url: String, currentBaseUrl: String, callback: (ExtractorLink) -> Unit) {
-        try {
-            Log.d("TopCinema", "[Vidtube] Loading: $url")
-            val uri = URI(url)
-            val hostBase = "${uri.scheme}://${uri.host}"
-            
-            val response = app.get(url, headers = getDynamicHeaders(currentBaseUrl), referer = currentBaseUrl)
-            val html = response.text
-            val document = response.document
-            val downloadButtons = document.select("a[href*='/d/']")
-            if (downloadButtons.isNotEmpty()) {
-                downloadButtons.amap { btn ->
-                    val href = btn.attr("href")
-                    val fullDownloadUrl = if (href.startsWith("http")) href else "$hostBase$href"
-                    val qualityText = btn.selectFirst("b")?.text()?.trim() ?: "Direct"
+     private suspend fun extractVidtube(url: String, currentBaseUrl: String, callback: (ExtractorLink) -> Unit) {
+    try {
+        Log.d("TopCinema", "[Vidtube] Loading: $url")
+        val uri = URI(url)
+        val hostBase = "${uri.scheme}://${uri.host}"
+        
+        val response = app.get(url, headers = getDynamicHeaders(currentBaseUrl), referer = currentBaseUrl)
+        val html = response.text
+        val document = response.document
 
-                    try {
-                        val dlDoc = app.get(
-                            fullDownloadUrl,
-                            headers = getDynamicHeaders(url),
-                            referer = url,
-                            interceptor = cfInterceptor
-                        )
-                        val finalDirectUrl = dlDoc.document.selectFirst("a.btn-primary, a[href*='download'], a[href*='.mp4'], a[href*='.m3u8']")?.attr("href")
-                            ?: dlDoc.url
+        // 1. معالجة صفحة أزرار التحميل (/d/) واستخراج كل جودة كسيرفر مستقل
+        val downloadButtons = document.select("a[href*='/d/']")
+        if (downloadButtons.isNotEmpty()) {
+            downloadButtons.amap { btn ->
+                val href = btn.attr("href")
+                val fullDownloadUrl = if (href.startsWith("http")) href else "$hostBase$href"
+                val qualityText = btn.selectFirst("b")?.text()?.trim() ?: "Direct"
 
-                        if (finalDirectUrl.isNotBlank() && (finalDirectUrl.startsWith("http") || finalDirectUrl.contains(".mp4"))) {
-                            val cleanDirectUrl = finalDirectUrl.replace(Regex("""[&?]referer=.*"""), "")
-                            callback(newExtractorLink(
-                                source = name,
-                                name = "Vidtube - $qualityText",
-                                url = cleanDirectUrl
-                            ) {
-                                this.referer = "$hostBase/"
-                                this.quality = getQualityFromName(qualityText)
-                            })
-                        }
-                    } catch (e: Exception) {
-                        Log.e("TopCinema", "[Vidtube] Download page error: ${e.message}")
+                try {
+                    val dlDoc = app.get(
+                        fullDownloadUrl,
+                        headers = getDynamicHeaders(url),
+                        referer = url,
+                        interceptor = cfInterceptor
+                    )
+                    val finalDirectUrl = dlDoc.document.selectFirst("a.btn-primary, a[href*='download'], a[href*='.mp4'], a[href*='.m3u8']")?.attr("href")
+                        ?: dlDoc.url
+
+                    if (finalDirectUrl.isNotBlank() && (finalDirectUrl.startsWith("http") || finalDirectUrl.contains(".mp4"))) {
+                        val cleanDirectUrl = finalDirectUrl.replace(Regex("""[&?]referer=.*"""), "")
+                        
+                        // جعل كل جودة سيرفراً مستقلاً
+                        val serverTitle = "Vidtube $qualityText"
+
+                        callback(newExtractorLink(
+                            source = serverTitle,      // <- هنا السر: تغيير المصدر يجعله سيرفراً منفصلاً في التطبيق
+                            name = serverTitle,
+                            url = cleanDirectUrl
+                        ) {
+                            this.referer = "$hostBase/"
+                            this.quality = getQualityFromName(qualityText)
+                        })
                     }
-                }
-                return
-            }
-            val packerRegex = Regex(
-                """eval\(function\(p,a,c,k,e,d\)\{.*?\}\(\s*(['"])(.*?)\1\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])(.*?)\5\.split""",
-                setOf(RegexOption.DOT_MATCHES_ALL)
-            )
-            var pRaw: String? = null
-            var a = 0
-            var c = 0
-            var kList: List<String> = emptyList()
-
-            val match = packerRegex.find(html)
-            if (match != null) {
-                try {
-                    pRaw = match.groupValues[2]
-                    a = match.groupValues[3].toInt()
-                    c = match.groupValues[4].toInt()
-                    val kStr = match.groupValues[6]
-                    kList = if (kStr.isEmpty()) emptyList() else kStr.split("|")
                 } catch (e: Exception) {
-                    Log.w("TopCinema", "[Vidtube] Regex parse partial failure: ${e.message}")
+                    Log.e("TopCinema", "[Vidtube] Download page error: ${e.message}")
                 }
             }
-
-            if (pRaw == null) {
-                Log.d("TopCinema", "[Vidtube] Could not extract p/a/c/k from page")
-                return
-            }
-
-            val p = pRaw.replace("\\'", "'")
-            val safeA = if (a <= 0) 62 else minOf(a, 62)
-            val safeC = if (c <= 0) kList.size.coerceAtLeast(0) else c
-
-            val unpacked = try {
-                unpackJs(p, safeA, safeC, kList)
-            } catch (e: Exception) {
-                ""
-            }
-
-            val fileRegex = Regex("""file\s*:\s*"(https?://[^"]+)"""")
-            val labelRegex = Regex("""label\s*:\s*"([^"]+)"""")
-
-            val files = fileRegex.findAll(unpacked).map { it.groupValues[1] }.toList()
-            val labels = labelRegex.findAll(unpacked).map { it.groupValues[1] }.toList()
-
-            files.forEachIndexed { index, fileUrl ->
-                val label = labels.getOrNull(index) ?: "Auto"
-                try {
-                    val cleanFileUrl = fileUrl.replace(Regex("""[&?]referer=.*"""), "")
-                    callback(newExtractorLink(
-                        source = name,
-                        name = "Vidtube - $label",
-                        url = cleanFileUrl
-                    ) {
-                        this.referer = "$hostBase/"
-                        this.quality = getQualityFromName(label)
-                    })
-                    Log.d("TopCinema", "[Vidtube] Found Link: $label -> $cleanFileUrl")
-                } catch (e: Exception) {
-                    Log.e("TopCinema", "[Vidtube] callback failed: ${e.message}")
-                }
-            }
-        } catch (e: Exception) {
-            Log.e("TopCinema", "[Vidtube] Connection error: ${e.message}")
-            logError(e)
+            return
         }
+
+        // 2. معالجة مشغل الفيديو (Packer JS) واستخراج كل جودة كسيرفر مستقل
+        val packerRegex = Regex(
+            """eval\(function\(p,a,c,k,e,d\)\{.*?\}\(\s*(['"])(.*?)\1\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])(.*?)\5\.split""",
+            setOf(RegexOption.DOT_MATCHES_ALL)
+        )
+        var pRaw: String? = null
+        var a = 0
+        var c = 0
+        var kList: List<String> = emptyList()
+
+        val match = packerRegex.find(html)
+        if (match != null) {
+            try {
+                pRaw = match.groupValues[2]
+                a = match.groupValues[3].toInt()
+                c = match.groupValues[4].toInt()
+                val kStr = match.groupValues[6]
+                kList = if (kStr.isEmpty()) emptyList() else kStr.split("|")
+            } catch (e: Exception) {
+                Log.w("TopCinema", "[Vidtube] Regex parse error: ${e.message}")
+            }
+        }
+
+        if (pRaw == null) return
+
+        val p = pRaw.replace("\\'", "'")
+        val safeA = if (a <= 0) 62 else minOf(a, 62)
+        val safeC = if (c <= 0) kList.size.coerceAtLeast(0) else c
+
+        val unpacked = try {
+            unpackJs(p, safeA, safeC, kList)
+        } catch (e: Exception) {
+            ""
+        }
+
+        val fileRegex = Regex("""file\s*:\s*"(https?://[^"]+)"""")
+        val labelRegex = Regex("""label\s*:\s*"([^"]+)"""")
+
+        val files = fileRegex.findAll(unpacked).map { it.groupValues[1] }.toList()
+        val labels = labelRegex.findAll(unpacked).map { it.groupValues[1] }.toList()
+
+        files.forEachIndexed { index, fileUrl ->
+            val label = labels.getOrNull(index) ?: "Auto"
+            val cleanFileUrl = fileUrl.replace(Regex("""[&?]referer=.*"""), "")
+            
+            // جعل كل جودة سيرفراً مستقلاً
+            val serverTitle = "Vidtube $label"
+
+            try {
+                callback(newExtractorLink(
+                    source = serverTitle,      // <- سيرفر مستقل
+                    name = serverTitle,
+                    url = cleanFileUrl
+                ) {
+                    this.referer = "$hostBase/"
+                    this.quality = getQualityFromName(label)
+                })
+                Log.d("TopCinema", "[Vidtube] Added Server: $serverTitle")
+            } catch (e: Exception) {
+                Log.e("TopCinema", "[Vidtube] callback error: ${e.message}")
+            }
+        }
+    } catch (e: Exception) {
+        Log.e("TopCinema", "[Vidtube] Connection error: ${e.message}")
+        logError(e)
     }
+}
 
     override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
         val extractedLinks = ConcurrentHashMap<String, String>()
