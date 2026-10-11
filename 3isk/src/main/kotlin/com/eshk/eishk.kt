@@ -16,14 +16,10 @@ class FiveTVProvider : MainAPI() {
         TvType.AsianDrama,
         TvType.Anime
     )
-
-    // ترويسات لتجنب الحظر
     private val headers = mapOf(
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Referer" to "$mainUrl/"
     )
-
-    // 1. الصفحة الرئيسية (أقسام الموقع)
     override val mainPage = mainPageOf(
         "$mainUrl/latest-movies/" to "جديد الأفلام",
         "$mainUrl/latest-series/" to "جديد الدراما",
@@ -34,8 +30,6 @@ class FiveTVProvider : MainAPI() {
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(request.data, headers = headers).document
         val homeItems = mutableListOf<SearchResponse>()
-
-        // استخراج الكروت من الصفحة
         document.select("article.ftv-home-poster-card").forEach { element ->
             val item = parseCard(element)
             if (item != null) homeItems.add(item)
@@ -43,8 +37,6 @@ class FiveTVProvider : MainAPI() {
 
         return newHomePageResponse(request.name, homeItems)
     }
-
-    // دالة مساعدة لتحويل عنصر الكارت إلى عنصر Cloudstream
     private fun parseCard(element: Element): SearchResponse? {
         val title = element.selectFirst(".ftv-home-poster-card__title")?.text()?.trim() ?: return null
         val url = element.selectFirst(".ftv-home-poster-card__image")?.attr("href") ?: return null
@@ -64,8 +56,6 @@ class FiveTVProvider : MainAPI() {
             }
         }
     }
-
-    // 2. محرك البحث (Search)
     override suspend fun search(query: String): List<SearchResponse> {
         val searchUrl = "$mainUrl/search/?q=$query"
         val document = app.get(searchUrl, headers = headers).document
@@ -74,8 +64,6 @@ class FiveTVProvider : MainAPI() {
             parseCard(element)
         }
     }
-
-    // 3. جلب تفاصيل العمل والحلقات (Load)
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url, headers = headers).document
 
@@ -95,15 +83,12 @@ class FiveTVProvider : MainAPI() {
                 this.tags = genres
             }
         } else {
-            // استخراج قائمة الحلقات في حالة المسلسلات
             val episodes = mutableListOf<Episode>()
             val episodeElements = document.select(".ftv-series-episodes-grid .ftv-episode-completion-item")
 
             episodeElements.forEach { el ->
                 val epHref = el.selectFirst("a.ftv-series-episode-card")?.attr("href") ?: return@forEach
                 val epTitle = el.selectFirst(".ftv-series-episode-card__body strong")?.text()?.trim() ?: "حلقة"
-                
-                // استخراج رقم الحلقة من النص أو الرابط
                 val epNum = Regex("""\d+""").find(epTitle)?.value?.toIntOrNull()
 
                 episodes.add(
@@ -114,8 +99,6 @@ class FiveTVProvider : MainAPI() {
                     )
                 )
             }
-
-            // ترتيب الحلقات تصاعدياً
             episodes.sortBy { it.episode }
 
             newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
@@ -126,8 +109,6 @@ class FiveTVProvider : MainAPI() {
             }
         }
     }
-
-    // 4. استخراج سيرفرات المشاهدة والتحميل (LoadLinks)
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -137,26 +118,17 @@ class FiveTVProvider : MainAPI() {
         val document = app.get(data, headers = headers).document
 
         val extractedUrls = mutableSetOf<String>()
-
-        // 1. استخراج سيرفرات المشاهدة من أزرار التاب (Tabs)
         document.select(".ftv-watch-tabs button[data-server-url]").forEach { tab ->
             val serverUrl = tab.attr("data-server-url")
             if (serverUrl.isNotEmpty()) extractedUrls.add(serverUrl)
         }
-
-        // 2. استخراج الـ iframe المباشر إن وجد
         document.select(".ftv-player-iframe").attr("src").let { iframeSrc ->
             if (iframeSrc.isNotEmpty()) extractedUrls.add(iframeSrc)
         }
-
-        // 3. استخراج روابط سيرفرات التحميل
         document.select(".ftv-download-list article.ftv-download-server a").forEach { link ->
             val downloadUrl = link.attr("href")
             if (downloadUrl.isNotEmpty()) extractedUrls.add(downloadUrl)
         }
-
-        // إرسال جميع السيرفرات المستخرجة إلى المستخرجات المدمجة في Cloudstream (Extractors)
-        // مثل: VidMoly, Ultra4Vid, DSVPlay, إلخ...
         extractedUrls.forEach { serverUrl ->
             loadExtractor(serverUrl, data, subtitleCallback, callback)
         }
