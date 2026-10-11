@@ -461,10 +461,7 @@ class EgyWatchProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         var foundAny = false
-        // إزالة الشرطات المائلة العكسية لفك أي روابط مشفرة مثل https:\/\/
         val cleanBody = responseBody.replace("\\/", "/").trim()
-
-        // 1. فحص النمط التقليدي: file:"...", label:"..."
         val labelMatches = Regex("""file\s*:\s*["']([^"']+)["']\s*,\s*label\s*:\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
             .findAll(cleanBody).toList()
 
@@ -484,8 +481,6 @@ class EgyWatchProvider : MainAPI() {
             }
             if (foundAny) return true
         }
-
-        // 2. فحص نمط JSON إذا كان الرد بتنسيق JSON
         try {
             val jsonRes = JSONObject(cleanBody)
             if (jsonRes.optString("status") == "success") {
@@ -522,13 +517,8 @@ class EgyWatchProvider : MainAPI() {
                 }
             }
         } catch (e: Exception) {
-            // ليس كائن JSON
         }
         if (foundAny) return true
-
-        // ========================================================
-        // 3. السطر الشامل: صيد أي رابط فيديو (m3u8 أو mp4 أو mkv) مهما كان موقعه وشكله
-        // ========================================================
         val universalVideoRegex = Regex("""https?://[^\s"'<>\\]+?\.(?:m3u8|mp4|mkv)(?:\?[^\s"'<>\\]*)?""", RegexOption.IGNORE_CASE)
         val extractedVideoUrls = universalVideoRegex.findAll(cleanBody)
             .map { it.value }
