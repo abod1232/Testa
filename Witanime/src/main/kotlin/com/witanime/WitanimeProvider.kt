@@ -50,7 +50,7 @@ import android.net.Uri
 import android.os.Looper
 import android.view.Gravity
 class WitAnime : MainAPI() {
-    override var mainUrl = "https://witanime.you"
+    override var mainUrl = "https://witanime.site"
     override var name = "WitAnime"
     override val hasMainPage = true
     override var lang = "ar"
