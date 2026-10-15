@@ -300,10 +300,6 @@ class WitAnime : MainAPI() {
     init {
         PlayerAccess.startMonitoring()
     }
-
-    // ==========================================
-    // 1. الصفحة الرئيسية (Main Page)
-    // ==========================================
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(mainUrl, headers = mapOf("User-Agent" to userAgent)).document
         val homePageList = ArrayList<HomePageList>()
@@ -353,10 +349,6 @@ class WitAnime : MainAPI() {
 
         return newHomePageResponse(homePageList)
     }
-
-    // ==========================================
-    // 2. البحث (Search)
-    // ==========================================
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/search?q=$query"
         val document = app.get(url, headers = mapOf("User-Agent" to userAgent)).document
@@ -372,10 +364,6 @@ class WitAnime : MainAPI() {
             }
         }.distinctBy { it.url }
     }
-
-    // ==========================================
-    // 3. جلب تفاصيل الأنمي والحلقات (Load)
-    // ==========================================
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url, headers = mapOf("User-Agent" to userAgent)).document
 
@@ -442,10 +430,6 @@ class WitAnime : MainAPI() {
             addEpisodes(DubStatus.Subbed, episodes.distinctBy { it.data })
         }
     }
-
-    // ==========================================
-    // 4. جلب روابط وسيرفرات المشاهدة (LoadLinks)
-    // ==========================================
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
