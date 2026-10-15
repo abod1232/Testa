@@ -300,9 +300,14 @@ class WitAnime : MainAPI() {
     init {
         PlayerAccess.startMonitoring()
     }
+
+    // ==========================================
+    // 1. الصفحة الرئيسية (Main Page)
+    // ==========================================
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(mainUrl, headers = mapOf("User-Agent" to userAgent)).document
         val homePageList = ArrayList<HomePageList>()
+
         document.select("section").forEach { section ->
             val title = section.selectFirst("h2")?.text()?.trim() ?: return@forEach
 
@@ -328,6 +333,7 @@ class WitAnime : MainAPI() {
                 homePageList.add(HomePageList(title, items))
             }
         }
+
         val aside = document.selectFirst("aside")
         if (aside != null) {
             val asideTitle = aside.selectFirst("h2")?.text()?.trim() ?: "أشهر أنميات الموسم"
@@ -347,6 +353,10 @@ class WitAnime : MainAPI() {
 
         return newHomePageResponse(homePageList)
     }
+
+    // ==========================================
+    // 2. البحث (Search)
+    // ==========================================
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/search?q=$query"
         val document = app.get(url, headers = mapOf("User-Agent" to userAgent)).document
@@ -362,6 +372,10 @@ class WitAnime : MainAPI() {
             }
         }.distinctBy { it.url }
     }
+
+    // ==========================================
+    // 3. جلب تفاصيل الأنمي والحلقات (Load)
+    // ==========================================
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url, headers = mapOf("User-Agent" to userAgent)).document
 
@@ -428,6 +442,10 @@ class WitAnime : MainAPI() {
             addEpisodes(DubStatus.Subbed, episodes.distinctBy { it.data })
         }
     }
+
+    // ==========================================
+    // 4. جلب روابط وسيرفرات المشاهدة (LoadLinks)
+    // ==========================================
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -436,10 +454,12 @@ class WitAnime : MainAPI() {
     ): Boolean {
         try {
             val watchHtml = app.get(data, headers = mapOf("User-Agent" to userAgent)).text
+
             val sourcesUrlPattern = Regex("""sourcesUrl:\s*['"]([^'"]+)['"]""")
             val rawSourcesUrl = sourcesUrlPattern.find(watchHtml)?.groupValues?.get(1) ?: return false
             val cleanSourcesUrl = rawSourcesUrl.replace("\\/", "/")
             val fullSourcesUrl = fixUrl(cleanSourcesUrl)
+
             val apiResponse = app.get(
                 fullSourcesUrl,
                 referer = data,
@@ -450,29 +470,8 @@ class WitAnime : MainAPI() {
                 )
             ).text
 
-            fun handleUrl(url: String) {
-                if (url.isBlank() || !url.startsWith("http")) return
-                if (url.contains("mega.nz")) {
-                    val dummyUrl = "https://raw.githubusercontent.com/Anarios/Cloudstream/master/app/src/main/res/raw/blank.mp4#mega-webview://$url"
-                    callback(
-                        newExtractorLink(
-                            name = "Mega (WebView)",
-                            source = "WitAnime",
-                            url = dummyUrl
-                        ) {
-                            referer = url
-                            quality = 10
-                            type = ExtractorLinkType.VIDEO
-                        }
-                    )
-                } else {
-                    CoroutineScope(Dispatchers.IO).launch {
-                        try {
-                            loadExtractor(url, data, subtitleCallback, callback)
-                        } catch (e: Exception) {}
-                    }
-                }
-            }
+            val extractedUrls = mutableListOf<String>()
+
             fun parseJsonSources(jsonObj: JSONObject) {
                 val keys = jsonObj.keys()
                 while (keys.hasNext()) {
@@ -484,7 +483,9 @@ class WitAnime : MainAPI() {
                                 key.contains("src", ignoreCase = true) || 
                                 key.contains("link", ignoreCase = true) || 
                                 key.contains("file", ignoreCase = true)) {
-                                handleUrl(value)
+                                if (value.isNotBlank() && value.startsWith("http")) {
+                                    extractedUrls.add(value)
+                                }
                             }
                         }
                         is JSONObject -> parseJsonSources(value)
@@ -492,7 +493,11 @@ class WitAnime : MainAPI() {
                             for (i in 0 until value.length()) {
                                 val item = value.opt(i)
                                 if (item is JSONObject) parseJsonSources(item)
-                                else if (item is String) handleUrl(item)
+                                else if (item is String) {
+                                    if (item.isNotBlank() && item.startsWith("http")) {
+                                        extractedUrls.add(item)
+                                    }
+                                }
                             }
                         }
                     }
@@ -507,6 +512,32 @@ class WitAnime : MainAPI() {
                     val item = jsonArray.optJSONObject(i) ?: continue
                     parseJsonSources(item)
                 }
+            }
+
+            val distinctUrls = extractedUrls.distinct()
+            supervisorScope {
+                distinctUrls.map { url ->
+                    async(Dispatchers.IO) {
+                        try {
+                            if (url.contains("mega.nz")) {
+                                val dummyUrl = "https://raw.githubusercontent.com/Anarios/Cloudstream/master/app/src/main/res/raw/blank.mp4#mega-webview://$url"
+                                callback(
+                                    newExtractorLink(
+                                        name = "Mega (WebView)",
+                                        source = "WitAnime",
+                                        url = dummyUrl
+                                    ) {
+                                        this.referer = url
+                                        this.quality = 10
+                                        this.type = ExtractorLinkType.VIDEO
+                                    }
+                                )
+                            } else {
+                                loadExtractor(url, data, subtitleCallback, callback)
+                            }
+                        } catch (e: Exception) {}
+                    }
+                }.awaitAll()
             }
 
             return true
