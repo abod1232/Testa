@@ -300,15 +300,9 @@ class WitAnime : MainAPI() {
     init {
         PlayerAccess.startMonitoring()
     }
-
-    // ==========================================
-    // 1. الصفحة الرئيسية (Main Page)
-    // ==========================================
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(mainUrl, headers = mapOf("User-Agent" to userAgent)).document
         val homePageList = ArrayList<HomePageList>()
-
-        // استخراج جميع الأقسام والفئات من وسوم section
         document.select("section").forEach { section ->
             val title = section.selectFirst("h2")?.text()?.trim() ?: return@forEach
 
@@ -334,8 +328,6 @@ class WitAnime : MainAPI() {
                 homePageList.add(HomePageList(title, items))
             }
         }
-
-        // القائمة الجانبية: أشهر أنميات الموسم
         val aside = document.selectFirst("aside")
         if (aside != null) {
             val asideTitle = aside.selectFirst("h2")?.text()?.trim() ?: "أشهر أنميات الموسم"
@@ -355,10 +347,6 @@ class WitAnime : MainAPI() {
 
         return newHomePageResponse(homePageList)
     }
-
-    // ==========================================
-    // 2. البحث (Search)
-    // ==========================================
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/search?q=$query"
         val document = app.get(url, headers = mapOf("User-Agent" to userAgent)).document
@@ -374,10 +362,6 @@ class WitAnime : MainAPI() {
             }
         }.distinctBy { it.url }
     }
-
-    // ==========================================
-    // 3. جلب تفاصيل الأنمي والحلقات (Load)
-    // ==========================================
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url, headers = mapOf("User-Agent" to userAgent)).document
 
@@ -444,10 +428,6 @@ class WitAnime : MainAPI() {
             addEpisodes(DubStatus.Subbed, episodes.distinctBy { it.data })
         }
     }
-
-    // ==========================================
-    // 4. جلب روابط وسيرفرات المشاهدة (LoadLinks)
-    // ==========================================
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -456,14 +436,10 @@ class WitAnime : MainAPI() {
     ): Boolean {
         try {
             val watchHtml = app.get(data, headers = mapOf("User-Agent" to userAgent)).text
-
-            // استخراج رابط API الخاص بسيرفرات الحلقة/الفيلم
             val sourcesUrlPattern = Regex("""sourcesUrl:\s*['"]([^'"]+)['"]""")
             val rawSourcesUrl = sourcesUrlPattern.find(watchHtml)?.groupValues?.get(1) ?: return false
             val cleanSourcesUrl = rawSourcesUrl.replace("\\/", "/")
             val fullSourcesUrl = fixUrl(cleanSourcesUrl)
-
-            // استدعاء API السيرفرات
             val apiResponse = app.get(
                 fullSourcesUrl,
                 referer = data,
@@ -497,8 +473,6 @@ class WitAnime : MainAPI() {
                     }
                 }
             }
-
-            // فحص رد JSON واستخراج الروابط
             fun parseJsonSources(jsonObj: JSONObject) {
                 val keys = jsonObj.keys()
                 while (keys.hasNext()) {
