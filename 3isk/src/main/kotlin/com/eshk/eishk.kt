@@ -121,10 +121,6 @@ class FiveTVProvider : MainAPI() {
         }
     }
 
-    // =========================================================================
-    // خوارزمية فك تشفير Dean Edwards Packer بدقة متناهية
-    // =========================================================================
-
     private fun unpackDeanEdwards(scriptText: String): String {
         try {
             var splitIdx = scriptText.lastIndexOf(".split('|')")
@@ -190,10 +186,6 @@ class FiveTVProvider : MainAPI() {
         return clean.trim()
     }
 
-    // =========================================================================
-    // استخراج السيرفرات وتشغيلها (loadLinks)
-    // =========================================================================
-
     data class ServerTarget(val name: String, val url: String, val isDownload: Boolean)
 
     override suspend fun loadLinks(
@@ -213,15 +205,11 @@ class FiveTVProvider : MainAPI() {
 
         val targets = mutableListOf<ServerTarget>()
         val seenUrls = mutableSetOf<String>()
-
-        // 1. المشغل المباشر
         val iframeSrc = document.selectFirst(".ftv-player-iframe")?.attr("src")?.trim() ?: ""
         if (iframeSrc.isNotEmpty() && !seenUrls.contains(iframeSrc)) {
             targets.add(ServerTarget("Direct Player", iframeSrc, false))
             seenUrls.add(iframeSrc)
         }
-
-        // 2. سيرفرات المشاهدة
         document.select(".ftv-watch-tabs button[data-server-url]").forEach { tab ->
             val u = tab.attr("data-server-url").trim()
             val name = tab.selectFirst("strong")?.text()?.trim() ?: "Stream"
@@ -230,8 +218,6 @@ class FiveTVProvider : MainAPI() {
                 seenUrls.add(u)
             }
         }
-
-        // 3. سيرفرات التحميل
         document.select(".ftv-download-list article.ftv-download-server a").forEach { link ->
             val u = link.attr("href").trim()
             val parentArticle = link.parents().firstOrNull { it.hasClass("ftv-download-server") }
@@ -243,23 +229,16 @@ class FiveTVProvider : MainAPI() {
         }
 
         println("[5TV] تم اكتشاف ${targets.size} سيرفر (مشاهدة وتحميل).")
-
-        // معالجة كافة السيرفرات بالتوازي
         coroutineScope {
             targets.map { target ->
                 async {
                     var serverUrl = target.url
-
-                    // استبدال dsvplay تلقائياً بـ playmogo
                     if (serverUrl.contains("dsvplay")) {
                         serverUrl = serverUrl.replace("dsvplay.com", "playmogo.com")
                     }
 
                     try {
-                        // محاولة 1: تجربة مستخرج CloudStream التلقائي
                         loadExtractor(serverUrl, data, subtitleCallback, callback)
-
-                        // محاولة 2: المعالجة المخصصة مثل كود بايثون
                         val uri = URL(serverUrl)
                         val domain = "${uri.protocol}://${uri.host}/"
                         val serverName = uri.host.replace("www.", "").lowercase()
@@ -275,8 +254,6 @@ class FiveTVProvider : MainAPI() {
 
                         if (res.code == 200) {
                             var content = res.text
-
-                            // فك تشفير الـ Packer إن وجد (مثل مشغل HGCloud)
                             if (content.contains("eval(function(p,a,c,k")) {
                                 val unpacked = unpackDeanEdwards(content)
                                 if (unpacked.isNotEmpty()) {
@@ -285,20 +262,14 @@ class FiveTVProvider : MainAPI() {
                             }
 
                             val matchedLinks = mutableSetOf<Pair<String, Boolean>>() // Pair(url, isM3u8)
-
-                            // أ) البحث عن روابط M3U8
                             val m3u8Regex = Regex("""(https?:[\\/]+[^\s"'<>]+\.m3u8[^\s"'<>]*)""", RegexOption.IGNORE_CASE)
                             m3u8Regex.findAll(content).forEach { m ->
                                 matchedLinks.add(Pair(cleanUrl(m.groupValues[1]), true))
                             }
-
-                            // ب) البحث عن روابط Cloudflare R2 التخزينية (MP4/MKV)
                             val r2Regex = Regex("""(https?:[\\/]+[^\s"'<>]+cloudflarestorage[^\s"'<>]*)""", RegexOption.IGNORE_CASE)
                             r2Regex.findAll(content).forEach { m ->
                                 matchedLinks.add(Pair(cleanUrl(m.groupValues[1]), false))
                             }
-
-                            // ج) البحث عن خاصية file: "..." أو file: '...'
                             val fileRegex = Regex("""["']?file["']?\s*:\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
                             fileRegex.findAll(content).forEach { m ->
                                 val f = m.groupValues[1]
@@ -306,8 +277,6 @@ class FiveTVProvider : MainAPI() {
                                     matchedLinks.add(Pair(cleanUrl(f), f.contains(".m3u8")))
                                 }
                             }
-
-                            // د) أزرار التحميل إذا كانت صفحة تحميل
                             if (target.isDownload) {
                                 val doc = Jsoup.parse(res.text)
                                 doc.select("a[href]").forEach { a ->
@@ -317,8 +286,6 @@ class FiveTVProvider : MainAPI() {
                                     }
                                 }
                             }
-
-                            // إرسال الروابط الصافية إلى مشغل التطبيق
                             matchedLinks.forEach { (videoUrl, isM3u8) ->
                                 if (videoUrl.length > 20 && videoUrl != serverUrl) {
                                     println("[5TV] 🎯 [نجاح مستخرج مخصص] تم استخراج فيديو من: $serverName -> $videoUrl")
@@ -341,7 +308,6 @@ class FiveTVProvider : MainAPI() {
                             }
                         }
                     } catch (e: Exception) {
-                        // تجاهل السيرفرات المعطلة أو البطيئة
                     }
                 }
             }.awaitAll()
