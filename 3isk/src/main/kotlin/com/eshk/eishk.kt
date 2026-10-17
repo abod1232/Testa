@@ -120,8 +120,6 @@ class FiveTVProvider : MainAPI() {
         }
     }
 
-    // ====================== خوارزميات الاستخراج المخصصة (Packer & Regex) ======================
-
     private fun deobfuscatePacker(packed: String): String {
         try {
             val packerRegex = """eval\(function\(p,a,c,k,e,[rd]\)\{.*?\}\((['"])(.*?)\1\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])(.*?)\5\.split\(['"]\|['"]\)""".toRegex()
@@ -181,23 +179,16 @@ class FiveTVProvider : MainAPI() {
     }
 
     private fun findVideoSource(text: String): String? {
-        // 1. البحث عن ملفات m3u8
         val m3u8Regex = """(https?://[^\s"\'<>]+?\.m3u8[^\s"\'<>?]*(?:\?[^\s"\'<>]*)?)""".toRegex()
         val m3u8Match = m3u8Regex.find(text)
         if (m3u8Match != null) return m3u8Match.groupValues[1]
-
-        // 2. البحث داخل خاصية file: '...' أو file: "..."
         val fileRegex = """file\s*:\s*["']([^"']+)["']""".toRegex()
         val fileMatch = fileRegex.find(text)
         if (fileMatch != null) return fileMatch.groupValues[1]
-
-        // 3. البحث عن ملفات mp4
         val mp4Regex = """(https?://[^\s"\'<>]+?\.mp4[^\s"\'<>?]*(?:\?[^\s"\'<>]*)?)""".toRegex()
         val mp4Match = mp4Regex.find(text)
         return mp4Match?.groupValues?.get(1)
     }
-
-    // =========================================================================================
 
     override suspend fun loadLinks(
         data: String,
@@ -212,34 +203,22 @@ class FiveTVProvider : MainAPI() {
         }
 
         val serverUrls = mutableSetOf<String>()
-
-        // 1. استخراج سيرفرات المشاهدة من الـ Tabs
         document.select(".ftv-watch-tabs button[data-server-url]").forEach { tab ->
             val serverUrl = tab.attr("data-server-url").trim()
             if (serverUrl.isNotEmpty()) serverUrls.add(serverUrl)
         }
-
-        // 2. استخراج المشغل المباشر
         val iframeSrc = document.selectFirst(".ftv-player-iframe")?.attr("src")?.trim() ?: ""
         if (iframeSrc.isNotEmpty()) serverUrls.add(iframeSrc)
-
-        // 3. استخراج سيرفرات التحميل
         document.select(".ftv-download-list article.ftv-download-server a").forEach { link ->
             val downloadUrl = link.attr("href").trim()
             if (downloadUrl.isNotEmpty()) serverUrls.add(downloadUrl)
         }
-
-        // معالجة جميع السيرفرات بالتوازي وبشكل غير متزامن (نفس طريقة Elif)
         coroutineScope {
             serverUrls.map { serverUrl ->
                 async {
                     try {
                         val fixedUrl = fixUrl(serverUrl)
-
-                        // محاولة 1: تجربة مستخرج CloudStream التلقائي أولاً
                         loadExtractor(fixedUrl, data, subtitleCallback, callback)
-
-                        // محاولة 2: المعالجة المخصصة (Custom Scraper) في حال لم يتعرف عليه كلاودستريم
                         val uri = URL(fixedUrl)
                         val domain = "${uri.protocol}://${uri.host}/"
                         val serverName = uri.host.replace("www.", "").lowercase()
@@ -279,7 +258,6 @@ class FiveTVProvider : MainAPI() {
                             }
                         }
                     } catch (e: Exception) {
-                        // تجاهل أي سيرفر يتعطل والانتقال للسيرفر التالي
                     }
                 }
             }.awaitAll()
