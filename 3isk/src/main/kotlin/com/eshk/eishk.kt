@@ -121,6 +121,22 @@ class FiveTVProvider : MainAPI() {
         }
     }
 
+    // =========================================================================
+    // دوال فك التشفير والتنظيف المطابقة لكود بايثون
+    // =========================================================================
+
+    private fun unescapeHtml(text: String): String {
+        return text
+            .replace("&amp;", "&")
+            .replace("&quot;", "\"")
+            .replace("&#039;", "'")
+            .replace("&apos;", "'")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("\\\"", "\"")
+            .replace("\\'", "'")
+    }
+
     private fun unpackDeanEdwards(scriptText: String): String {
         try {
             var splitIdx = scriptText.lastIndexOf(".split('|')")
@@ -141,10 +157,13 @@ class FiveTVProvider : MainAPI() {
             val kStr = sub.substring(lastMatch.range.last + 1)
             val k = kStr.split("|")
 
-            val firstQuoteIdx = sub.indexOf("function(p,a,c,k")
-            var pStart = sub.indexOf("'", if (firstQuoteIdx != -1) firstQuoteIdx else 0)
+            // تصحيح مهم: بداية النص p تكون بعد قوس الإغلاق للدالة لتجنب التقاط '\\b'
+            val lastBrace = sub.lastIndexOf('}', lastMatch.range.first)
+            if (lastBrace == -1) return ""
+
+            var pStart = sub.indexOf('\'', lastBrace)
             if (pStart == -1 || pStart > lastMatch.range.first) {
-                pStart = sub.indexOf("\"", if (firstQuoteIdx != -1) firstQuoteIdx else 0)
+                pStart = sub.indexOf('"', lastBrace)
             }
             if (pStart == -1) return ""
 
@@ -181,10 +200,69 @@ class FiveTVProvider : MainAPI() {
 
     private fun cleanUrl(rawUrl: String): String {
         var clean = rawUrl.replace("\\/", "/")
-        clean = clean.split("&quot;")[0].split("\"")[0].split("'")[0]
+        clean = unescapeHtml(clean)
+        clean = clean.split("\"")[0].split("'")[0]
+        clean = clean.split("<")[0].split(">")[0]
         clean = clean.split(",")[0].split("\\")[0]
         return clean.trim()
     }
+
+    // =========================================================================
+    // فحص الرابط المباشر (مع وبدون Referer) لمعرفة أي وضع يعمل
+    // =========================================================================
+
+    private suspend fun verifyAndGetHeaders(videoUrl: String, domain: String): Map<String, String>? {
+        val userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+
+        val headersWithReferer = mapOf(
+            "User-Agent" to userAgent,
+            "Referer" to domain,
+            "Origin" to domain.removeSuffix("/"),
+            "Range" to "bytes=0-1"
+        )
+
+        val headersWithoutReferer = mapOf(
+            "User-Agent" to userAgent,
+            "Range" to "bytes=0-1"
+        )
+
+        // 1. فحص الرابط بدون Referer (ضروري لروابط Cloudflare R2 و S3 التخزينية)
+        try {
+            val resNoRef = app.get(videoUrl, headers = headersWithoutReferer, timeout = 6)
+            if (resNoRef.code in 200..299) {
+                println("[5TV] ✅ الرابط يعمل بدون Referer [كود: ${resNoRef.code}]")
+                return emptyMap()
+            }
+        } catch (_: Exception) {}
+
+        // 2. فحص الرابط مع Referer (ضروري لروابط HLS ومواقع المشاهدة)
+        try {
+            val resWithRef = app.get(videoUrl, headers = headersWithReferer, timeout = 6)
+            if (resWithRef.code in 200..299) {
+                println("[5TV] ✅ الرابط يعمل مع Referer ($domain) [كود: ${resWithRef.code}]")
+                return mapOf("Referer" to domain, "Origin" to domain.removeSuffix("/"))
+            }
+        } catch (_: Exception) {}
+
+        // 3. فحص خاص لملفات m3u8 التي ترفض هيدر Range
+        if (videoUrl.contains(".m3u8")) {
+            try {
+                val resM3u8WithRef = app.get(videoUrl, headers = mapOf("Referer" to domain), timeout = 6)
+                if (resM3u8WithRef.code in 200..299) return mapOf("Referer" to domain)
+            } catch (_: Exception) {}
+
+            try {
+                val resM3u8NoRef = app.get(videoUrl, headers = emptyMap(), timeout = 6)
+                if (resM3u8NoRef.code in 200..299) return emptyMap()
+            } catch (_: Exception) {}
+        }
+
+        return null
+    }
+
+    // =========================================================================
+    // استخراج السيرفرات وتشغيلها (loadLinks)
+    // =========================================================================
 
     data class ServerTarget(val name: String, val url: String, val isDownload: Boolean)
 
@@ -194,7 +272,7 @@ class FiveTVProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        println("[5TV] جاري فحص الرابط الأصلي: $data")
+        println("[5TV] جاري فحص الرابط المستهدف: $data")
 
         val document = try {
             app.get(data, headers = browserHeaders).document
@@ -205,11 +283,15 @@ class FiveTVProvider : MainAPI() {
 
         val targets = mutableListOf<ServerTarget>()
         val seenUrls = mutableSetOf<String>()
+
+        // 1. المشغل المباشر
         val iframeSrc = document.selectFirst(".ftv-player-iframe")?.attr("src")?.trim() ?: ""
         if (iframeSrc.isNotEmpty() && !seenUrls.contains(iframeSrc)) {
             targets.add(ServerTarget("Direct Player", iframeSrc, false))
             seenUrls.add(iframeSrc)
         }
+
+        // 2. سيرفرات المشاهدة
         document.select(".ftv-watch-tabs button[data-server-url]").forEach { tab ->
             val u = tab.attr("data-server-url").trim()
             val name = tab.selectFirst("strong")?.text()?.trim() ?: "Stream"
@@ -218,6 +300,8 @@ class FiveTVProvider : MainAPI() {
                 seenUrls.add(u)
             }
         }
+
+        // 3. سيرفرات التحميل
         document.select(".ftv-download-list article.ftv-download-server a").forEach { link ->
             val u = link.attr("href").trim()
             val parentArticle = link.parents().firstOrNull { it.hasClass("ftv-download-server") }
@@ -228,17 +312,23 @@ class FiveTVProvider : MainAPI() {
             }
         }
 
-        println("[5TV] تم اكتشاف ${targets.size} سيرفر (مشاهدة وتحميل).")
+        println("[5TV] تم اكتشاف ${targets.size} سيرفر. بدء المعالجة والاستخراج المتقدم...")
+
         coroutineScope {
             targets.map { target ->
                 async {
                     var serverUrl = target.url
+
+                    // استبدال dsvplay تلقائياً بـ playmogo لحل مشكلة الـ DNS
                     if (serverUrl.contains("dsvplay")) {
                         serverUrl = serverUrl.replace("dsvplay.com", "playmogo.com")
                     }
 
                     try {
+                        // محاولة 1: تجربة مستخرج CloudStream التلقائي
                         loadExtractor(serverUrl, data, subtitleCallback, callback)
+
+                        // محاولة 2: استخراج مخصص متطابق مع كود بايثون
                         val uri = URL(serverUrl)
                         val domain = "${uri.protocol}://${uri.host}/"
                         val serverName = uri.host.replace("www.", "").lowercase()
@@ -253,60 +343,82 @@ class FiveTVProvider : MainAPI() {
                         )
 
                         if (res.code == 200) {
-                            var content = res.text
+                            var content = unescapeHtml(res.text)
+
+                            // فك تشفير الـ Packer مثل HGCloud
                             if (content.contains("eval(function(p,a,c,k")) {
                                 val unpacked = unpackDeanEdwards(content)
                                 if (unpacked.isNotEmpty()) {
-                                    content += "\n$unpacked"
+                                    content += "\n" + unescapeHtml(unpacked)
                                 }
                             }
 
-                            val matchedLinks = mutableSetOf<Pair<String, Boolean>>() // Pair(url, isM3u8)
+                            val matchedUrls = mutableSetOf<String>()
+
+                            // أ) استخراج روابط M3U8
                             val m3u8Regex = Regex("""(https?:[\\/]+[^\s"'<>]+\.m3u8[^\s"'<>]*)""", RegexOption.IGNORE_CASE)
                             m3u8Regex.findAll(content).forEach { m ->
-                                matchedLinks.add(Pair(cleanUrl(m.groupValues[1]), true))
+                                matchedUrls.add(cleanUrl(m.groupValues[1]))
                             }
+
+                            // ب) استخراج روابط Cloudflare R2 / S3 التخزينية (مثل التي في سيرفر 71Stream)
                             val r2Regex = Regex("""(https?:[\\/]+[^\s"'<>]+cloudflarestorage[^\s"'<>]*)""", RegexOption.IGNORE_CASE)
                             r2Regex.findAll(content).forEach { m ->
-                                matchedLinks.add(Pair(cleanUrl(m.groupValues[1]), false))
+                                matchedUrls.add(cleanUrl(m.groupValues[1]))
                             }
+
+                            // ج) استخراج صيغ الفيديو MP4 / MKV
+                            val mediaRegex = Regex("""(https?:[\\/]+[^\s"'<>]+\.(?:mp4|mkv)[^\s"'<>]*)""", RegexOption.IGNORE_CASE)
+                            mediaRegex.findAll(content).forEach { m ->
+                                matchedUrls.add(cleanUrl(m.groupValues[1]))
+                            }
+
+                            // د) خاصية file: '...'
                             val fileRegex = Regex("""["']?file["']?\s*:\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
                             fileRegex.findAll(content).forEach { m ->
                                 val f = m.groupValues[1]
                                 if (f.startsWith("http")) {
-                                    matchedLinks.add(Pair(cleanUrl(f), f.contains(".m3u8")))
+                                    matchedUrls.add(cleanUrl(f))
                                 }
                             }
+
+                            // هـ) فحص روابط أزرار التحميل المباشرة
                             if (target.isDownload) {
                                 val doc = Jsoup.parse(res.text)
                                 doc.select("a[href]").forEach { a ->
                                     val href = a.attr("href")
                                     if (href.contains(".mp4") || href.contains(".mkv") || href.contains(".m3u8")) {
-                                        matchedLinks.add(Pair(cleanUrl(href), href.contains(".m3u8")))
+                                        matchedUrls.add(cleanUrl(href))
                                     }
                                 }
                             }
-                            matchedLinks.forEach { (videoUrl, isM3u8) ->
+
+                            // التحقق من كل رابط وتحديد إن كان يشتغل مع أو بدون Referer
+                            matchedUrls.forEach { videoUrl ->
                                 if (videoUrl.length > 20 && videoUrl != serverUrl) {
-                                    println("[5TV] 🎯 [نجاح مستخرج مخصص] تم استخراج فيديو من: $serverName -> $videoUrl")
-                                    callback(
-                                        newExtractorLink(
-                                            source = name,
-                                            name = "[5TV] ${target.name}",
-                                            url = videoUrl,
-                                        ) {
-                                            this.referer = domain
-                                            this.quality = Qualities.P1080.value
-                                            this.headers = mapOf(
-                                                "Referer" to domain,
-                                                "Origin" to domain.removeSuffix("/")
-                                            )
-                                        }
-                                    )
+                                    val workingHeaders = verifyAndGetHeaders(videoUrl, domain)
+
+                                    if (workingHeaders != null) {
+                                        val isM3u8 = videoUrl.contains(".m3u8")
+                                        println("[5TV] 🎯 تم قبول الرابط الشغال بنجاح: $videoUrl")
+
+                                        callback(
+                                            newExtractorLink(
+                                                source = name,
+                                                name = "[5TV] ${target.name}",
+                                                url = videoUrl,
+                                           ) {
+                                                this.referer = workingHeaders["Referer"] ?: ""
+                                                this.quality = Qualities.P1080.value
+                                                this.headers = workingHeaders
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
                     } catch (e: Exception) {
+                        // تجاهل السيرفرات المتعطلة
                     }
                 }
             }.awaitAll()
