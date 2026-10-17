@@ -2,8 +2,14 @@ package com.eshk
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.newExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
+import com.lagradost.cloudstream3.utils.Qualities
 import org.jsoup.nodes.Element
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import java.net.URL
 
 class FiveTVProvider : MainAPI() {
     override var mainUrl = "https://new61.5tv.lol"
@@ -17,7 +23,7 @@ class FiveTVProvider : MainAPI() {
         TvType.Anime
     )
 
-    private val headers = mapOf(
+    private val browserHeaders = mapOf(
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Referer" to "$mainUrl/"
     )
@@ -30,7 +36,7 @@ class FiveTVProvider : MainAPI() {
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = app.get(request.data, headers = headers).document
+        val document = app.get(request.data, headers = browserHeaders).document
         val homeItems = mutableListOf<SearchResponse>()
         document.select("article.ftv-home-poster-card").forEach { element ->
             val item = parseCard(element)
@@ -62,7 +68,7 @@ class FiveTVProvider : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         val searchUrl = "$mainUrl/search/?q=$query"
-        val document = app.get(searchUrl, headers = headers).document
+        val document = app.get(searchUrl, headers = browserHeaders).document
 
         return document.select(".ftv-search-grid article").mapNotNull { element ->
             parseCard(element)
@@ -70,7 +76,7 @@ class FiveTVProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse? {
-        val document = app.get(url, headers = headers).document
+        val document = app.get(url, headers = browserHeaders).document
 
         val title = document.selectFirst("h1.ftv-content-hero__title")?.text()?.trim() ?: return null
         val poster = document.selectFirst(".ftv-content-hero__poster img")?.attr("src")
@@ -114,91 +120,171 @@ class FiveTVProvider : MainAPI() {
         }
     }
 
+    // ====================== خوارزميات الاستخراج المخصصة (Packer & Regex) ======================
+
+    private fun deobfuscatePacker(packed: String): String {
+        try {
+            val packerRegex = """eval\(function\(p,a,c,k,e,[rd]\)\{.*?\}\((['"])(.*?)\1\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])(.*?)\5\.split\(['"]\|['"]\)""".toRegex()
+            val match = packerRegex.find(packed) ?: return ""
+            val (_, p, aStr, cStr, _, kStr) = match.destructured
+            val a = aStr.toIntOrNull() ?: return ""
+            val c = cStr.toIntOrNull() ?: return ""
+            val k = kStr.split('|')
+
+            fun getBaseNString(num: Int, base: Int): String {
+                val chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                if (base <= 36) return num.toString(base)
+                var n = num
+                var res = ""
+                while (n > 0) {
+                    res = chars[n % base] + res
+                    n /= base
+                }
+                return if (res.isEmpty()) "0" else res
+            }
+
+            val dict = mutableMapOf<String, String>()
+            for (i in 0 until c) {
+                val key = getBaseNString(i, a)
+                val value = if (i < k.size && k[i].isNotEmpty()) k[i] else key
+                dict[key] = value
+            }
+
+            val wordRegex = """\b\w+\b""".toRegex()
+            return wordRegex.replace(p) { matchResult ->
+                val word = matchResult.value
+                dict[word] ?: word
+            }
+        } catch (e: Exception) {
+            return ""
+        }
+    }
+
+    private fun extractLogic(htmlText: String): String {
+        try {
+            val startMarker = "eval(function(p,a,c,k,e,d)"
+            val startIdx = htmlText.indexOf(startMarker)
+            if (startIdx != -1) {
+                val endMarker = ".split('|')))"
+                val endIdx = htmlText.indexOf(endMarker, startIdx)
+                if (endIdx != -1) {
+                    val packedJs = htmlText.substring(startIdx, endIdx + endMarker.length)
+                    val unpacked = deobfuscatePacker(packedJs)
+                    if (unpacked.isNotEmpty()) {
+                        return unpacked
+                    }
+                }
+            }
+        } catch (e: Exception) {
+        }
+        return htmlText
+    }
+
+    private fun findVideoSource(text: String): String? {
+        // 1. البحث عن ملفات m3u8
+        val m3u8Regex = """(https?://[^\s"\'<>]+?\.m3u8[^\s"\'<>?]*(?:\?[^\s"\'<>]*)?)""".toRegex()
+        val m3u8Match = m3u8Regex.find(text)
+        if (m3u8Match != null) return m3u8Match.groupValues[1]
+
+        // 2. البحث داخل خاصية file: '...' أو file: "..."
+        val fileRegex = """file\s*:\s*["']([^"']+)["']""".toRegex()
+        val fileMatch = fileRegex.find(text)
+        if (fileMatch != null) return fileMatch.groupValues[1]
+
+        // 3. البحث عن ملفات mp4
+        val mp4Regex = """(https?://[^\s"\'<>]+?\.mp4[^\s"\'<>?]*(?:\?[^\s"\'<>]*)?)""".toRegex()
+        val mp4Match = mp4Regex.find(text)
+        return mp4Match?.groupValues?.get(1)
+    }
+
+    // =========================================================================================
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        println("[5TV] ================== بدء جلب الروابط ==================")
-        println("[5TV] جاري فحص الرابط المستهدف: $data")
-
         val document = try {
-            app.get(data, headers = headers).document
+            app.get(data, headers = browserHeaders).document
         } catch (e: Exception) {
-            println("[5TV] [خطأ فادح] فشل تحميل الصفحة المستهدفة: ${e.message}")
             return false
         }
 
-        val extractedUrls = mutableSetOf<String>()
-        val watchTabs = document.select(".ftv-watch-tabs button[data-server-url]")
-        println("[5TV] عدد السيرفرات في الـ Tabs المكتشفة: ${watchTabs.size}")
-        watchTabs.forEach { tab ->
-            val serverName = tab.selectFirst("strong")?.text()?.trim() ?: "Unknown"
+        val serverUrls = mutableSetOf<String>()
+
+        // 1. استخراج سيرفرات المشاهدة من الـ Tabs
+        document.select(".ftv-watch-tabs button[data-server-url]").forEach { tab ->
             val serverUrl = tab.attr("data-server-url").trim()
-            if (serverUrl.isNotEmpty()) {
-                println("[5TV] 🟢 تم التقاط سيرفر المشاهدة: [$serverName] -> $serverUrl")
-                extractedUrls.add(serverUrl)
-            }
+            if (serverUrl.isNotEmpty()) serverUrls.add(serverUrl)
         }
+
+        // 2. استخراج المشغل المباشر
         val iframeSrc = document.selectFirst(".ftv-player-iframe")?.attr("src")?.trim() ?: ""
-        if (iframeSrc.isNotEmpty()) {
-            println("[5TV] 🟢 تم التقاط المشغل المباشر (Iframe): $iframeSrc")
-            extractedUrls.add(iframeSrc)
-        } else {
-            println("[5TV] ⚠️ لم يتم العثور على مشغل iframe مباشر في الصفحة.")
-        }
-        val downloadLinks = document.select(".ftv-download-list article.ftv-download-server a")
-        println("[5TV] عدد سيرفرات التحميل المكتشفة: ${downloadLinks.size}")
-        downloadLinks.forEach { link ->
+        if (iframeSrc.isNotEmpty()) serverUrls.add(iframeSrc)
+
+        // 3. استخراج سيرفرات التحميل
+        document.select(".ftv-download-list article.ftv-download-server a").forEach { link ->
             val downloadUrl = link.attr("href").trim()
-            if (downloadUrl.isNotEmpty()) {
-                println("[5TV] 🔵 تم التقاط سيرفر تحميل: $downloadUrl")
-                extractedUrls.add(downloadUrl)
-            }
+            if (downloadUrl.isNotEmpty()) serverUrls.add(downloadUrl)
         }
 
-        println("[5TV] ----------------------------------------------------")
-        println("[5TV] إجمالي السيرفرات الفريدة المكتشفة: ${extractedUrls.size}")
-        println("[5TV] بدء محاولة استخراج روابط الفيديو المباشرة عبر الـ Extractors...")
+        // معالجة جميع السيرفرات بالتوازي وبشكل غير متزامن (نفس طريقة Elif)
+        coroutineScope {
+            serverUrls.map { serverUrl ->
+                async {
+                    try {
+                        val fixedUrl = fixUrl(serverUrl)
 
-        var successCount = 0
-        var failCount = 0
-        extractedUrls.forEach { serverUrl ->
-            println("[5TV] ⏳ تجربة المستخرج مع الرابط: $serverUrl")
-            var serverExtractedSomething = false
+                        // محاولة 1: تجربة مستخرج CloudStream التلقائي أولاً
+                        loadExtractor(fixedUrl, data, subtitleCallback, callback)
 
-            try {
-                loadExtractor(
-                    url = serverUrl,
-                    referer = data,
-                    subtitleCallback = { sub ->
-                        println("[5TV]    📝 تم العثور على ترجمة: [${sub.lang}] ${sub.url}")
-                        subtitleCallback(sub)
-                    },
-                    callback = { link ->
-                        serverExtractedSomething = true
-                        successCount++
-                        println("[5TV]    ✅ [نجاح] تم استخراج فيديو: [${link.name}] (${link.quality}p) -> ${link.url}")
-                        callback(link)
+                        // محاولة 2: المعالجة المخصصة (Custom Scraper) في حال لم يتعرف عليه كلاودستريم
+                        val uri = URL(fixedUrl)
+                        val domain = "${uri.protocol}://${uri.host}/"
+                        val serverName = uri.host.replace("www.", "").lowercase()
+
+                        val serverResponse = app.get(
+                            fixedUrl,
+                            headers = mapOf(
+                                "Referer" to data,
+                                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                            )
+                        )
+
+                        if (serverResponse.code == 200) {
+                            val content = extractLogic(serverResponse.text)
+                            val videoLink = findVideoSource(content)
+
+                            if (!videoLink.isNullOrEmpty()) {
+                                val finalVideoUrl = fixUrl(videoLink).replace("\\/", "/")
+
+                                val isM3u8 = finalVideoUrl.contains(".m3u8")
+
+                                callback(
+                                    newExtractorLink(
+                                        source = name,
+                                        name = "[5TV] $serverName",
+                                        url = finalVideoUrl,
+                                        type = if (isM3u8) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                                    ) {
+                                        this.referer = domain
+                                        this.quality = Qualities.P1080.value
+                                        this.headers = mapOf(
+                                            "Referer" to domain,
+                                            "Origin" to domain.removeSuffix("/")
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                    } catch (e: Exception) {
+                        // تجاهل أي سيرفر يتعطل والانتقال للسيرفر التالي
                     }
-                )
-
-                if (!serverExtractedSomething) {
-                    failCount++
-                    println("[5TV]    ⚠️ [تحذير] لم يجد المستخرج رابط فيديو صالح لهذا السيرفر (قد يحتاج Extractor مخصص).")
                 }
-            } catch (e: Exception) {
-                failCount++
-                println("[5TV]    ❌ [خطأ أثناء الاستخراج]: ${e.javaClass.simpleName} - ${e.message}")
-            }
+            }.awaitAll()
         }
 
-        println("[5TV] ================= ملخص الاستخراج =================")
-        println("[5TV] إجمالي الروابط التي نجح تشغيلها: $successCount")
-        println("[5TV] إجمالي السيرفرات التي فشلت: $failCount")
-        println("[5TV] ==================================================")
-
-        return successCount > 0
+        return true
     }
 }
