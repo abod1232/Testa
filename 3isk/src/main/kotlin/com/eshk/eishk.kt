@@ -131,8 +131,6 @@ class FiveTVProvider : MainAPI() {
         }
 
         val extractedUrls = mutableSetOf<String>()
-
-        // 1. استخراج الـ Tabs
         val watchTabs = document.select(".ftv-watch-tabs button[data-server-url]")
         println("[5TV] عدد السيرفرات في الـ Tabs المكتشفة: ${watchTabs.size}")
         watchTabs.forEach { tab ->
@@ -143,8 +141,6 @@ class FiveTVProvider : MainAPI() {
                 extractedUrls.add(serverUrl)
             }
         }
-
-        // 2. استخراج الـ Iframe المباشر
         val iframeSrc = document.selectFirst(".ftv-player-iframe")?.attr("src")?.trim() ?: ""
         if (iframeSrc.isNotEmpty()) {
             println("[5TV] 🟢 تم التقاط المشغل المباشر (Iframe): $iframeSrc")
@@ -152,8 +148,6 @@ class FiveTVProvider : MainAPI() {
         } else {
             println("[5TV] ⚠️ لم يتم العثور على مشغل iframe مباشر في الصفحة.")
         }
-
-        // 3. استخراج سيرفرات التحميل
         val downloadLinks = document.select(".ftv-download-list article.ftv-download-server a")
         println("[5TV] عدد سيرفرات التحميل المكتشفة: ${downloadLinks.size}")
         downloadLinks.forEach { link ->
@@ -170,8 +164,6 @@ class FiveTVProvider : MainAPI() {
 
         var successCount = 0
         var failCount = 0
-
-        // 4. استخراج الروابط وفحص نجاحها
         extractedUrls.forEach { serverUrl ->
             println("[5TV] ⏳ تجربة المستخرج مع الرابط: $serverUrl")
             var serverExtractedSomething = false
