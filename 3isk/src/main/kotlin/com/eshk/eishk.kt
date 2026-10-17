@@ -16,10 +16,12 @@ class FiveTVProvider : MainAPI() {
         TvType.AsianDrama,
         TvType.Anime
     )
+
     private val headers = mapOf(
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Referer" to "$mainUrl/"
     )
+
     override val mainPage = mainPageOf(
         "$mainUrl/latest-movies/" to "جديد الأفلام",
         "$mainUrl/latest-series/" to "جديد الدراما",
@@ -37,6 +39,7 @@ class FiveTVProvider : MainAPI() {
 
         return newHomePageResponse(request.name, homeItems)
     }
+
     private fun parseCard(element: Element): SearchResponse? {
         val title = element.selectFirst(".ftv-home-poster-card__title")?.text()?.trim() ?: return null
         val url = element.selectFirst(".ftv-home-poster-card__image")?.attr("href") ?: return null
@@ -56,6 +59,7 @@ class FiveTVProvider : MainAPI() {
             }
         }
     }
+
     override suspend fun search(query: String): List<SearchResponse> {
         val searchUrl = "$mainUrl/search/?q=$query"
         val document = app.get(searchUrl, headers = headers).document
@@ -64,6 +68,7 @@ class FiveTVProvider : MainAPI() {
             parseCard(element)
         }
     }
+
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url, headers = headers).document
 
@@ -92,11 +97,11 @@ class FiveTVProvider : MainAPI() {
                 val epNum = Regex("""\d+""").find(epTitle)?.value?.toIntOrNull()
 
                 episodes.add(
-    newEpisode(epHref) {
-        this.name = epTitle
-        this.episode = epNum
-    }
-)
+                    newEpisode(epHref) {
+                        this.name = epTitle
+                        this.episode = epNum
+                    }
+                )
             }
             episodes.sortBy { it.episode }
 
@@ -108,30 +113,100 @@ class FiveTVProvider : MainAPI() {
             }
         }
     }
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val document = app.get(data, headers = headers).document
+        println("[5TV] ================== بدء جلب الروابط ==================")
+        println("[5TV] جاري فحص الرابط المستهدف: $data")
+
+        val document = try {
+            app.get(data, headers = headers).document
+        } catch (e: Exception) {
+            println("[5TV] [خطأ فادح] فشل تحميل الصفحة المستهدفة: ${e.message}")
+            return false
+        }
 
         val extractedUrls = mutableSetOf<String>()
-        document.select(".ftv-watch-tabs button[data-server-url]").forEach { tab ->
-            val serverUrl = tab.attr("data-server-url")
-            if (serverUrl.isNotEmpty()) extractedUrls.add(serverUrl)
-        }
-        document.select(".ftv-player-iframe").attr("src").let { iframeSrc ->
-            if (iframeSrc.isNotEmpty()) extractedUrls.add(iframeSrc)
-        }
-        document.select(".ftv-download-list article.ftv-download-server a").forEach { link ->
-            val downloadUrl = link.attr("href")
-            if (downloadUrl.isNotEmpty()) extractedUrls.add(downloadUrl)
-        }
-        extractedUrls.forEach { serverUrl ->
-            loadExtractor(serverUrl, data, subtitleCallback, callback)
+
+        // 1. استخراج الـ Tabs
+        val watchTabs = document.select(".ftv-watch-tabs button[data-server-url]")
+        println("[5TV] عدد السيرفرات في الـ Tabs المكتشفة: ${watchTabs.size}")
+        watchTabs.forEach { tab ->
+            val serverName = tab.selectFirst("strong")?.text()?.trim() ?: "Unknown"
+            val serverUrl = tab.attr("data-server-url").trim()
+            if (serverUrl.isNotEmpty()) {
+                println("[5TV] 🟢 تم التقاط سيرفر المشاهدة: [$serverName] -> $serverUrl")
+                extractedUrls.add(serverUrl)
+            }
         }
 
-        return true
+        // 2. استخراج الـ Iframe المباشر
+        val iframeSrc = document.selectFirst(".ftv-player-iframe")?.attr("src")?.trim() ?: ""
+        if (iframeSrc.isNotEmpty()) {
+            println("[5TV] 🟢 تم التقاط المشغل المباشر (Iframe): $iframeSrc")
+            extractedUrls.add(iframeSrc)
+        } else {
+            println("[5TV] ⚠️ لم يتم العثور على مشغل iframe مباشر في الصفحة.")
+        }
+
+        // 3. استخراج سيرفرات التحميل
+        val downloadLinks = document.select(".ftv-download-list article.ftv-download-server a")
+        println("[5TV] عدد سيرفرات التحميل المكتشفة: ${downloadLinks.size}")
+        downloadLinks.forEach { link ->
+            val downloadUrl = link.attr("href").trim()
+            if (downloadUrl.isNotEmpty()) {
+                println("[5TV] 🔵 تم التقاط سيرفر تحميل: $downloadUrl")
+                extractedUrls.add(downloadUrl)
+            }
+        }
+
+        println("[5TV] ----------------------------------------------------")
+        println("[5TV] إجمالي السيرفرات الفريدة المكتشفة: ${extractedUrls.size}")
+        println("[5TV] بدء محاولة استخراج روابط الفيديو المباشرة عبر الـ Extractors...")
+
+        var successCount = 0
+        var failCount = 0
+
+        // 4. استخراج الروابط وفحص نجاحها
+        extractedUrls.forEach { serverUrl ->
+            println("[5TV] ⏳ تجربة المستخرج مع الرابط: $serverUrl")
+            var serverExtractedSomething = false
+
+            try {
+                loadExtractor(
+                    url = serverUrl,
+                    referer = data,
+                    subtitleCallback = { sub ->
+                        println("[5TV]    📝 تم العثور على ترجمة: [${sub.lang}] ${sub.url}")
+                        subtitleCallback(sub)
+                    },
+                    callback = { link ->
+                        serverExtractedSomething = true
+                        successCount++
+                        println("[5TV]    ✅ [نجاح] تم استخراج فيديو: [${link.name}] (${link.quality}p) -> ${link.url}")
+                        callback(link)
+                    }
+                )
+
+                if (!serverExtractedSomething) {
+                    failCount++
+                    println("[5TV]    ⚠️ [تحذير] لم يجد المستخرج رابط فيديو صالح لهذا السيرفر (قد يحتاج Extractor مخصص).")
+                }
+            } catch (e: Exception) {
+                failCount++
+                println("[5TV]    ❌ [خطأ أثناء الاستخراج]: ${e.javaClass.simpleName} - ${e.message}")
+            }
+        }
+
+        println("[5TV] ================= ملخص الاستخراج =================")
+        println("[5TV] إجمالي الروابط التي نجح تشغيلها: $successCount")
+        println("[5TV] إجمالي السيرفرات التي فشلت: $failCount")
+        println("[5TV] ==================================================")
+
+        return successCount > 0
     }
 }
