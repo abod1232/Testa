@@ -30,21 +30,35 @@ class FiveTVProvider : MainAPI() {
     )
 
     override val mainPage = mainPageOf(
-        "$mainUrl/latest-movies/" to "جديد الأفلام",
-        "$mainUrl/latest-series/" to "جديد الدراما",
-        "$mainUrl/category/أنمي/" to "جديد الأنمي",
-        "$mainUrl/category/البرامج-الأسيوية/" to "البرامج الأسيوية"
+        mainUrl to "الرئيسية"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = app.get(request.data, headers = browserHeaders).document
-        val homeItems = mutableListOf<SearchResponse>()
-        document.select("article.ftv-home-poster-card").forEach { element ->
-            val item = parseCard(element)
-            if (item != null) homeItems.add(item)
+        val document = app.get(mainUrl, headers = browserHeaders).document
+        val homeSections = mutableListOf<HomePageList>()
+
+        document.select("section.ftv-home-section").forEach { section ->
+            val sectionTitle = section.selectFirst("h2")?.text()?.trim() ?: return@forEach
+            val items = mutableListOf<SearchResponse>()
+
+            section.select("article.ftv-home-poster-card").forEach { card ->
+                parseCard(card)?.let { items.add(it) }
+            }
+
+            section.select("article.ftv-home-episode-card").forEach { card ->
+                parseEpisodeCard(card)?.let { items.add(it) }
+            }
+
+            section.select("article.ftv-status-row__card").forEach { card ->
+                parseStatusCard(card)?.let { items.add(it) }
+            }
+
+            if (items.isNotEmpty()) {
+                homeSections.add(HomePageList(sectionTitle, items))
+            }
         }
 
-        return newHomePageResponse(request.name, homeItems)
+        return newHomePageResponse(homeSections)
     }
 
     private fun parseCard(element: Element): SearchResponse? {
@@ -67,6 +81,32 @@ class FiveTVProvider : MainAPI() {
         }
     }
 
+    private fun parseEpisodeCard(element: Element): SearchResponse? {
+        val titleEl = element.selectFirst(".ftv-home-episode-card__title") ?: return null
+        val title = titleEl.text().trim()
+        val url = titleEl.attr("href") ?: return null
+        val poster = element.selectFirst("img")?.let {
+            it.attr("src").ifEmpty { it.attr("data-src") }
+        }
+        val meta = element.selectFirst(".ftv-home-episode-card__meta")?.text()?.replace("\n", " ")?.trim()
+        val fullTitle = if (!meta.isNullOrEmpty()) "$title ($meta)" else title
+
+        return newTvSeriesSearchResponse(fullTitle, url, TvType.TvSeries) {
+            this.posterUrl = poster
+        }
+    }
+
+    private fun parseStatusCard(element: Element): SearchResponse? {
+        val link = element.selectFirst("a.ftv-status-row__link") ?: return null
+        val url = link.attr("href") ?: return null
+        val title = element.selectFirst("h3")?.text()?.trim() ?: return null
+        val poster = element.selectFirst("img")?.attr("src")
+
+        return newTvSeriesSearchResponse(title, url, TvType.TvSeries) {
+            this.posterUrl = poster
+        }
+    }
+
     override suspend fun search(query: String): List<SearchResponse> {
         val searchUrl = "$mainUrl/search/?q=$query"
         val document = app.get(searchUrl, headers = browserHeaders).document
@@ -77,7 +117,18 @@ class FiveTVProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse? {
-        val document = app.get(url, headers = browserHeaders).document
+        var finalUrl = url
+        if (url.contains("/episode/")) {
+            try {
+                val epDoc = app.get(url, headers = browserHeaders).document
+                val backLink = epDoc.selectFirst("a.ftv-episode-poster-back")?.attr("href")
+                if (!backLink.isNullOrEmpty()) {
+                    finalUrl = backLink
+                }
+            } catch (_: Exception) {}
+        }
+
+        val document = app.get(finalUrl, headers = browserHeaders).document
 
         val title = document.selectFirst("h1.ftv-content-hero__title")?.text()?.trim() ?: return null
         val poster = document.selectFirst(".ftv-content-hero__poster img")?.attr("src")
@@ -85,10 +136,10 @@ class FiveTVProvider : MainAPI() {
         val year = document.selectFirst(".ftv-content-hero__year a")?.text()?.trim()?.toIntOrNull()
         val genres = document.select(".ftv-content-hero__genres a").map { it.text().trim() }
 
-        val isMovie = url.contains("/movie/")
+        val isMovie = finalUrl.contains("/movie/")
 
         return if (isMovie) {
-            newMovieLoadResponse(title, url, TvType.Movie, url) {
+            newMovieLoadResponse(title, finalUrl, TvType.Movie, finalUrl) {
                 this.posterUrl = poster
                 this.plot = description
                 this.year = year
@@ -96,11 +147,11 @@ class FiveTVProvider : MainAPI() {
             }
         } else {
             val episodes = mutableListOf<Episode>()
-            val episodeElements = document.select(".ftv-series-episodes-grid .ftv-episode-completion-item")
+            val episodeElements = document.select(".ftv-series-episodes-grid .ftv-episode-completion-item, .ftv-episodes-grid .ftv-episode-completion-item")
 
             episodeElements.forEach { el ->
-                val epHref = el.selectFirst("a.ftv-series-episode-card")?.attr("href") ?: return@forEach
-                val epTitle = el.selectFirst(".ftv-series-episode-card__body strong")?.text()?.trim() ?: "حلقة"
+                val epHref = el.selectFirst("a.ftv-series-episode-card, a.ftv-episode-card")?.attr("href") ?: return@forEach
+                val epTitle = el.selectFirst(".ftv-series-episode-card__body strong, .ftv-episode-card__text strong")?.text()?.trim() ?: "حلقة"
                 val epNum = Regex("""\d+""").find(epTitle)?.value?.toIntOrNull()
 
                 episodes.add(
@@ -112,7 +163,7 @@ class FiveTVProvider : MainAPI() {
             }
             episodes.sortBy { it.episode }
 
-            newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
+            newTvSeriesLoadResponse(title, finalUrl, TvType.TvSeries, episodes) {
                 this.posterUrl = poster
                 this.plot = description
                 this.year = year
@@ -152,6 +203,7 @@ class FiveTVProvider : MainAPI() {
 
             val kStr = sub.substring(lastMatch.range.last + 1)
             val k = kStr.split("|")
+
             val lastBrace = sub.lastIndexOf('}', lastMatch.range.first)
             if (lastBrace == -1) return ""
 
@@ -187,7 +239,7 @@ class FiveTVProvider : MainAPI() {
                 val word = matchResult.value
                 lookup[word] ?: word
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             return ""
         }
     }
@@ -215,20 +267,21 @@ class FiveTVProvider : MainAPI() {
             "User-Agent" to userAgent,
             "Range" to "bytes=0-1"
         )
+
         try {
             val resNoRef = app.get(videoUrl, headers = headersWithoutReferer, timeout = 6)
             if (resNoRef.code in 200..299) {
-                println("[5TV] ✅ الرابط يعمل بدون Referer [كود: ${resNoRef.code}]")
                 return emptyMap()
             }
         } catch (_: Exception) {}
+
         try {
             val resWithRef = app.get(videoUrl, headers = headersWithReferer, timeout = 6)
             if (resWithRef.code in 200..299) {
-                println("[5TV] ✅ الرابط يعمل مع Referer ($domain) [كود: ${resWithRef.code}]")
                 return mapOf("Referer" to domain, "Origin" to domain.removeSuffix("/"))
             }
         } catch (_: Exception) {}
+
         if (videoUrl.contains(".m3u8")) {
             try {
                 val resM3u8WithRef = app.get(videoUrl, headers = mapOf("Referer" to domain), timeout = 6)
@@ -252,22 +305,21 @@ class FiveTVProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        println("[5TV] جاري فحص الرابط المستهدف: $data")
-
         val document = try {
             app.get(data, headers = browserHeaders).document
-        } catch (e: Exception) {
-            println("[5TV] خطأ في تحميل الصفحة: ${e.message}")
+        } catch (_: Exception) {
             return false
         }
 
         val targets = mutableListOf<ServerTarget>()
         val seenUrls = mutableSetOf<String>()
+
         val iframeSrc = document.selectFirst(".ftv-player-iframe")?.attr("src")?.trim() ?: ""
         if (iframeSrc.isNotEmpty() && !seenUrls.contains(iframeSrc)) {
             targets.add(ServerTarget("Direct Player", iframeSrc, false))
             seenUrls.add(iframeSrc)
         }
+
         document.select(".ftv-watch-tabs button[data-server-url]").forEach { tab ->
             val u = tab.attr("data-server-url").trim()
             val name = tab.selectFirst("strong")?.text()?.trim() ?: "Stream"
@@ -276,6 +328,7 @@ class FiveTVProvider : MainAPI() {
                 seenUrls.add(u)
             }
         }
+
         document.select(".ftv-download-list article.ftv-download-server a").forEach { link ->
             val u = link.attr("href").trim()
             val parentArticle = link.parents().firstOrNull { it.hasClass("ftv-download-server") }
@@ -286,21 +339,20 @@ class FiveTVProvider : MainAPI() {
             }
         }
 
-        println("[5TV] تم اكتشاف ${targets.size} سيرفر. بدء المعالجة والاستخراج المتقدم...")
-
         coroutineScope {
             targets.map { target ->
                 async {
                     var serverUrl = target.url
-                    if (serverUrl.contains("dsvplay")) {
+
+                    if (serverUrl.contains("dsvplay.com")) {
                         serverUrl = serverUrl.replace("dsvplay.com", "playmogo.com")
                     }
 
                     try {
                         loadExtractor(serverUrl, data, subtitleCallback, callback)
+
                         val uri = URL(serverUrl)
                         val domain = "${uri.protocol}://${uri.host}/"
-                        val serverName = uri.host.replace("www.", "").lowercase()
 
                         val res = app.get(
                             serverUrl,
@@ -313,6 +365,7 @@ class FiveTVProvider : MainAPI() {
 
                         if (res.code == 200) {
                             var content = unescapeHtml(res.text)
+
                             if (content.contains("eval(function(p,a,c,k")) {
                                 val unpacked = unpackDeanEdwards(content)
                                 if (unpacked.isNotEmpty()) {
@@ -321,18 +374,22 @@ class FiveTVProvider : MainAPI() {
                             }
 
                             val matchedUrls = mutableSetOf<String>()
+
                             val m3u8Regex = Regex("""(https?:[\\/]+[^\s"'<>]+\.m3u8[^\s"'<>]*)""", RegexOption.IGNORE_CASE)
                             m3u8Regex.findAll(content).forEach { m ->
                                 matchedUrls.add(cleanUrl(m.groupValues[1]))
                             }
+
                             val r2Regex = Regex("""(https?:[\\/]+[^\s"'<>]+cloudflarestorage[^\s"'<>]*)""", RegexOption.IGNORE_CASE)
                             r2Regex.findAll(content).forEach { m ->
                                 matchedUrls.add(cleanUrl(m.groupValues[1]))
                             }
+
                             val mediaRegex = Regex("""(https?:[\\/]+[^\s"'<>]+\.(?:mp4|mkv)[^\s"'<>]*)""", RegexOption.IGNORE_CASE)
                             mediaRegex.findAll(content).forEach { m ->
                                 matchedUrls.add(cleanUrl(m.groupValues[1]))
                             }
+
                             val fileRegex = Regex("""["']?file["']?\s*:\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
                             fileRegex.findAll(content).forEach { m ->
                                 val f = m.groupValues[1]
@@ -340,6 +397,7 @@ class FiveTVProvider : MainAPI() {
                                     matchedUrls.add(cleanUrl(f))
                                 }
                             }
+
                             if (target.isDownload) {
                                 val doc = Jsoup.parse(res.text)
                                 doc.select("a[href]").forEach { a ->
@@ -349,20 +407,20 @@ class FiveTVProvider : MainAPI() {
                                     }
                                 }
                             }
+
                             matchedUrls.forEach { videoUrl ->
                                 if (videoUrl.length > 20 && videoUrl != serverUrl) {
                                     val workingHeaders = verifyAndGetHeaders(videoUrl, domain)
 
                                     if (workingHeaders != null) {
                                         val isM3u8 = videoUrl.contains(".m3u8")
-                                        println("[5TV] 🎯 تم قبول الرابط الشغال بنجاح: $videoUrl")
-
                                         callback(
                                             newExtractorLink(
                                                 source = name,
                                                 name = "[5TV] ${target.name}",
                                                 url = videoUrl,
-                                           ) {
+                                                type = if (isM3u8) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                                            ) {
                                                 this.referer = workingHeaders["Referer"] ?: ""
                                                 this.quality = Qualities.P1080.value
                                                 this.headers = workingHeaders
@@ -372,8 +430,7 @@ class FiveTVProvider : MainAPI() {
                                 }
                             }
                         }
-                    } catch (e: Exception) {
-                    }
+                    } catch (_: Exception) {}
                 }
             }.awaitAll()
         }
