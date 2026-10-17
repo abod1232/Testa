@@ -294,7 +294,6 @@ class FiveTVProvider : MainAPI() {
                                             source = name,
                                             name = "[5TV] ${target.name}",
                                             url = videoUrl,
-                                            type = if (isM3u8) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
                                         ) {
                                             this.referer = domain
                                             this.quality = Qualities.P1080.value
