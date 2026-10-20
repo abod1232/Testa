@@ -29,8 +29,6 @@ class WitAnime : MainAPI() {
     override var lang = "ar"
 
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie)
-    
-    // الهيدرز المعتمدة لتجاوز فحص Cloudflare
     private val userAgent =
         "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Mobile Safari/537.36"
 
@@ -302,10 +300,6 @@ class WitAnime : MainAPI() {
     init {
         PlayerAccess.startMonitoring()
     }
-
-    // ==========================================
-    // 1. الصفحة الرئيسية (Main Page)
-    // ==========================================
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(mainUrl, headers = clientHints).document
         val homePageList = ArrayList<HomePageList>()
@@ -355,10 +349,6 @@ class WitAnime : MainAPI() {
 
         return newHomePageResponse(homePageList)
     }
-
-    // ==========================================
-    // 2. البحث (Search)
-    // ==========================================
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/search?q=$query"
         val document = app.get(url, headers = clientHints).document
@@ -374,10 +364,6 @@ class WitAnime : MainAPI() {
             }
         }.distinctBy { it.url }
     }
-
-    // ==========================================
-    // 3. جلب تفاصيل الأنمي والحلقات (Load)
-    // ==========================================
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url, headers = clientHints).document
 
@@ -444,10 +430,6 @@ class WitAnime : MainAPI() {
             addEpisodes(DubStatus.Subbed, episodes.distinctBy { it.data })
         }
     }
-
-    // ==========================================
-    // 4. جلب روابط المشاهدة والتحميل (بحد أقصى 10 سيرفرات)
-    // ==========================================
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -455,7 +437,6 @@ class WitAnime : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         return try {
-            // 1. فتح الصفحة وسحب التوكن
             val watchRes = app.get(data, headers = clientHints)
             val watchHtml = watchRes.text
             val doc = watchRes.document
@@ -464,14 +445,10 @@ class WitAnime : MainAPI() {
                 ?: Regex("""csrf-token["']?\s+content=["']([^"']+)["']""").find(watchHtml)?.groupValues?.get(1)
                 ?: Regex("""data-csrf=["']([^"']+)["']""").find(watchHtml)?.groupValues?.get(1)
                 ?: return false
-
-            // 2. استخراج sourcesUrl
             val sourcesPattern = Regex("""sourcesUrl:\s*['"]([^'"]+)['"]""")
             val rawSources = sourcesPattern.find(watchHtml)?.groupValues?.get(1)?.replace("\\/", "/")
                 ?: "${data.trimEnd('/')}/sources"
             val sourcesUrl = fixUrl(rawSources)
-
-            // 3. طلب مصفوفة السيرفرات الكاملة عبر POST
             val sourcesHeaders = clientHints + mapOf(
                 "X-Csrf-Token" to csrfToken,
                 "Accept" to "application/json",
@@ -490,11 +467,7 @@ class WitAnime : MainAPI() {
 
             data class ServerItem(val quality: String, val label: String, val token: String, val isStream: Boolean)
             val allServers = mutableListOf<ServerItem>()
-
-            // ترتيب الجودات (FHD ثم HD ثم SD)
             val qualityOrder = listOf("FHD", "HD", "SD")
-
-            // تجميع سيرفرات المشاهدة
             players?.let { p ->
                 val keys = qualityOrder + p.keys().asSequence().toList()
                 for (q in keys.distinct()) {
@@ -509,8 +482,6 @@ class WitAnime : MainAPI() {
                     }
                 }
             }
-
-            // تجميع سيرفرات التنزيل
             downloads?.let { d ->
                 val keys = qualityOrder + d.keys().asSequence().toList()
                 for (q in keys.distinct()) {
@@ -525,8 +496,6 @@ class WitAnime : MainAPI() {
                     }
                 }
             }
-
-            // ===> وضع حد أقصى 10 سيرفرات فقط كما طلبت <===
             val limitedServers = allServers.take(10)
 
             val gateHeaders = clientHints + mapOf(
@@ -539,8 +508,6 @@ class WitAnime : MainAPI() {
                 "Sec-Fetch-Dest" to "iframe",
                 "Referer" to data
             )
-
-            // 4. المرور على السيرفرات العشرة: تفعيل صلاحية السيرفر ثم طلب البوابة مباشرة
             for (server in limitedServers) {
                 try {
                     val sourceEndpoint = if (server.isStream) "stream-source" else "download-source"
@@ -548,11 +515,7 @@ class WitAnime : MainAPI() {
 
                     val sourceUrl = "https://witanime.site/watch/$sourceEndpoint/${server.token}"
                     val gateUrl = "https://witanime.site/watch/$gateEndpoint/${server.token}"
-
-                    // أ) إرسال طلب التفعيل المسبق
                     app.post(sourceUrl, headers = sourcesHeaders)
-
-                    // ب) إرسال طلب البوابة مباشرة والتقاط كود 302
                     val gateRes = app.get(gateUrl, headers = gateHeaders, followRedirects = false)
                     var embedUrl = gateRes.headers["location"] ?: gateRes.headers["Location"]
 
@@ -582,8 +545,6 @@ class WitAnime : MainAPI() {
                             loadExtractor(embedUrl, data, subtitleCallback, callback)
                         }
                     }
-
-                    // مهلة بسيطة بين كل سيرفر لتجنب الحظر
                     delay(300)
                 } catch (e: Exception) {
                     logError(e)
