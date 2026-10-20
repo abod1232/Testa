@@ -541,9 +541,6 @@ class WitAnime : MainAPI() {
                                     this.referer = embedUrl
                                     this.quality = Qualities.Unknown.value
                                     this.type = ExtractorLinkType.VIDEO
-// ==========================================
-    // 4. جلب روابط المشاهدة والتحميل (بحد أقصى 10 سيرفرات)
-    // ==========================================
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -551,30 +548,21 @@ class WitAnime : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         return try {
-            // 1. فتح الصفحة وسحب التوكن والكوكيز
             val watchRes = app.get(data, headers = clientHints)
             val watchHtml = watchRes.text
             val doc = watchRes.document
-
-            // ===> سحب الكوكيز الصريحة من رد الصفحة الأولى <===
             val currentCookies = watchRes.cookies.toMutableMap()
 
             val csrfToken = doc.selectFirst("meta[name='csrf-token']")?.attr("content")
                 ?: Regex("""csrf-token["']?\s+content=["']([^"']+)["']""").find(watchHtml)?.groupValues?.get(1)
                 ?: Regex("""data-csrf=["']([^"']+)["']""").find(watchHtml)?.groupValues?.get(1)
                 ?: return false
-
-            // 2. استخراج مسار sourcesUrl
             val sourcesPattern = Regex("""sourcesUrl:\s*['"]([^'"]+)['"]""")
             val rawSources = sourcesPattern.find(watchHtml)?.groupValues?.get(1)?.replace("\\/", "/")
                 ?: "${data.trimEnd('/')}/sources"
             val sourcesUrl = fixUrl(rawSources)
-
-            // دالة لتوليد سطر الـ Cookie يدوياً لضمان وصوله للسيرفر 100%
             fun makeCookieHeader(): String =
                 currentCookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
-
-            // 3. تجهيز هيدرز طلب /sources
             val sourcesHeaders = mapOf(
                 "Sec-Ch-Ua" to "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
                 "Sec-Ch-Ua-Mobile" to "?1",
@@ -589,15 +577,11 @@ class WitAnime : MainAPI() {
                 # إرسال الكوكيز يدوياً في الهيدر لضمان عدم ضياعها
                 "Cookie" to makeCookieHeader()
             )
-
-            // إرسال POST مع تمرير الكوكيز صراحة
             val sourcesRes = app.post(
                 sourcesUrl,
                 headers = sourcesHeaders,
                 cookies = currentCookies
             )
-            
-            // تحديث الكوكيز من رد السيرفر
             currentCookies.putAll(sourcesRes.cookies)
 
             val json = JSONObject(sourcesRes.text)
@@ -608,8 +592,6 @@ class WitAnime : MainAPI() {
             val allServers = mutableListOf<ServerItem>()
 
             val qualityOrder = listOf("FHD", "HD", "SD")
-
-            // تجميع سيرفرات المشاهدة
             players?.let { p ->
                 val keys = qualityOrder + p.keys().asSequence().toList()
                 for (q in keys.distinct()) {
@@ -624,8 +606,6 @@ class WitAnime : MainAPI() {
                     }
                 }
             }
-
-            // تجميع سيرفرات التنزيل
             downloads?.let { d ->
                 val keys = qualityOrder + d.keys().asSequence().toList()
                 for (q in keys.distinct()) {
@@ -640,11 +620,7 @@ class WitAnime : MainAPI() {
                     }
                 }
             }
-
-            // أخذ 10 سيرفرات فقط كحد أقصى
             val limitedServers = allServers.take(10)
-
-            // 4. المرور على السيرفرات وتنفيذ دورة الـ gate
             for (server in limitedServers) {
                 try {
                     val sourceEndpoint = if (server.isStream) "stream-source" else "download-source"
@@ -654,12 +630,8 @@ class WitAnime : MainAPI() {
                     val gateUrl = "https://witanime.site/watch/$gateEndpoint/${server.token}"
 
                     val currentReqHeaders = sourcesHeaders + mapOf("Cookie" to makeCookieHeader())
-
-                    // أ) إرسال طلب التفعيل المسبق
                     val sRes = app.post(sourceUrl, headers = currentReqHeaders, cookies = currentCookies)
                     currentCookies.putAll(sRes.cookies)
-
-                    // ب) طلب البوابة
                     val gateHeaders = mapOf(
                         "Host" to "witanime.site",
                         "Sec-Ch-Ua" to "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
@@ -677,8 +649,6 @@ class WitAnime : MainAPI() {
 
                     val gateRes = app.get(gateUrl, headers = gateHeaders, cookies = currentCookies)
                     currentCookies.putAll(gateRes.cookies)
-
-                    // استخراج الرابط المباشر
                     var embedUrl = if (gateRes.url != gateUrl && !gateRes.url.contains("witanime.site/watch/")) {
                         gateRes.url
                     } else {
