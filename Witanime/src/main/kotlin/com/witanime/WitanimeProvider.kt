@@ -516,7 +516,7 @@ class WitAnime : MainAPI() {
                     val sourceUrl = "https://witanime.site/watch/$sourceEndpoint/${server.token}"
                     val gateUrl = "https://witanime.site/watch/$gateEndpoint/${server.token}"
                     app.post(sourceUrl, headers = sourcesHeaders)
-                    val gateRes = app.get(gateUrl, headers = gateHeaders, followRedirects = false)
+                    val gateRes = app.get(gateUrl, headers = gateHeaders)
                     var embedUrl = gateRes.headers["location"] ?: gateRes.headers["Location"]
 
                     if (embedUrl.isNullOrBlank() && gateRes.text.isNotBlank()) {
