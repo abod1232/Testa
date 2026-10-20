@@ -29,8 +29,17 @@ class WitAnime : MainAPI() {
     override var lang = "ar"
 
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie)
+    
+    // الهيدرز المعتمدة لتجاوز فحص Cloudflare
     private val userAgent =
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Mobile Safari/537.36"
+
+    private val clientHints = mapOf(
+        "User-Agent" to userAgent,
+        "Sec-Ch-Ua" to "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "Sec-Ch-Ua-Mobile" to "?1",
+        "Sec-Ch-Ua-Platform" to "\"Android\""
+    )
 
     companion object {
         @Volatile var isWebViewOpen = false
@@ -111,13 +120,6 @@ class WitAnime : MainAPI() {
                     fragment.javaClass.getMethod("getPlayer").invoke(fragment)
                 } catch (ex: Exception) { null }
             }
-        }
-
-        fun getAppContext(): Context? {
-            return try {
-                val activityThreadClass = Class.forName("android.app.ActivityThread")
-                activityThreadClass.getMethod("currentApplication").invoke(null) as? Context
-            } catch (e: Exception) { null }
         }
 
         fun pausePlayer() {
@@ -300,8 +302,12 @@ class WitAnime : MainAPI() {
     init {
         PlayerAccess.startMonitoring()
     }
+
+    // ==========================================
+    // 1. الصفحة الرئيسية (Main Page)
+    // ==========================================
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = app.get(mainUrl, headers = mapOf("User-Agent" to userAgent)).document
+        val document = app.get(mainUrl, headers = clientHints).document
         val homePageList = ArrayList<HomePageList>()
 
         document.select("section").forEach { section ->
@@ -349,9 +355,13 @@ class WitAnime : MainAPI() {
 
         return newHomePageResponse(homePageList)
     }
+
+    // ==========================================
+    // 2. البحث (Search)
+    // ==========================================
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/search?q=$query"
-        val document = app.get(url, headers = mapOf("User-Agent" to userAgent)).document
+        val document = app.get(url, headers = clientHints).document
 
         return document.select("div.grid a[href*='/anime/'], div.grid a[href*='/movie/']").mapNotNull { card ->
             val href = card.attr("href")
@@ -364,8 +374,12 @@ class WitAnime : MainAPI() {
             }
         }.distinctBy { it.url }
     }
+
+    // ==========================================
+    // 3. جلب تفاصيل الأنمي والحلقات (Load)
+    // ==========================================
     override suspend fun load(url: String): LoadResponse {
-        val document = app.get(url, headers = mapOf("User-Agent" to userAgent)).document
+        val document = app.get(url, headers = clientHints).document
 
         val jsonLd = document.selectFirst("script[type='application/ld+json']")?.data()
         val title = document.selectFirst("h1")?.text()?.trim() ?: ""
@@ -430,104 +444,156 @@ class WitAnime : MainAPI() {
             addEpisodes(DubStatus.Subbed, episodes.distinctBy { it.data })
         }
     }
+
+    // ==========================================
+    // 4. جلب روابط المشاهدة والتحميل (بحد أقصى 10 سيرفرات)
+    // ==========================================
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        try {
-            val watchHtml = app.get(data, headers = mapOf("User-Agent" to userAgent)).text
+        return try {
+            // 1. فتح الصفحة وسحب التوكن
+            val watchRes = app.get(data, headers = clientHints)
+            val watchHtml = watchRes.text
+            val doc = watchRes.document
 
-            val sourcesUrlPattern = Regex("""sourcesUrl:\s*['"]([^'"]+)['"]""")
-            val rawSourcesUrl = sourcesUrlPattern.find(watchHtml)?.groupValues?.get(1) ?: return false
-            val cleanSourcesUrl = rawSourcesUrl.replace("\\/", "/")
-            val fullSourcesUrl = fixUrl(cleanSourcesUrl)
+            val csrfToken = doc.selectFirst("meta[name='csrf-token']")?.attr("content")
+                ?: Regex("""csrf-token["']?\s+content=["']([^"']+)["']""").find(watchHtml)?.groupValues?.get(1)
+                ?: Regex("""data-csrf=["']([^"']+)["']""").find(watchHtml)?.groupValues?.get(1)
+                ?: return false
 
-            val apiResponse = app.get(
-                fullSourcesUrl,
-                referer = data,
-                headers = mapOf(
-                    "User-Agent" to userAgent,
-                    "Accept" to "application/json, text/plain, */*",
-                    "X-Requested-With" to "XMLHttpRequest"
-                )
-            ).text
+            // 2. استخراج sourcesUrl
+            val sourcesPattern = Regex("""sourcesUrl:\s*['"]([^'"]+)['"]""")
+            val rawSources = sourcesPattern.find(watchHtml)?.groupValues?.get(1)?.replace("\\/", "/")
+                ?: "${data.trimEnd('/')}/sources"
+            val sourcesUrl = fixUrl(rawSources)
 
-            val extractedUrls = mutableListOf<String>()
+            // 3. طلب مصفوفة السيرفرات الكاملة عبر POST
+            val sourcesHeaders = clientHints + mapOf(
+                "X-Csrf-Token" to csrfToken,
+                "Accept" to "application/json",
+                "Origin" to "https://witanime.site",
+                "Referer" to data,
+                "Sec-Fetch-Dest" to "empty",
+                "Sec-Fetch-Mode" to "cors",
+                "Sec-Fetch-Site" to "same-origin"
+            )
 
-            fun parseJsonSources(jsonObj: JSONObject) {
-                val keys = jsonObj.keys()
-                while (keys.hasNext()) {
-                    val key = keys.next()
-                    val value = jsonObj.opt(key)
-                    when (value) {
-                        is String -> {
-                            if (key.contains("url", ignoreCase = true) || 
-                                key.contains("src", ignoreCase = true) || 
-                                key.contains("link", ignoreCase = true) || 
-                                key.contains("file", ignoreCase = true)) {
-                                if (value.isNotBlank() && value.startsWith("http")) {
-                                    extractedUrls.add(value)
-                                }
-                            }
-                        }
-                        is JSONObject -> parseJsonSources(value)
-                        is JSONArray -> {
-                            for (i in 0 until value.length()) {
-                                val item = value.opt(i)
-                                if (item is JSONObject) parseJsonSources(item)
-                                else if (item is String) {
-                                    if (item.isNotBlank() && item.startsWith("http")) {
-                                        extractedUrls.add(item)
-                                    }
-                                }
-                            }
+            val sourcesRes = app.post(sourcesUrl, headers = sourcesHeaders)
+            val json = JSONObject(sourcesRes.text)
+
+            val players = json.optJSONObject("players")
+            val downloads = json.optJSONObject("downloads")
+
+            data class ServerItem(val quality: String, val label: String, val token: String, val isStream: Boolean)
+            val allServers = mutableListOf<ServerItem>()
+
+            // ترتيب الجودات (FHD ثم HD ثم SD)
+            val qualityOrder = listOf("FHD", "HD", "SD")
+
+            // تجميع سيرفرات المشاهدة
+            players?.let { p ->
+                val keys = qualityOrder + p.keys().asSequence().toList()
+                for (q in keys.distinct()) {
+                    val arr = p.optJSONArray(q) ?: continue
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.optJSONObject(i) ?: continue
+                        val token = obj.optString("token")
+                        val label = obj.optString("label", "Server")
+                        if (token.isNotBlank()) {
+                            allServers.add(ServerItem(q, label, token, true))
                         }
                     }
                 }
             }
 
-            if (apiResponse.trim().startsWith("{")) {
-                parseJsonSources(JSONObject(apiResponse))
-            } else if (apiResponse.trim().startsWith("[")) {
-                val jsonArray = JSONArray(apiResponse)
-                for (i in 0 until jsonArray.length()) {
-                    val item = jsonArray.optJSONObject(i) ?: continue
-                    parseJsonSources(item)
+            // تجميع سيرفرات التنزيل
+            downloads?.let { d ->
+                val keys = qualityOrder + d.keys().asSequence().toList()
+                for (q in keys.distinct()) {
+                    val arr = d.optJSONArray(q) ?: continue
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.optJSONObject(i) ?: continue
+                        val token = obj.optString("token")
+                        val label = obj.optString("label", "Download")
+                        if (token.isNotBlank()) {
+                            allServers.add(ServerItem(q, label, token, false))
+                        }
+                    }
                 }
             }
 
-            val distinctUrls = extractedUrls.distinct()
-            supervisorScope {
-                distinctUrls.map { url ->
-                    async(Dispatchers.IO) {
-                        try {
-                            if (url.contains("mega.nz")) {
-                                val dummyUrl = "https://raw.githubusercontent.com/Anarios/Cloudstream/master/app/src/main/res/raw/blank.mp4#mega-webview://$url"
-                                callback(
-                                    newExtractorLink(
-                                        name = "Mega (WebView)",
-                                        source = "WitAnime",
-                                        url = dummyUrl
-                                    ) {
-                                        this.referer = url
-                                        this.quality = 10
-                                        this.type = ExtractorLinkType.VIDEO
-                                    }
-                                )
-                            } else {
-                                loadExtractor(url, data, subtitleCallback, callback)
-                            }
-                        } catch (e: Exception) {}
+            // ===> وضع حد أقصى 10 سيرفرات فقط كما طلبت <===
+            val limitedServers = allServers.take(10)
+
+            val gateHeaders = clientHints + mapOf(
+                "Host" to "witanime.site",
+                "Upgrade-Insecure-Requests" to "1",
+                "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8",
+                "Sec-Fetch-Site" to "same-origin",
+                "Sec-Fetch-Mode" to "navigate",
+                "Sec-Fetch-User" to "?1",
+                "Sec-Fetch-Dest" to "iframe",
+                "Referer" to data
+            )
+
+            // 4. المرور على السيرفرات العشرة: تفعيل صلاحية السيرفر ثم طلب البوابة مباشرة
+            for (server in limitedServers) {
+                try {
+                    val sourceEndpoint = if (server.isStream) "stream-source" else "download-source"
+                    val gateEndpoint = if (server.isStream) "stream-gate" else "download-gate"
+
+                    val sourceUrl = "https://witanime.site/watch/$sourceEndpoint/${server.token}"
+                    val gateUrl = "https://witanime.site/watch/$gateEndpoint/${server.token}"
+
+                    // أ) إرسال طلب التفعيل المسبق
+                    app.post(sourceUrl, headers = sourcesHeaders)
+
+                    // ب) إرسال طلب البوابة مباشرة والتقاط كود 302
+                    val gateRes = app.get(gateUrl, headers = gateHeaders, followRedirects = false)
+                    var embedUrl = gateRes.headers["location"] ?: gateRes.headers["Location"]
+
+                    if (embedUrl.isNullOrBlank() && gateRes.text.isNotBlank()) {
+                        val metaMatch = Regex("""url=['"]([^'"]+)['"]""").find(gateRes.text)
+                            ?: Regex("""href=["'](https?://[^"']+)["']""").find(gateRes.text)
+                        embedUrl = metaMatch?.groupValues?.get(1)
                     }
-                }.awaitAll()
+
+                    if (!embedUrl.isNullOrBlank() && embedUrl.startsWith("http")) {
+                        val displayName = "${server.label} (${server.quality})"
+                        
+                        if (embedUrl.contains("mega.nz")) {
+                            val dummyUrl = "https://raw.githubusercontent.com/Anarios/Cloudstream/master/app/src/main/res/raw/blank.mp4#mega-webview://$embedUrl"
+                            callback(
+                                newExtractorLink(
+                                    name = "$displayName [WebView]",
+                                    source = "WitAnime",
+                                    url = dummyUrl
+                                ) {
+                                    this.referer = embedUrl
+                                    this.quality = Qualities.Unknown.value
+                                    this.type = ExtractorLinkType.VIDEO
+                                }
+                            )
+                        } else {
+                            loadExtractor(embedUrl, data, subtitleCallback, callback)
+                        }
+                    }
+
+                    // مهلة بسيطة بين كل سيرفر لتجنب الحظر
+                    delay(300)
+                } catch (e: Exception) {
+                    logError(e)
+                }
             }
 
-            return true
+            true
         } catch (e: Exception) {
             logError(e)
-            return false
+            false
         }
     }
 }
