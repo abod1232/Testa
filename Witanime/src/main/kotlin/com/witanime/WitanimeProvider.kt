@@ -24,7 +24,7 @@ import org.json.JSONObject
 
 class WitAnime : MainAPI() {
     override var mainUrl = "https://witanime.site"
-    override var name = "WitAnime1"
+    override var name = "WitAnime"
     override val hasMainPage = true
     override var lang = "ar"
 
