@@ -32,7 +32,6 @@ class WitAnime : MainAPI() {
     override var lang = "ar"
 
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie)
-    
     private val customUserAgent =
         "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Mobile Safari/537.36"
 
@@ -478,6 +477,7 @@ class WitAnime : MainAPI() {
                 val csrfToken = Regex("""name=['"]csrf-token['"]\s+content=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: Regex("""data-csrf=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: return@withContext false
+                delay(3000)
                 val sourcesPattern = Regex("""sourcesUrl:\s*['"]([^'"]+)['"]""")
                 val rawSources = sourcesPattern.find(pageHtml)?.groupValues?.get(1)?.replace("\\/", "/")
                     ?: "${data.trimEnd('/')}/sources"
@@ -540,7 +540,7 @@ class WitAnime : MainAPI() {
                     }
                 }
                 val limitedServers = allServers.take(10)
-                for (server in limitedServers) {
+                for ((idx, server) in limitedServers.withIndex()) {
                     try {
                         val sourceEndpoint = if (server.isStream) "stream-source" else "download-source"
                         val gateEndpoint = if (server.isStream) "stream-gate" else "download-gate"
@@ -554,6 +554,7 @@ class WitAnime : MainAPI() {
                                 header("X-Csrf-Token", csrfToken)
                                 header("Accept", "application/json")
                                 header("Origin", "https://witanime.site")
+                                
                                 header("Sec-Fetch-Dest", "empty")
                                 header("Sec-Fetch-Mode", "cors")
                                 header("Sec-Fetch-Site", "same-origin")
