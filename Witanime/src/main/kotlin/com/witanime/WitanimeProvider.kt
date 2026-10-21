@@ -32,6 +32,8 @@ class WitAnime : MainAPI() {
     override var lang = "ar"
 
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie)
+    
+    // الهيدرز المطابقة تماماً لكود بايثون
     private val customUserAgent =
         "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Mobile Safari/537.36"
 
@@ -303,6 +305,10 @@ class WitAnime : MainAPI() {
     init {
         PlayerAccess.startMonitoring()
     }
+
+    // ==========================================
+    // 1. الصفحة الرئيسية (Main Page)
+    // ==========================================
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(mainUrl, headers = baseHeadersMap).document
         val homePageList = ArrayList<HomePageList>()
@@ -352,6 +358,10 @@ class WitAnime : MainAPI() {
 
         return newHomePageResponse(homePageList)
     }
+
+    // ==========================================
+    // 2. البحث (Search)
+    // ==========================================
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/search?q=$query"
         val document = app.get(url, headers = baseHeadersMap).document
@@ -367,6 +377,10 @@ class WitAnime : MainAPI() {
             }
         }.distinctBy { it.url }
     }
+
+    // ==========================================
+    // 3. جلب تفاصيل الأنمي والحلقات (Load)
+    // ==========================================
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url, headers = baseHeadersMap).document
 
@@ -433,6 +447,10 @@ class WitAnime : MainAPI() {
             addEpisodes(DubStatus.Subbed, episodes.distinctBy { it.data })
         }
     }
+
+    // ==========================================
+    // 4. جلب الروابط وتفعيل السيرفرات (مطابق 100% لكود بايثون)
+    // ==========================================
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -441,6 +459,7 @@ class WitAnime : MainAPI() {
     ): Boolean {
         return withContext(Dispatchers.IO) {
             try {
+                // عميل OkHttp بدون تحويل تلقائي (يعادل allow_redirects=False في بايثون)
                 val directClient = app.baseClient.newBuilder()
                     .followRedirects(false)
                     .followSslRedirects(false)
@@ -462,6 +481,8 @@ class WitAnime : MainAPI() {
 
                 fun makeCookieHeader(): String =
                     cookieStore.entries.joinToString("; ") { "${it.key}=${it.value}" }
+
+                // 1. فتح الصفحة وسحب التوكن الأولي
                 val pageReq = Request.Builder()
                     .url(data)
                     .apply {
@@ -477,7 +498,11 @@ class WitAnime : MainAPI() {
                 val csrfToken = Regex("""name=['"]csrf-token['"]\s+content=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: Regex("""data-csrf=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: return@withContext false
+
+                // انتظار 3 ثوانٍ قبل طلب السيرفرات تماماً كما في بايثون
                 delay(3000)
+
+                // 2. طلب مصفوفة السيرفرات عبر POST
                 val sourcesPattern = Regex("""sourcesUrl:\s*['"]([^'"]+)['"]""")
                 val rawSources = sourcesPattern.find(pageHtml)?.groupValues?.get(1)?.replace("\\/", "/")
                     ?: "${data.trimEnd('/')}/sources"
@@ -490,7 +515,6 @@ class WitAnime : MainAPI() {
                         header("X-Csrf-Token", csrfToken)
                         header("Accept", "application/json")
                         header("Origin", "https://witanime.site")
-                        
                         header("Sec-Fetch-Dest", "empty")
                         header("Sec-Fetch-Mode", "cors")
                         header("Sec-Fetch-Site", "same-origin")
@@ -511,6 +535,8 @@ class WitAnime : MainAPI() {
                 val allServers = mutableListOf<ServerItem>()
 
                 val qualityOrder = listOf("FHD", "HD", "SD")
+
+                // تجميع سيرفرات المشاهدة
                 players?.let { p ->
                     val keys = qualityOrder + p.keys().asSequence().toList()
                     for (q in keys.distinct()) {
@@ -525,6 +551,8 @@ class WitAnime : MainAPI() {
                         }
                     }
                 }
+
+                // تجميع سيرفرات التنزيل
                 downloads?.let { d ->
                     val keys = qualityOrder + d.keys().asSequence().toList()
                     for (q in keys.distinct()) {
@@ -539,7 +567,11 @@ class WitAnime : MainAPI() {
                         }
                     }
                 }
+
+                // حد أقصى 10 سيرفرات فقط
                 val limitedServers = allServers.take(10)
+
+                // 3. المرور على السيرفرات: إرسال الإعدادات ثم طلب البوابة مباشرة، والفاصل 3 ثوانٍ قبل السيرفر التالي
                 for ((idx, server) in limitedServers.withIndex()) {
                     try {
                         val sourceEndpoint = if (server.isStream) "stream-source" else "download-source"
@@ -547,6 +579,8 @@ class WitAnime : MainAPI() {
 
                         val sourceUrl = "https://witanime.site/watch/$sourceEndpoint/${server.token}"
                         val gateUrl = "https://witanime.site/watch/$gateEndpoint/${server.token}"
+
+                        // أ) إرسال طلب التفعيل المسبق (POST)
                         val sReq = Request.Builder()
                             .url(sourceUrl)
                             .apply {
@@ -566,6 +600,8 @@ class WitAnime : MainAPI() {
                         val sRes = directClient.newCall(sReq).execute()
                         saveCookiesFrom(sRes)
                         sRes.close()
+
+                        // ب) طلب البوابة فوراً بدون انتظار (GET مع allow_redirects=false)
                         val gReq = Request.Builder()
                             .url(gateUrl)
                             .apply {
@@ -587,6 +623,8 @@ class WitAnime : MainAPI() {
 
                         val gRes = directClient.newCall(gReq).execute()
                         saveCookiesFrom(gRes)
+
+                        // التقاط رابط Location المباشر (كود 302)
                         var embedUrl = gRes.header("Location") ?: gRes.header("location")
 
                         if (embedUrl.isNullOrBlank()) {
@@ -596,6 +634,8 @@ class WitAnime : MainAPI() {
                             embedUrl = match?.groupValues?.get(1)
                         }
                         gRes.close()
+
+                        // إرسال الرابط إلى المشغل
                         if (!embedUrl.isNullOrBlank() && embedUrl.startsWith("http")) {
                             val displayName = "${server.label} (${server.quality})"
                             
@@ -616,8 +656,14 @@ class WitAnime : MainAPI() {
                                 loadExtractor(embedUrl, data, subtitleCallback, callback)
                             }
                         }
+
+                        // ج) الانتظار 3 ثوانٍ قبل الانتقال للسيرفر التالي (مثل كود بايثون تماماً)
+                        if (idx < limitedServers.size - 1) {
+                            delay(3000)
+                        }
                     } catch (e: Exception) {
                         logError(e)
+                        delay(3000)
                     }
                 }
 
