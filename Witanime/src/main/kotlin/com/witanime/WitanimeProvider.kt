@@ -520,7 +520,7 @@ class WitAnime : MainAPI() {
                         header("X-Csrf-Token", csrfToken)
                         header("Accept", "application/json")
                         header("Origin", "https://witanime.site")
-                        header("Referer", data)
+                        
                         header("Sec-Fetch-Dest", "empty")
                         header("Sec-Fetch-Mode", "cors")
                         header("Sec-Fetch-Site", "same-origin")
