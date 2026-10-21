@@ -490,7 +490,7 @@ class WitAnime : MainAPI() {
                         header("X-Csrf-Token", csrfToken)
                         header("Accept", "application/json")
                         header("Origin", "https://witanime.site")
-                        header("Referer", data)
+                        
                         header("Sec-Fetch-Dest", "empty")
                         header("Sec-Fetch-Mode", "cors")
                         header("Sec-Fetch-Site", "same-origin")
@@ -554,7 +554,7 @@ class WitAnime : MainAPI() {
                                 header("X-Csrf-Token", csrfToken)
                                 header("Accept", "application/json")
                                 header("Origin", "https://witanime.site")
-                                header("Referer", data)
+                                
                                 header("Sec-Fetch-Dest", "empty")
                                 header("Sec-Fetch-Mode", "cors")
                                 header("Sec-Fetch-Site", "same-origin")
@@ -580,7 +580,6 @@ class WitAnime : MainAPI() {
                                 header("Sec-Fetch-Mode", "navigate")
                                 header("Sec-Fetch-User", "?1")
                                 header("Sec-Fetch-Dest", "iframe")
-                                header("Referer", data)
                                 header("Cookie", makeCookieHeader())
                             }
                             .get()
