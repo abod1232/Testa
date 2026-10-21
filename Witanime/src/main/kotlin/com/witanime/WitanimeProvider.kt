@@ -32,6 +32,7 @@ class WitAnime : MainAPI() {
     override var lang = "ar"
 
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie)
+    
     private val customUserAgent =
         "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Mobile Safari/537.36"
 
@@ -303,6 +304,10 @@ class WitAnime : MainAPI() {
     init {
         PlayerAccess.startMonitoring()
     }
+
+    // ==========================================
+    // 1. الصفحة الرئيسية (Main Page)
+    // ==========================================
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(mainUrl, headers = baseHeadersMap).document
         val homePageList = ArrayList<HomePageList>()
@@ -352,6 +357,10 @@ class WitAnime : MainAPI() {
 
         return newHomePageResponse(homePageList)
     }
+
+    // ==========================================
+    // 2. البحث (Search)
+    // ==========================================
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/search?q=$query"
         val document = app.get(url, headers = baseHeadersMap).document
@@ -367,42 +376,62 @@ class WitAnime : MainAPI() {
             }
         }.distinctBy { it.url }
     }
+
+    // ==========================================
+    // 3. جلب تفاصيل الأنمي والحلقات (Load)
+    // ==========================================
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url, headers = baseHeadersMap).document
 
-        val jsonLd = document.selectFirst("script[type='application/ld+json']")?.data()
-        val title = document.selectFirst("h1")?.text()?.trim() ?: ""
-        val poster = document.selectFirst("div.shrink-0 img")?.attr("src")
-            ?: document.selectFirst("meta[property='og:image']")?.attr("content")
-        val description = document.selectFirst("p.text-neutral-300")?.text()?.trim()
+        // 1. العنوان الصافي للأنمي
+        val title = document.selectFirst("a[href*='/anime/'] span[dir='ltr']")?.text()?.trim()
+            ?: document.selectFirst("h1 span[dir='ltr']")?.text()?.trim()
+            ?: document.selectFirst("meta[property='og:title']")?.attr("content")
+                ?.replace("مترجمة اون لاين", "")
+                ?.replace("الحلقة \\d+".toRegex(), "")
+                ?.replace("انمي", "")
+                ?.trim()
+            ?: ""
+
+        // 2. البوستر المباشر بدقة عالية
+        val poster = document.selectFirst("meta[property='og:image']")?.attr("content")
+            ?: document.selectFirst("div.relative img[alt*='$title']")?.attr("src")
+            ?: document.selectFirst("div.relative img")?.attr("src")
+
+        // 3. القصة الحقيقية (المحدد الدقيق p.leading-relaxed)
+        val description = document.selectFirst("p.leading-relaxed")?.text()?.trim()
+            ?: document.selectFirst("meta[property='og:description']")?.attr("content")
 
         val isMovie = url.contains("/movie/")
         val tvType = if (isMovie) TvType.AnimeMovie else TvType.Anime
 
+        // 4. التصنيفات والفئات (Genres)
         val genres = mutableListOf<String>()
-        if (!jsonLd.isNullOrBlank()) {
-            try {
-                val jsonObj = JSONObject(jsonLd)
-                if (jsonObj.has("genre")) {
-                    val genreArray = jsonObj.getJSONArray("genre")
-                    for (i in 0 until genreArray.length()) {
-                        genres.add(genreArray.getString(i))
-                    }
-                }
-            } catch (e: Exception) {}
+        document.select("div.flex-wrap.gap-2 span.rounded-full").forEach {
+            val tag = it.text().trim()
+            if (tag.isNotEmpty()) genres.add(tag)
         }
-        if (genres.isEmpty()) {
-            document.select("div.flex.flex-wrap.gap-2 span.rounded-full").forEach {
-                genres.add(it.text().trim())
+
+        // 5. استخراج البيانات الإضافية (السنة، الاستوديو، الحالة، التقييم)
+        var year: Int? = null
+        var status = ShowStatus.Ongoing
+
+        if (document.selectFirst("span:contains(مكتمل)") != null) {
+            status = ShowStatus.Completed
+        }
+
+        document.select("div.grid > div").forEach { box ->
+            val label = box.selectFirst("span.text-neutral-400")?.text()?.trim() ?: ""
+            val value = box.selectFirst("p")?.text()?.trim() ?: ""
+            if (label.contains("السنة")) {
+                year = value.toIntOrNull()
             }
         }
 
-        val status = if (document.selectFirst("span:contains(مكتمل)") != null) {
-            ShowStatus.Completed
-        } else {
-            ShowStatus.Ongoing
-        }
+        val ratingText = document.selectFirst("span[dir='ltr']:has(svg)")?.text()?.trim()
+        val rating = ratingText?.toFloatOrNull()
 
+        // 6. استخراج الحلقات
         val episodes = mutableListOf<Episode>()
 
         if (isMovie) {
@@ -410,16 +439,20 @@ class WitAnime : MainAPI() {
             episodes.add(newEpisode(fixUrl(watchUrl)) {
                 this.name = title
                 this.episode = 1
+                this.posterUrl = poster
             })
         } else {
             document.select("div[data-episode-list] a[href*='/watch/']").forEach { epTag ->
                 val epHref = epTag.attr("href")
-                val epText = epTag.selectFirst("span:contains(الحلقة)")?.text() ?: epTag.text()
-                val epNum = Regex("""\d+""").find(epHref.substringAfterLast("/"))?.value?.toIntOrNull()
+                val epNum = Regex("""/(\d+)$""").find(epHref)?.groupValues?.get(1)?.toIntOrNull()
+                    ?: Regex("""\d+""").find(epTag.text())?.value?.toIntOrNull()
+
+                val epThumb = epTag.selectFirst("img")?.attr("src")
 
                 episodes.add(newEpisode(fixUrl(epHref)) {
-                    this.name = epText.ifBlank { "الحلقة $epNum" }
+                    this.name = "الحلقة ${epNum ?: ""}".trim()
                     this.episode = epNum
+                    this.posterUrl = epThumb ?: poster
                 })
             }
             episodes.sortBy { it.episode }
@@ -429,10 +462,16 @@ class WitAnime : MainAPI() {
             this.posterUrl = poster
             this.plot = description
             this.tags = genres
+            this.year = year
             this.showStatus = status
+            this.rating = rating?.times(1000)?.toInt()
             addEpisodes(DubStatus.Subbed, episodes.distinctBy { it.data })
         }
     }
+
+    // ==========================================
+    // 4. جلب الروابط وتفعيل السيرفرات (10 سيرفرات كحد أقصى)
+    // ==========================================
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -462,6 +501,8 @@ class WitAnime : MainAPI() {
 
                 fun makeCookieHeader(): String =
                     cookieStore.entries.joinToString("; ") { "${it.key}=${it.value}" }
+
+                // 1. فتح الصفحة وسحب التوكن والكوكيز
                 val pageReq = Request.Builder()
                     .url(data)
                     .apply {
@@ -477,7 +518,8 @@ class WitAnime : MainAPI() {
                 val csrfToken = Regex("""name=['"]csrf-token['"]\s+content=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: Regex("""data-csrf=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: return@withContext false
-                delay(3000)
+
+                // 2. طلب مصفوفة السيرفرات عبر POST
                 val sourcesPattern = Regex("""sourcesUrl:\s*['"]([^'"]+)['"]""")
                 val rawSources = sourcesPattern.find(pageHtml)?.groupValues?.get(1)?.replace("\\/", "/")
                     ?: "${data.trimEnd('/')}/sources"
@@ -490,6 +532,7 @@ class WitAnime : MainAPI() {
                         header("X-Csrf-Token", csrfToken)
                         header("Accept", "application/json")
                         header("Origin", "https://witanime.site")
+                        header("Referer", data)
                         header("Sec-Fetch-Dest", "empty")
                         header("Sec-Fetch-Mode", "cors")
                         header("Sec-Fetch-Site", "same-origin")
@@ -510,6 +553,8 @@ class WitAnime : MainAPI() {
                 val allServers = mutableListOf<ServerItem>()
 
                 val qualityOrder = listOf("FHD", "HD", "SD")
+
+                // تجميع سيرفرات المشاهدة
                 players?.let { p ->
                     val keys = qualityOrder + p.keys().asSequence().toList()
                     for (q in keys.distinct()) {
@@ -524,6 +569,8 @@ class WitAnime : MainAPI() {
                         }
                     }
                 }
+
+                // تجميع سيرفرات التنزيل
                 downloads?.let { d ->
                     val keys = qualityOrder + d.keys().asSequence().toList()
                     for (q in keys.distinct()) {
@@ -538,14 +585,20 @@ class WitAnime : MainAPI() {
                         }
                     }
                 }
+
+                // حد أقصى 10 سيرفرات
                 val limitedServers = allServers.take(10)
-                for ((idx, server) in limitedServers.withIndex()) {
+
+                // 3. المرور على السيرفرات مباشرة
+                for (server in limitedServers) {
                     try {
                         val sourceEndpoint = if (server.isStream) "stream-source" else "download-source"
                         val gateEndpoint = if (server.isStream) "stream-gate" else "download-gate"
 
                         val sourceUrl = "https://witanime.site/watch/$sourceEndpoint/${server.token}"
                         val gateUrl = "https://witanime.site/watch/$gateEndpoint/${server.token}"
+
+                        // أ) تفعيل صلاحية السيرفر (بدون Referer)
                         val sReq = Request.Builder()
                             .url(sourceUrl)
                             .apply {
@@ -553,7 +606,6 @@ class WitAnime : MainAPI() {
                                 header("X-Csrf-Token", csrfToken)
                                 header("Accept", "application/json")
                                 header("Origin", "https://witanime.site")
-                                
                                 header("Sec-Fetch-Dest", "empty")
                                 header("Sec-Fetch-Mode", "cors")
                                 header("Sec-Fetch-Site", "same-origin")
@@ -565,6 +617,8 @@ class WitAnime : MainAPI() {
                         val sRes = directClient.newCall(sReq).execute()
                         saveCookiesFrom(sRes)
                         sRes.close()
+
+                        // ب) طلب البوابة (بدون Referer)
                         val gReq = Request.Builder()
                             .url(gateUrl)
                             .apply {
@@ -574,7 +628,7 @@ class WitAnime : MainAPI() {
                                 header("Sec-Ch-Ua-Mobile", "?1")
                                 header("Sec-Ch-Ua-Platform", "\"Android\"")
                                 header("Upgrade-Insecure-Requests", "1")
-                                header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
+                                header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8")
                                 header("Sec-Fetch-Site", "same-origin")
                                 header("Sec-Fetch-Mode", "navigate")
                                 header("Sec-Fetch-User", "?1")
@@ -586,6 +640,7 @@ class WitAnime : MainAPI() {
 
                         val gRes = directClient.newCall(gReq).execute()
                         saveCookiesFrom(gRes)
+
                         var embedUrl = gRes.header("Location") ?: gRes.header("location")
 
                         if (embedUrl.isNullOrBlank()) {
@@ -595,6 +650,7 @@ class WitAnime : MainAPI() {
                             embedUrl = match?.groupValues?.get(1)
                         }
                         gRes.close()
+
                         if (!embedUrl.isNullOrBlank() && embedUrl.startsWith("http")) {
                             val displayName = "${server.label} (${server.quality})"
                             
@@ -615,12 +671,8 @@ class WitAnime : MainAPI() {
                                 loadExtractor(embedUrl, data, subtitleCallback, callback)
                             }
                         }
-                        if (idx < limitedServers.size - 1) {
-                            delay(3000)
-                        }
                     } catch (e: Exception) {
                         logError(e)
-                        delay(3000)
                     }
                 }
 
