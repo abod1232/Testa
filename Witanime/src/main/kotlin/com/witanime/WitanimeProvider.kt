@@ -304,10 +304,6 @@ class WitAnime : MainAPI() {
     init {
         PlayerAccess.startMonitoring()
     }
-
-    // ==========================================
-    // 1. الصفحة الرئيسية (Main Page)
-    // ==========================================
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(mainUrl, headers = baseHeadersMap).document
         val homePageList = ArrayList<HomePageList>()
@@ -357,10 +353,6 @@ class WitAnime : MainAPI() {
 
         return newHomePageResponse(homePageList)
     }
-
-    // ==========================================
-    // 2. البحث (Search)
-    // ==========================================
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/search?q=$query"
         val document = app.get(url, headers = baseHeadersMap).document
@@ -376,14 +368,8 @@ class WitAnime : MainAPI() {
             }
         }.distinctBy { it.url }
     }
-
-    // ==========================================
-    // 3. جلب تفاصيل الأنمي والحلقات (Load)
-    // ==========================================
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url, headers = baseHeadersMap).document
-
-        // 1. العنوان الصافي للأنمي
         val title = document.selectFirst("a[href*='/anime/'] span[dir='ltr']")?.text()?.trim()
             ?: document.selectFirst("h1 span[dir='ltr']")?.text()?.trim()
             ?: document.selectFirst("meta[property='og:title']")?.attr("content")
@@ -392,27 +378,19 @@ class WitAnime : MainAPI() {
                 ?.replace("انمي", "")
                 ?.trim()
             ?: ""
-
-        // 2. البوستر المباشر بدقة عالية
         val poster = document.selectFirst("meta[property='og:image']")?.attr("content")
             ?: document.selectFirst("div.relative img[alt*='$title']")?.attr("src")
             ?: document.selectFirst("div.relative img")?.attr("src")
-
-        // 3. القصة الحقيقية (المحدد الدقيق p.leading-relaxed)
         val description = document.selectFirst("p.leading-relaxed")?.text()?.trim()
             ?: document.selectFirst("meta[property='og:description']")?.attr("content")
 
         val isMovie = url.contains("/movie/")
         val tvType = if (isMovie) TvType.AnimeMovie else TvType.Anime
-
-        // 4. التصنيفات والفئات (Genres)
         val genres = mutableListOf<String>()
         document.select("div.flex-wrap.gap-2 span.rounded-full").forEach {
             val tag = it.text().trim()
             if (tag.isNotEmpty()) genres.add(tag)
         }
-
-        // 5. استخراج البيانات الإضافية (السنة، الاستوديو، الحالة، التقييم)
         var year: Int? = null
         var status = ShowStatus.Ongoing
 
@@ -430,8 +408,6 @@ class WitAnime : MainAPI() {
 
         val ratingText = document.selectFirst("span[dir='ltr']:has(svg)")?.text()?.trim()
         val rating = ratingText?.toFloatOrNull()
-
-        // 6. استخراج الحلقات
         val episodes = mutableListOf<Episode>()
 
         if (isMovie) {
@@ -468,10 +444,6 @@ class WitAnime : MainAPI() {
             addEpisodes(DubStatus.Subbed, episodes.distinctBy { it.data })
         }
     }
-
-    // ==========================================
-    // 4. جلب الروابط وتفعيل السيرفرات (10 سيرفرات كحد أقصى)
-    // ==========================================
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -501,8 +473,6 @@ class WitAnime : MainAPI() {
 
                 fun makeCookieHeader(): String =
                     cookieStore.entries.joinToString("; ") { "${it.key}=${it.value}" }
-
-                // 1. فتح الصفحة وسحب التوكن والكوكيز
                 val pageReq = Request.Builder()
                     .url(data)
                     .apply {
@@ -518,8 +488,6 @@ class WitAnime : MainAPI() {
                 val csrfToken = Regex("""name=['"]csrf-token['"]\s+content=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: Regex("""data-csrf=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: return@withContext false
-
-                // 2. طلب مصفوفة السيرفرات عبر POST
                 val sourcesPattern = Regex("""sourcesUrl:\s*['"]([^'"]+)['"]""")
                 val rawSources = sourcesPattern.find(pageHtml)?.groupValues?.get(1)?.replace("\\/", "/")
                     ?: "${data.trimEnd('/')}/sources"
@@ -553,8 +521,6 @@ class WitAnime : MainAPI() {
                 val allServers = mutableListOf<ServerItem>()
 
                 val qualityOrder = listOf("FHD", "HD", "SD")
-
-                // تجميع سيرفرات المشاهدة
                 players?.let { p ->
                     val keys = qualityOrder + p.keys().asSequence().toList()
                     for (q in keys.distinct()) {
@@ -569,8 +535,6 @@ class WitAnime : MainAPI() {
                         }
                     }
                 }
-
-                // تجميع سيرفرات التنزيل
                 downloads?.let { d ->
                     val keys = qualityOrder + d.keys().asSequence().toList()
                     for (q in keys.distinct()) {
@@ -585,11 +549,7 @@ class WitAnime : MainAPI() {
                         }
                     }
                 }
-
-                // حد أقصى 10 سيرفرات
                 val limitedServers = allServers.take(10)
-
-                // 3. المرور على السيرفرات مباشرة
                 for (server in limitedServers) {
                     try {
                         val sourceEndpoint = if (server.isStream) "stream-source" else "download-source"
@@ -597,8 +557,6 @@ class WitAnime : MainAPI() {
 
                         val sourceUrl = "https://witanime.site/watch/$sourceEndpoint/${server.token}"
                         val gateUrl = "https://witanime.site/watch/$gateEndpoint/${server.token}"
-
-                        // أ) تفعيل صلاحية السيرفر (بدون Referer)
                         val sReq = Request.Builder()
                             .url(sourceUrl)
                             .apply {
@@ -617,8 +575,6 @@ class WitAnime : MainAPI() {
                         val sRes = directClient.newCall(sReq).execute()
                         saveCookiesFrom(sRes)
                         sRes.close()
-
-                        // ب) طلب البوابة (بدون Referer)
                         val gReq = Request.Builder()
                             .url(gateUrl)
                             .apply {
