@@ -19,6 +19,7 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.utils.*
 import kotlinx.coroutines.*
+import okhttp3.Interceptor
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -29,11 +30,21 @@ class WitAnime : MainAPI() {
     override var lang = "ar"
 
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie)
-    private val userAgent =
+    
+    // الـ User-Agent الحصري المطلوب
+    private val customUserAgent =
         "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Mobile Safari/537.36"
 
+    // اعتراض أي طلب وحذف أي User-Agent قديم للويندوز واستبداله بالـ Android حصرياً
+    private val userAgentInterceptor = Interceptor { chain ->
+        val original = chain.request()
+        val request = original.newBuilder()
+            .header("User-Agent", customUserAgent) // .header تحذف وتستبدل أي User-Agent مكرر
+            .build()
+        chain.proceed(request)
+    }
+
     private val clientHints = mapOf(
-        "User-Agent" to userAgent,
         "Sec-Ch-Ua" to "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
         "Sec-Ch-Ua-Mobile" to "?1",
         "Sec-Ch-Ua-Platform" to "\"Android\""
@@ -300,8 +311,12 @@ class WitAnime : MainAPI() {
     init {
         PlayerAccess.startMonitoring()
     }
+
+    // ==========================================
+    // 1. الصفحة الرئيسية (Main Page)
+    // ==========================================
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = app.get(mainUrl, headers = clientHints).document
+        val document = app.get(mainUrl, headers = clientHints, interceptor = userAgentInterceptor).document
         val homePageList = ArrayList<HomePageList>()
 
         document.select("section").forEach { section ->
@@ -349,9 +364,13 @@ class WitAnime : MainAPI() {
 
         return newHomePageResponse(homePageList)
     }
+
+    // ==========================================
+    // 2. البحث (Search)
+    // ==========================================
     override suspend fun search(query: String): List<SearchResponse> {
         val url = "$mainUrl/search?q=$query"
-        val document = app.get(url, headers = clientHints).document
+        val document = app.get(url, headers = clientHints, interceptor = userAgentInterceptor).document
 
         return document.select("div.grid a[href*='/anime/'], div.grid a[href*='/movie/']").mapNotNull { card ->
             val href = card.attr("href")
@@ -364,8 +383,12 @@ class WitAnime : MainAPI() {
             }
         }.distinctBy { it.url }
     }
+
+    // ==========================================
+    // 3. جلب تفاصيل الأنمي والحلقات (Load)
+    // ==========================================
     override suspend fun load(url: String): LoadResponse {
-        val document = app.get(url, headers = clientHints).document
+        val document = app.get(url, headers = clientHints, interceptor = userAgentInterceptor).document
 
         val jsonLd = document.selectFirst("script[type='application/ld+json']")?.data()
         val title = document.selectFirst("h1")?.text()?.trim() ?: ""
@@ -430,7 +453,10 @@ class WitAnime : MainAPI() {
             addEpisodes(DubStatus.Subbed, episodes.distinctBy { it.data })
         }
     }
-            
+
+    // ==========================================
+    // 4. جلب الروابط وتفعيل السيرفرات (10 سيرفرات كحد أقصى)
+    // ==========================================
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -438,25 +464,28 @@ class WitAnime : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         return try {
-            val watchRes = app.get(data, headers = clientHints)
+            // 1. فتح الصفحة وسحب التوكن والكوكيز مع استبدال الـ User-Agent
+            val watchRes = app.get(data, headers = clientHints, interceptor = userAgentInterceptor)
             val watchHtml = watchRes.text
             val doc = watchRes.document
+
             val currentCookies = watchRes.cookies.toMutableMap()
 
             val csrfToken = doc.selectFirst("meta[name='csrf-token']")?.attr("content")
                 ?: Regex("""csrf-token["']?\s+content=["']([^"']+)["']""").find(watchHtml)?.groupValues?.get(1)
                 ?: Regex("""data-csrf=["']([^"']+)["']""").find(watchHtml)?.groupValues?.get(1)
                 ?: return false
+
+            // 2. استخراج sourcesUrl
             val sourcesPattern = Regex("""sourcesUrl:\s*['"]([^'"]+)['"]""")
             val rawSources = sourcesPattern.find(watchHtml)?.groupValues?.get(1)?.replace("\\/", "/")
                 ?: "${data.trimEnd('/')}/sources"
             val sourcesUrl = fixUrl(rawSources)
+
             fun makeCookieHeader(): String =
                 currentCookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
-            val sourcesHeaders = mapOf(
-                "Sec-Ch-Ua" to "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
-                "Sec-Ch-Ua-Mobile" to "?1",
-                "Sec-Ch-Ua-Platform" to "\"Android\"",
+
+            val sourcesHeaders = clientHints + mapOf(
                 "X-Csrf-Token" to csrfToken,
                 "Accept" to "application/json",
                 "Origin" to "https://witanime.site",
@@ -466,10 +495,13 @@ class WitAnime : MainAPI() {
                 "Sec-Fetch-Site" to "same-origin",
                 "Cookie" to makeCookieHeader()
             )
+
+            // إرسال POST مع Interceptor لاستبدال User-Agent الويندوز
             val sourcesRes = app.post(
                 sourcesUrl,
                 headers = sourcesHeaders,
-                cookies = currentCookies
+                cookies = currentCookies,
+                interceptor = userAgentInterceptor
             )
             currentCookies.putAll(sourcesRes.cookies)
 
@@ -481,6 +513,8 @@ class WitAnime : MainAPI() {
             val allServers = mutableListOf<ServerItem>()
 
             val qualityOrder = listOf("FHD", "HD", "SD")
+
+            // تجميع سيرفرات المشاهدة
             players?.let { p ->
                 val keys = qualityOrder + p.keys().asSequence().toList()
                 for (q in keys.distinct()) {
@@ -495,6 +529,8 @@ class WitAnime : MainAPI() {
                     }
                 }
             }
+
+            // تجميع سيرفرات التنزيل
             downloads?.let { d ->
                 val keys = qualityOrder + d.keys().asSequence().toList()
                 for (q in keys.distinct()) {
@@ -509,7 +545,10 @@ class WitAnime : MainAPI() {
                     }
                 }
             }
+
+            // حد أقصى 10 سيرفرات فقط
             val limitedServers = allServers.take(10)
+
             for (server in limitedServers) {
                 try {
                     val sourceEndpoint = if (server.isStream) "stream-source" else "download-source"
@@ -519,13 +558,19 @@ class WitAnime : MainAPI() {
                     val gateUrl = "https://witanime.site/watch/$gateEndpoint/${server.token}"
 
                     val currentReqHeaders = sourcesHeaders + mapOf("Cookie" to makeCookieHeader())
-                    val sRes = app.post(sourceUrl, headers = currentReqHeaders, cookies = currentCookies)
+
+                    // أ) إرسال طلب التفعيل المسبق
+                    val sRes = app.post(
+                        sourceUrl,
+                        headers = currentReqHeaders,
+                        cookies = currentCookies,
+                        interceptor = userAgentInterceptor
+                    )
                     currentCookies.putAll(sRes.cookies)
-                    val gateHeaders = mapOf(
+
+                    // ب) طلب البوابة
+                    val gateHeaders = clientHints + mapOf(
                         "Host" to "witanime.site",
-                        "Sec-Ch-Ua" to "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
-                        "Sec-Ch-Ua-Mobile" to "?1",
-                        "Sec-Ch-Ua-Platform" to "\"Android\"",
                         "Upgrade-Insecure-Requests" to "1",
                         "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8",
                         "Sec-Fetch-Site" to "same-origin",
@@ -536,8 +581,14 @@ class WitAnime : MainAPI() {
                         "Cookie" to makeCookieHeader()
                     )
 
-                    val gateRes = app.get(gateUrl, headers = gateHeaders, cookies = currentCookies)
+                    val gateRes = app.get(
+                        gateUrl,
+                        headers = gateHeaders,
+                        cookies = currentCookies,
+                        interceptor = userAgentInterceptor
+                    )
                     currentCookies.putAll(gateRes.cookies)
+
                     var embedUrl = if (gateRes.url != gateUrl && !gateRes.url.contains("witanime.site/watch/")) {
                         gateRes.url
                     } else {
