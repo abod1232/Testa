@@ -464,7 +464,6 @@ class WitAnime : MainAPI() {
                 "Sec-Fetch-Dest" to "empty",
                 "Sec-Fetch-Mode" to "cors",
                 "Sec-Fetch-Site" to "same-origin",
-                # إرسال الكوكيز يدوياً في الهيدر لضمان عدم ضياعها
                 "Cookie" to makeCookieHeader()
             )
             val sourcesRes = app.post(
