@@ -257,12 +257,6 @@ class AnimePhoenixProvider : MainAPI() {
         }
         return searchResults
     }
-
-    
-
-// ... داخل كلاس AnimePhoenixProvider ...
-
-    // دالة توليد التوقيع الرقمي HMAC-SHA256 كما في ملفات جافاسكريبت الموقع
     private fun computeSearchSignature(
         query: String,
         timestamp: Long,
@@ -289,8 +283,6 @@ class AnimePhoenixProvider : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         val searchLandingUrl = "$mainUrl/search/?q=${URLEncoder.encode(query, "UTF-8")}"
-        
-        // 1. استخراج الـ public_key والـ api_url من صفحة البحث
         val pageHtml = try {
             httpGet(searchLandingUrl).text
         } catch (e: Exception) {
@@ -304,12 +296,8 @@ class AnimePhoenixProvider : MainAPI() {
         val rawApiUrl = Regex(""""api_url"\s*:\s*"([^"]+)"""")
             .find(pageHtml)?.groupValues?.get(1)?.replace("\\/", "/")
             ?: "$mainUrl/api/search.php"
-
-        // 2. توليد الطابع الزمني والتوقيع الرقمي
         val ts = System.currentTimeMillis() / 1000
         val signature = computeSearchSignature(query = query, timestamp = ts, publicKey = publicKey)
-
-        // 3. بناء الرابط والهيدرز المطابقة لكود الموقع الأصلي
         val encodedQ = URLEncoder.encode(query, "UTF-8")
         val apiUrl = "$rawApiUrl?q=$encodedQ&type=all&sort=relevance&page=1&per_page=25&dropdown=0"
 
@@ -321,8 +309,6 @@ class AnimePhoenixProvider : MainAPI() {
                 put("X-PX-Signature", signature)
             }
         }
-
-        // 4. إرسال الطلب ومعالجة الـ JSON
         try {
             val responseText = app.get(apiUrl, headers = searchHeaders).text
             val json = JSONObject(responseText)
