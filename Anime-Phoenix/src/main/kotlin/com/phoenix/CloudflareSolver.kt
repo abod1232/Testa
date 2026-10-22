@@ -39,12 +39,12 @@ object CloudflareSolver {
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
-                webView.alpha = 1.0f
-webView.translationX = 0f
-webView.translationY = 0f
-webView.isFocusable = true
-webView.isFocusableInTouchMode = true
-webView.isClickable = true
+                webView.alpha = 0.01f // شفافية شبه كاملة لتجنب كشف الروبوتات
+                webView.translationX = 10000f // إزاحة النافذة خارج الشاشة تماماً
+                webView.translationY = 10000f
+                webView.isFocusable = false // منع التفاعل
+                webView.isFocusableInTouchMode = false
+                webView.isClickable = false
 
                 webView.settings.apply {
                     javaScriptEnabled = true
