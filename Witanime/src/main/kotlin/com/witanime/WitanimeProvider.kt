@@ -476,7 +476,7 @@ class WitAnime : MainAPI() {
                 this.tags = genres
                 this.year = year
                 this.showStatus = status
-                this.rating = rating?.times(1000)?.toInt()
+                
                 addEpisodes(DubStatus.Subbed, episodes.distinctBy { it.data })
             }
         }
