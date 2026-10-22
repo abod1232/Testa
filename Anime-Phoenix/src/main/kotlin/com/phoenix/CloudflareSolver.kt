@@ -1,4 +1,4 @@
-package com.egydead
+package com.phoenix
 
 import android.R
 import android.app.Activity
