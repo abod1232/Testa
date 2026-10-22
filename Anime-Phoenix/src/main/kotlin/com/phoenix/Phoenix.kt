@@ -361,30 +361,21 @@ class AnimePhoenixProvider : MainAPI() {
         }
 
         val finalUrl = response.url
-        val htmlText = response.text
-        val statusCode = response.code
-
-        println("AnimePhoenix_DEBUG: Initial Request Status Code = $statusCode")
-        println("AnimePhoenix_DEBUG: Final Redirected URL = $finalUrl")
-        println("AnimePhoenix_DEBUG: HTML Length = ${htmlText.length}")
-
         val document = response.document
 
         val title = document.selectFirst("h1.FJ-Phoenix-Hero-Title")?.text()
             ?: document.selectFirst("h1.FJ-CC-Title")?.text()
+            ?: document.selectFirst("h1")?.text()
             ?: ""
         val poster = document.selectFirst(".FJ-Phoenix-Hero-Poster img")?.attr("src")
+            ?: document.selectFirst("meta[property=og:image]")?.attr("content")
         val description = document.selectFirst(".FJ-Phoenix-Desc-Full")?.text()
+            ?: document.selectFirst("meta[property=og:description]")?.attr("content")
         val isMovie = finalUrl.contains("/movies/")
-
-        println("AnimePhoenix_DEBUG: Extracted Title = $title")
-        println("AnimePhoenix_DEBUG: Extracted Poster = $poster")
-        println("AnimePhoenix_DEBUG: Is Movie? = $isMovie")
 
         if (isMovie) {
             val watchBtn = document.selectFirst("a.FJ-Btn-Watch")
             val watchUrl = watchBtn?.attr("href") ?: "$finalUrl/watch"
-            println("AnimePhoenix_DEBUG: Movie watchUrl resolved to = $watchUrl")
 
             return newMovieLoadResponse(title, finalUrl, TvType.AnimeMovie, watchUrl).apply {
                 this.posterUrl = poster
@@ -392,105 +383,145 @@ class AnimePhoenixProvider : MainAPI() {
             }
         } else {
             val episodes = mutableListOf<Episode>()
-            val episodesPageUrl = "${finalUrl.removeSuffix("/")}/episodes/"
+            val isEpisodeUrl = finalUrl.contains("/episodes/")
 
-            try {
-                val epResponse = httpGet(episodesPageUrl, referer = finalUrl)
-                val epDocument = epResponse.document
-                val epHtml = epResponse.text
-                val firstGroup = epDocument.select("div#episodesGrid a.FJ-episode-wrap").mapNotNull { item ->
-                    val titleEl = item.selectFirst(".FJ-Phoenix-Anastasia-EpCard-Name")
-                    val epTitle = titleEl?.text() ?: return@mapNotNull null
-                    val epUrl = item.attr("href") ?: return@mapNotNull null
-                    val cleanTitle = epTitle.replace("\\s+".toRegex(), " ").trim()
-                    val epNum = """(\d+)$""".toRegex().find(cleanTitle)?.groupValues?.get(1)?.toIntOrNull()
+            // 1. إذا كان الرابط لحلقة مباشرة، نحاول البحث عن رابط صفحة الأنمي الكامل
+            val parentAnimeUrl = if (isEpisodeUrl) {
+                document.select("a[href*='/animes/'], a[href*='/series/'], a[href*='/tvshows/']").mapNotNull {
+                    it.attr("href")
+                }.firstOrNull { it.contains("/animes/") || it.contains("/series/") }?.let { fixUrlNull(it) }
+            } else {
+                null
+            }
 
-                    newEpisode(epUrl) {
-                        this.name = cleanTitle
-                        this.episode = epNum
-                        this.season = 1
-                        this.posterUrl = poster
-                    }
-                }
+            // تحديد الصفحة الأساسية التي سنجلب منها قائمة الحلقات
+            val baseSeriesUrl = parentAnimeUrl ?: finalUrl
+            val episodesPageUrl = if (baseSeriesUrl.contains("/episodes/")) {
+                null // إذا لم نجد صفحة الأنمي وبقينا في رابط الحلقة، لا نضف /episodes/
+            } else {
+                "${baseSeriesUrl.removeSuffix("/")}/episodes/"
+            }
 
-                if (firstGroup.isNotEmpty()) {
-                    episodes.addAll(firstGroup)
-                    val tokenRegex = """"token"\s*:\s*"([^"]+)"""".toRegex()
-                    val sigRegex = """"sig"\s*:\s*"([^"]+)"""".toRegex()
+            // 2. محاولة جلب الحلقات من صفحة /episodes/ الخاصة بالأنمي إن وجدت
+            if (episodesPageUrl != null) {
+                try {
+                    val epResponse = httpGet(episodesPageUrl, referer = finalUrl)
+                    if (epResponse.code in 200..299) {
+                        val epDocument = epResponse.document
+                        val epHtml = epResponse.text
+                        val firstGroup = epDocument.select("div#episodesGrid a.FJ-episode-wrap").mapNotNull { item ->
+                            val titleEl = item.selectFirst(".FJ-Phoenix-Anastasia-EpCard-Name")
+                            val epTitle = titleEl?.text() ?: return@mapNotNull null
+                            val epUrl = item.attr("href") ?: return@mapNotNull null
+                            val cleanTitle = epTitle.replace("\\s+".toRegex(), " ").trim()
+                            val epNum = """(\d+)$""".toRegex().find(cleanTitle)?.groupValues?.get(1)?.toIntOrNull()
 
-                    val token = tokenRegex.find(epHtml)?.groupValues?.get(1)
-                    val sig = sigRegex.find(epHtml)?.groupValues?.get(1)
-                    val paginationEl = epDocument.selectFirst("#pagination") ?: epDocument.selectFirst(".FJ-Phoenix-Anastasia-Pagination-Wrap")
-                    val totalPages = paginationEl?.attr("data-total")?.toIntOrNull() ?: 1
+                            newEpisode(epUrl) {
+                                this.name = cleanTitle
+                                this.episode = epNum
+                                this.season = 1
+                                this.posterUrl = poster
+                            }
+                        }
 
-                    if (totalPages > 1 && token != null && sig != null) {
-                        val ajaxUrl = "$mainUrl/wp-admin/admin-ajax.php?action=fj_get_episodes&token=${URLEncoder.encode(token, "UTF-8")}&sig=$sig&page=$totalPages&sort=oldest&search="
-                        val ajaxResponse = httpGet(ajaxUrl, referer = episodesPageUrl).text
-                        val json = JSONObject(ajaxResponse)
+                        if (firstGroup.isNotEmpty()) {
+                            episodes.addAll(firstGroup)
+                            val tokenRegex = """"token"\s*:\s*"([^"]+)"""".toRegex()
+                            val sigRegex = """"sig"\s*:\s*"([^"]+)"""".toRegex()
 
-                        if (json.optBoolean("success")) {
-                            val data = json.getJSONObject("data")
-                            val html = data.optString("html")
-                            if (html.isNotEmpty()) {
-                                val lastPageDoc = Jsoup.parse(html)
-                                val lastGroup = lastPageDoc.select("a.FJ-episode-wrap").mapNotNull { item ->
-                                    val titleEl = item.selectFirst(".FJ-Phoenix-Anastasia-EpCard-Name")
-                                    val epTitle = titleEl?.text() ?: return@mapNotNull null
-                                    val epUrl = item.attr("href") ?: return@mapNotNull null
-                                    val cleanTitle = epTitle.replace("\\s+".toRegex(), " ").trim()
-                                    val epNum = """(\d+)$""".toRegex().find(cleanTitle)?.groupValues?.get(1)?.toIntOrNull()
+                            val token = tokenRegex.find(epHtml)?.groupValues?.get(1)
+                            val sig = sigRegex.find(epHtml)?.groupValues?.get(1)
+                            val paginationEl = epDocument.selectFirst("#pagination") ?: epDocument.selectFirst(".FJ-Phoenix-Anastasia-Pagination-Wrap")
+                            val totalPages = paginationEl?.attr("data-total")?.toIntOrNull() ?: 1
 
-                                    newEpisode(epUrl) {
-                                        this.name = cleanTitle
-                                        this.episode = epNum
-                                        this.season = 1
-                                        this.posterUrl = poster
+                            if (totalPages > 1 && token != null && sig != null) {
+                                val ajaxUrl = "$mainUrl/wp-admin/admin-ajax.php?action=fj_get_episodes&token=${URLEncoder.encode(token, "UTF-8")}&sig=$sig&page=$totalPages&sort=oldest&search="
+                                val ajaxResponse = httpGet(ajaxUrl, referer = episodesPageUrl).text
+                                val json = JSONObject(ajaxResponse)
+
+                                if (json.optBoolean("success")) {
+                                    val data = json.getJSONObject("data")
+                                    val html = data.optString("html")
+                                    if (html.isNotEmpty()) {
+                                        val lastPageDoc = Jsoup.parse(html)
+                                        val lastGroup = lastPageDoc.select("a.FJ-episode-wrap").mapNotNull { item ->
+                                            val titleEl = item.selectFirst(".FJ-Phoenix-Anastasia-EpCard-Name")
+                                            val epTitle = titleEl?.text() ?: return@mapNotNull null
+                                            val epUrl = item.attr("href") ?: return@mapNotNull null
+                                            val cleanTitle = epTitle.replace("\\s+".toRegex(), " ").trim()
+                                            val epNum = """(\d+)$""".toRegex().find(cleanTitle)?.groupValues?.get(1)?.toIntOrNull()
+
+                                            newEpisode(epUrl) {
+                                                this.name = cleanTitle
+                                                this.episode = epNum
+                                                this.season = 1
+                                                this.posterUrl = poster
+                                            }
+                                        }
+
+                                        if (lastGroup.isNotEmpty()) {
+                                            val sampleEp = firstGroup.first()
+                                            val sampleTitle = sampleEp.name ?: ""
+                                            val sampleUrl = sampleEp.data
+
+                                            val titlePrefix = sampleTitle.replace("""\d+$""".toRegex(), "")
+                                            val urlPrefix = sampleUrl.replace("""\d+$""".toRegex(), "")
+
+                                            val startNum = (firstGroup.last().episode ?: firstGroup.size) + 1
+                                            val endNum = (lastGroup.first().episode ?: 1000) - 1
+
+                                            val middleEpisodes = mutableListOf<Episode>()
+                                            for (num in startNum..endNum) {
+                                                middleEpisodes.add(newEpisode("$urlPrefix$num") {
+                                                    this.name = "$titlePrefix$num"
+                                                    this.episode = num
+                                                    this.season = 1
+                                                    this.posterUrl = poster
+                                                })
+                                            }
+
+                                            episodes.addAll(middleEpisodes)
+                                            episodes.addAll(lastGroup)
+                                        }
                                     }
-                                }
-
-                                if (lastGroup.isNotEmpty()) {
-                                    val sampleEp = firstGroup.first()
-                                    val sampleTitle = sampleEp.name ?: ""
-                                    val sampleUrl = sampleEp.data
-
-                                    val titlePrefix = sampleTitle.replace("""\d+$""".toRegex(), "")
-                                    val urlPrefix = sampleUrl.replace("""\d+$""".toRegex(), "")
-
-                                    val startNum = (firstGroup.last().episode ?: firstGroup.size) + 1
-                                    val endNum = (lastGroup.first().episode ?: 1000) - 1
-
-                                    val middleEpisodes = mutableListOf<Episode>()
-                                    for (num in startNum..endNum) {
-                                        middleEpisodes.add(newEpisode("$urlPrefix$num") {
-                                            this.name = "$titlePrefix$num"
-                                            this.episode = num
-                                            this.season = 1
-                                            this.posterUrl = poster
-                                        })
-                                    }
-
-                                    episodes.addAll(middleEpisodes)
-                                    episodes.addAll(lastGroup)
                                 }
                             }
                         }
                     }
+                } catch (e: Exception) {
+                    println("AnimePhoenix_DEBUG: Error fetching /episodes/: ${e.message}")
                 }
-            } catch (e: Exception) {
-                val epPills = document.select("div.FJ-EpsGrid a")
-                epPills.reversed().forEachIndexed { index, pill ->
-                    val epTitle = pill.attr("title").ifEmpty { "الحلقة" }
-                    val epUrl = pill.attr("href")
-                    val epNum = """(\d+)$""".toRegex().find(epTitle)?.groupValues?.get(1)?.toIntOrNull() ?: (index + 1)
-                    if (epUrl.isNotEmpty()) {
-                        episodes.add(newEpisode(epUrl) {
-                            this.name = epTitle
-                            this.episode = epNum
-                            this.season = 1
-                            this.posterUrl = poster
-                        })
+            }
+
+            // 3. إذا لم تتوفر حلقات، نبحث في أزرار الحلقات داخل نفس الصفحة (Pills)
+            if (episodes.isEmpty()) {
+                val epPills = document.select("div.FJ-EpsGrid a, div#episodesGrid a.FJ-episode-wrap, ul.episodes-list a")
+                if (epPills.isNotEmpty()) {
+                    epPills.reversed().forEachIndexed { index, pill ->
+                        val epTitle = pill.attr("title").ifEmpty { pill.text().ifEmpty { "الحلقة" } }
+                        val epUrl = pill.attr("href")
+                        val epNum = """(\d+)$""".toRegex().find(epTitle)?.groupValues?.get(1)?.toIntOrNull() ?: (index + 1)
+                        if (epUrl.isNotEmpty()) {
+                            episodes.add(newEpisode(epUrl) {
+                                this.name = epTitle
+                                this.episode = epNum
+                                this.season = 1
+                                this.posterUrl = poster
+                            })
+                        }
                     }
                 }
+            }
+
+            // 4. خطة الأمان: إذا كانت الصفحة حلقة خاصة أو فيلم/حلقة مفردة ولم نجد غيرها
+            if (episodes.isEmpty() && isEpisodeUrl) {
+                val epNum = """(\d+)$""".toRegex().find(finalUrl)?.groupValues?.get(1)?.toIntOrNull() ?: 1
+                episodes.add(newEpisode(finalUrl) {
+                    this.name = title.ifEmpty { "الحلقة 1" }
+                    this.episode = epNum
+                    this.season = 1
+                    this.posterUrl = poster
+                })
             }
 
             println("AnimePhoenix_DEBUG: Total successfully extracted episodes count = ${episodes.size}")
@@ -500,7 +531,6 @@ class AnimePhoenixProvider : MainAPI() {
             }
         }
     }
-
     override suspend fun loadLinks(
         data: String,
         isCdn: Boolean,
