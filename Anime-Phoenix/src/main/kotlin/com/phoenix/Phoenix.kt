@@ -384,8 +384,6 @@ class AnimePhoenixProvider : MainAPI() {
         } else {
             val episodes = mutableListOf<Episode>()
             val isEpisodeUrl = finalUrl.contains("/episodes/")
-
-            // 1. إذا كان الرابط لحلقة مباشرة، نحاول البحث عن رابط صفحة الأنمي الكامل
             val parentAnimeUrl = if (isEpisodeUrl) {
                 document.select("a[href*='/animes/'], a[href*='/series/'], a[href*='/tvshows/']").mapNotNull {
                     it.attr("href")
@@ -393,16 +391,12 @@ class AnimePhoenixProvider : MainAPI() {
             } else {
                 null
             }
-
-            // تحديد الصفحة الأساسية التي سنجلب منها قائمة الحلقات
             val baseSeriesUrl = parentAnimeUrl ?: finalUrl
             val episodesPageUrl = if (baseSeriesUrl.contains("/episodes/")) {
                 null // إذا لم نجد صفحة الأنمي وبقينا في رابط الحلقة، لا نضف /episodes/
             } else {
                 "${baseSeriesUrl.removeSuffix("/")}/episodes/"
             }
-
-            // 2. محاولة جلب الحلقات من صفحة /episodes/ الخاصة بالأنمي إن وجدت
             if (episodesPageUrl != null) {
                 try {
                     val epResponse = httpGet(episodesPageUrl, referer = finalUrl)
@@ -492,8 +486,6 @@ class AnimePhoenixProvider : MainAPI() {
                     println("AnimePhoenix_DEBUG: Error fetching /episodes/: ${e.message}")
                 }
             }
-
-            // 3. إذا لم تتوفر حلقات، نبحث في أزرار الحلقات داخل نفس الصفحة (Pills)
             if (episodes.isEmpty()) {
                 val epPills = document.select("div.FJ-EpsGrid a, div#episodesGrid a.FJ-episode-wrap, ul.episodes-list a")
                 if (epPills.isNotEmpty()) {
@@ -512,8 +504,6 @@ class AnimePhoenixProvider : MainAPI() {
                     }
                 }
             }
-
-            // 4. خطة الأمان: إذا كانت الصفحة حلقة خاصة أو فيلم/حلقة مفردة ولم نجد غيرها
             if (episodes.isEmpty() && isEpisodeUrl) {
                 val epNum = """(\d+)$""".toRegex().find(finalUrl)?.groupValues?.get(1)?.toIntOrNull() ?: 1
                 episodes.add(newEpisode(finalUrl) {
