@@ -40,8 +40,6 @@ object CloudflareSolver {
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
-
-                // جعل الـ WebView ظاهراً وقابلاً للتفاعل
                 webView.alpha = 1.0f
                 webView.translationX = 0f
                 webView.translationY = 0f
@@ -87,8 +85,6 @@ object CloudflareSolver {
                         continuation.resume(SolverResult(finalUrl, finalCookies))
                     }
                 }
-
-                // مهلة زمنية 60 ثانية كحد أقصى في حال لم يتم الحل
                 pollingHandler.postDelayed({
                     finishSuccess(webView.url ?: initialUrl, "Timeout - 60s")
                 }, 60000)
@@ -170,8 +166,6 @@ object CloudflareSolver {
 
                     val currentLiveUrl = webView.url ?: initialUrl
                     val currentCookies = cookieManager.getCookie(currentLiveUrl)
-
-                    // التحقق من نجاح الحصول على الكوكي لإغلاق النافذة
                     if (currentCookies != null && currentCookies.contains("cf_clearance")) {
                         finishSuccess(currentLiveUrl, "تم صيد الكوكيز بنجاح")
                         return
