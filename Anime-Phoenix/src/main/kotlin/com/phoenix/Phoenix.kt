@@ -203,25 +203,17 @@ class AnimePhoenixProvider : MainAPI() {
     override suspend fun search(query: String): List<SearchResponse> {
     val searchUrl = "$mainUrl/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}"
     val document = httpGet(searchUrl).document
-
-    // استهداف بطاقات الأنمي داخل شبكة نتائج البحث
     val cards = document.select("section div.grid > a[data-preview], section div.grid > a[href*='/anime/'], section div.grid > a[href*='/movie/']")
 
     return cards.mapNotNull { card ->
         val href = card.attr("href")?.trim() ?: return@mapNotNull null
         val fullUrl = fixUrlNull(href) ?: return@mapNotNull null
-
-        // استخراج العنوان
         val title = card.selectFirst("h3")?.text()?.trim()
             ?: card.selectFirst("img")?.attr("alt")?.trim()
             ?: return@mapNotNull null
-
-        // استخراج البوستر
         val poster = card.selectFirst("img")?.let { img ->
             img.attr("src").ifEmpty { img.attr("data-src") }
         }
-
-        // تحديد نوع العمل (فيلم أو أنمي)
         val isMovie = href.contains("/movie/") || card.text().contains("فيلم")
         val tvType = if (isMovie) TvType.AnimeMovie else TvType.Anime
 
