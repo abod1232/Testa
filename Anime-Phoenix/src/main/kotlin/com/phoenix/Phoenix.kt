@@ -258,8 +258,6 @@ class AnimePhoenixProvider : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         val searchLandingUrl = "$mainUrl/search/?q=${URLEncoder.encode(query, "UTF-8")}"
-        
-        // 1. جلب صفحة البحث لاستخراج مفتاح public_key ورابط الـ API
         val pageHtml = try {
             httpGet(searchLandingUrl).text
         } catch (e: Exception) {
@@ -273,18 +271,13 @@ class AnimePhoenixProvider : MainAPI() {
         val rawApiUrl = Regex(""""api_url"\s*:\s*"([^"]+)"""")
             .find(pageHtml)?.groupValues?.get(1)?.replace("\\/", "/")
             ?: "$mainUrl/api/search.php"
-
-        // 2. المحاولة الأولى: طلب GET المباشر من API البحث
         try {
             val getApiUrl = "$rawApiUrl?query=${URLEncoder.encode(query, "UTF-8")}&public_key=$publicKey&type=all&page=1"
             val getResponse = httpGet(getApiUrl, referer = searchLandingUrl).text
             val results = parseSearchJson(getResponse)
             if (results.isNotEmpty()) return results
         } catch (e: Exception) {
-            // الاستمرار للمحاولة التالية
         }
-
-        // 3. المحاولة الثانية: طلب POST إلى API البحث
         try {
             val postResponse = httpPost(
                 rawApiUrl,
@@ -300,10 +293,7 @@ class AnimePhoenixProvider : MainAPI() {
             val results = parseSearchJson(postResponse)
             if (results.isNotEmpty()) return results
         } catch (e: Exception) {
-            // الاستمرار للمحاولة التالية
         }
-
-        // 4. المحاولة الثالثة: خطة التراجع القديمة (wp-admin/admin-ajax.php)
         try {
             val ajaxUrl = "$mainUrl/wp-admin/admin-ajax.php"
             val ajaxResponse = httpPost(
@@ -321,7 +311,6 @@ class AnimePhoenixProvider : MainAPI() {
             val results = parseSearchJson(ajaxResponse)
             if (results.isNotEmpty()) return results
         } catch (e: Exception) {
-            // تجاهل الخطأ
         }
 
         return emptyList()
