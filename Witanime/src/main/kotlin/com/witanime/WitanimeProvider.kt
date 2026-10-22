@@ -25,6 +25,8 @@ import okhttp3.RequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import org.jsoup.Jsoup
+import java.util.concurrent.TimeUnit
+import kotlin.random.Random
 
 class WitAnime : MainAPI() {
     override var mainUrl = "https://witanime.site"
@@ -34,6 +36,7 @@ class WitAnime : MainAPI() {
 
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie)
     
+    // الـ User-Agent الرئيسي للأندرويد
     private val customUserAgent =
         "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Mobile Safari/537.36"
 
@@ -42,6 +45,14 @@ class WitAnime : MainAPI() {
         "Sec-Ch-Ua" to "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
         "Sec-Ch-Ua-Mobile" to "?1",
         "Sec-Ch-Ua-Platform" to "\"Android\""
+    )
+
+    // قائمة تدوير الـ User-Agent لجلب التوكن الجديد مثل كود بايثون
+    private val rotatingUas = listOf(
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2.1 Safari/605.1.15",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_3_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/122.0.2365.66"
     )
 
     companion object {
@@ -320,10 +331,15 @@ class WitAnime : MainAPI() {
         res.close()
         return Jsoup.parse(body)
     }
+
+    // ==========================================
+    // 1. الصفحة الرئيسية (Main Page)
+    // ==========================================
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         return withContext(Dispatchers.IO) {
             val document = fetchDocument(mainUrl)
             val homePageList = ArrayList<HomePageList>()
+
             document.select("section.mb-14").forEach { section ->
                 val title = section.selectFirst("h2")?.text()?.trim() ?: return@forEach
 
@@ -349,6 +365,7 @@ class WitAnime : MainAPI() {
                     homePageList.add(HomePageList(title, items))
                 }
             }
+
             val aside = document.selectFirst("aside")
             if (aside != null) {
                 val asideTitle = aside.selectFirst("h2")?.text()?.trim() ?: "أشهر أنميات الموسم"
@@ -369,6 +386,10 @@ class WitAnime : MainAPI() {
             newHomePageResponse(homePageList)
         }
     }
+
+    // ==========================================
+    // 2. البحث (Search)
+    // ==========================================
     override suspend fun search(query: String): List<SearchResponse> {
         return withContext(Dispatchers.IO) {
             val url = "$mainUrl/search?q=$query"
@@ -386,9 +407,14 @@ class WitAnime : MainAPI() {
             }.distinctBy { it.url }
         }
     }
+
+    // ==========================================
+    // 3. جلب تفاصيل الأنمي والبوستر والحلقات (Load)
+    // ==========================================
     override suspend fun load(url: String): LoadResponse {
         return withContext(Dispatchers.IO) {
             val document = fetchDocument(url)
+
             val title = document.selectFirst("h1 span[dir='ltr']")?.text()?.trim()
                 ?: document.selectFirst("h1")?.text()?.trim()
                 ?: document.selectFirst("meta[property='og:title']")?.attr("content")
@@ -398,20 +424,25 @@ class WitAnime : MainAPI() {
                     ?.replace("انمي", "")
                     ?.trim()
                 ?: ""
+
+            // البوستر الأصلي العمودي
             val poster = document.selectFirst("img[src*='/posters/']")?.attr("src")
                 ?: document.selectFirst("div.shrink-0 img")?.attr("src")
                 ?: document.selectFirst("meta[property='og:image']")?.attr("content")
                 ?: document.selectFirst("meta[name='image']")?.attr("content")
+
             val description = document.selectFirst("p.leading-relaxed")?.text()?.trim()
                 ?: document.selectFirst("meta[property='og:description']")?.attr("content")
 
             val isMovie = url.contains("/movie/")
             val tvType = if (isMovie) TvType.AnimeMovie else TvType.Anime
+
             val genres = mutableListOf<String>()
             document.select("div.flex-wrap.gap-2 span.rounded-full").forEach {
                 val tag = it.text().trim()
                 if (tag.isNotEmpty()) genres.add(tag)
             }
+
             var year: Int? = null
             var status = ShowStatus.Completed
 
@@ -429,6 +460,7 @@ class WitAnime : MainAPI() {
 
             val ratingText = document.selectFirst("span[dir='ltr']:has(svg)")?.text()?.trim()
             val rating = ratingText?.toFloatOrNull()
+
             val episodes = mutableListOf<Episode>()
 
             if (isMovie) {
@@ -464,6 +496,10 @@ class WitAnime : MainAPI() {
             }
         }
     }
+
+    // ==========================================
+    // 4. جلب روابط المشاهدة والتحميل واستخراج الـ iFrame (مطابق لكود بايثون)
+    // ==========================================
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -472,9 +508,11 @@ class WitAnime : MainAPI() {
     ): Boolean {
         return withContext(Dispatchers.IO) {
             try {
+                // عميل OkHttp بدون تتبع التحويل (يحاكي allow_redirects=False بدقة)
                 val directClient = app.baseClient.newBuilder()
                     .followRedirects(false)
                     .followSslRedirects(false)
+                    .callTimeout(20, TimeUnit.SECONDS)
                     .build()
 
                 val cookieStore = mutableMapOf<String, String>()
@@ -493,11 +531,16 @@ class WitAnime : MainAPI() {
 
                 fun makeCookieHeader(): String =
                     cookieStore.entries.joinToString("; ") { "${it.key}=${it.value}" }
+
+                // 1. فتح الصفحة بجلسة جديدة وتخطي الكاش عبر إضافة بارامتر زمني و User-Agent عشوائي
+                val cacheBusterUrl = "$data?t=${System.currentTimeMillis()}"
+                val randomUa = rotatingUas.random()
+
                 val pageReq = Request.Builder()
-                    .url(data)
-                    .apply {
-                        baseHeadersMap.forEach { (k, v) -> header(k, v) }
-                    }
+                    .url(cacheBusterUrl)
+                    .header("User-Agent", randomUa)
+                    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                    .header("Accept-Language", "ar-IQ,ar;q=0.9,en-US;q=0.8,en;q=0.7")
                     .build()
 
                 val pageRes = directClient.newCall(pageReq).execute()
@@ -508,27 +551,33 @@ class WitAnime : MainAPI() {
                 val csrfToken = Regex("""name=['"]csrf-token['"]\s+content=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: Regex("""data-csrf=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: return@withContext false
+
+                // مهلة 1.3 ثانية مثل كود بايثون تماماً
+                delay(1300)
+
+                // 2. طلب مصفوفة السيرفرات عبر POST
                 val sourcesPattern = Regex("""sourcesUrl:\s*['"]([^'"]+)['"]""")
                 val rawSources = sourcesPattern.find(pageHtml)?.groupValues?.get(1)?.replace("\\/", "/")
                     ?: "${data.trimEnd('/')}/sources"
                 val sourcesUrl = fixUrl(rawSources)
 
-                val sourcesReqBuilder = Request.Builder()
+                val sourcesReq = Request.Builder()
                     .url(sourcesUrl)
                     .apply {
                         baseHeadersMap.forEach { (k, v) -> header(k, v) }
                         header("X-Csrf-Token", csrfToken)
                         header("Accept", "application/json")
                         header("Origin", "https://witanime.site")
-                        
+                        header("Referer", data)
                         header("Sec-Fetch-Dest", "empty")
                         header("Sec-Fetch-Mode", "cors")
                         header("Sec-Fetch-Site", "same-origin")
                         header("Cookie", makeCookieHeader())
                     }
                     .post(RequestBody.create(null, ByteArray(0)))
+                    .build()
 
-                val sourcesRes = directClient.newCall(sourcesReqBuilder.build()).execute()
+                val sourcesRes = directClient.newCall(sourcesReq).execute()
                 saveCookiesFrom(sourcesRes)
                 val sourcesJsonStr = sourcesRes.body?.string().orEmpty()
                 sourcesRes.close()
@@ -540,10 +589,9 @@ class WitAnime : MainAPI() {
                 data class ServerItem(val quality: String, val label: String, val token: String, val isStream: Boolean)
                 val allServers = mutableListOf<ServerItem>()
 
-                val qualityOrder = listOf("FHD", "HD", "SD")
+                // تجميع سيرفرات المشاهدة
                 players?.let { p ->
-                    val keys = qualityOrder + p.keys().asSequence().toList()
-                    for (q in keys.distinct()) {
+                    for (q in p.keys()) {
                         val arr = p.optJSONArray(q) ?: continue
                         for (i in 0 until arr.length()) {
                             val obj = arr.optJSONObject(i) ?: continue
@@ -555,9 +603,10 @@ class WitAnime : MainAPI() {
                         }
                     }
                 }
+
+                // تجميع سيرفرات التنزيل
                 downloads?.let { d ->
-                    val keys = qualityOrder + d.keys().asSequence().toList()
-                    for (q in keys.distinct()) {
+                    for (q in d.keys()) {
                         val arr = d.optJSONArray(q) ?: continue
                         for (i in 0 until arr.length()) {
                             val obj = arr.optJSONObject(i) ?: continue
@@ -569,14 +618,20 @@ class WitAnime : MainAPI() {
                         }
                     }
                 }
+
+                // حصر السيرفرات بـ 10 سيرفرات كحد أقصى كما طلبت
                 val limitedServers = allServers.take(10)
-                for (server in limitedServers) {
+
+                // 3. الدوران على السيرفرات وتطبيق دورة الـ source والـ gate واستخراج رابط الـ iFrame الفعلي
+                for ((idx, server) in limitedServers.withIndex()) {
                     try {
                         val sourceEndpoint = if (server.isStream) "stream-source" else "download-source"
                         val gateEndpoint = if (server.isStream) "stream-gate" else "download-gate"
 
                         val sourceUrl = "https://witanime.site/watch/$sourceEndpoint/${server.token}"
                         val gateUrl = "https://witanime.site/watch/$gateEndpoint/${server.token}"
+
+                        // أ) تفعيل صلاحية السيرفر (POST) بدون Referer
                         val sReq = Request.Builder()
                             .url(sourceUrl)
                             .apply {
@@ -595,6 +650,8 @@ class WitAnime : MainAPI() {
                         val sRes = directClient.newCall(sReq).execute()
                         saveCookiesFrom(sRes)
                         sRes.close()
+
+                        // ب) طلب البوابة (GET) مباشرة لالتقاط الـ 302 بدون Referer
                         val gReq = Request.Builder()
                             .url(gateUrl)
                             .apply {
@@ -604,7 +661,7 @@ class WitAnime : MainAPI() {
                                 header("Sec-Ch-Ua-Mobile", "?1")
                                 header("Sec-Ch-Ua-Platform", "\"Android\"")
                                 header("Upgrade-Insecure-Requests", "1")
-                                header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8")
+                                header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
                                 header("Sec-Fetch-Site", "same-origin")
                                 header("Sec-Fetch-Mode", "navigate")
                                 header("Sec-Fetch-User", "?1")
@@ -617,8 +674,10 @@ class WitAnime : MainAPI() {
                         val gRes = directClient.newCall(gReq).execute()
                         saveCookiesFrom(gRes)
 
+                        // ===> استخراج رابط الـ iFrame / Embed المباشر من ترويسة التحويل 302 <===
                         var embedUrl = gRes.header("Location") ?: gRes.header("location")
 
+                        // كخيار بديل إذا أرجع صفحة HTML مع تاغ meta refresh
                         if (embedUrl.isNullOrBlank()) {
                             val gBody = gRes.body?.string().orEmpty()
                             val match = Regex("""url=['"]([^'"]+)['"]""").find(gBody)
@@ -627,8 +686,10 @@ class WitAnime : MainAPI() {
                         }
                         gRes.close()
 
+                        // إرسال الرابط المستخرج لمشغلات التطبيق
                         if (!embedUrl.isNullOrBlank() && embedUrl.startsWith("http")) {
-                            val displayName = "${server.label} (${server.quality})"
+                            val typeLabel = if (server.isStream) "مشاهدة" else "تنزيل"
+                            val displayName = "${server.label} (${server.quality}) [$typeLabel]"
                             
                             if (embedUrl.contains("mega.nz")) {
                                 val dummyUrl = "https://raw.githubusercontent.com/Anarios/Cloudstream/master/app/src/main/res/raw/blank.mp4#mega-webview://$embedUrl"
@@ -647,8 +708,14 @@ class WitAnime : MainAPI() {
                                 loadExtractor(embedUrl, data, subtitleCallback, callback)
                             }
                         }
+
+                        // فاصل ثانيتين بين السيرفرات مثل كود بايثون تماماً
+                        if (idx < limitedServers.size - 1) {
+                            delay(2000)
+                        }
                     } catch (e: Exception) {
                         logError(e)
+                        delay(2000)
                     }
                 }
 
