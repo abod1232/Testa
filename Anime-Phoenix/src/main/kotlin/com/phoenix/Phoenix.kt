@@ -2,15 +2,20 @@ package com.phoenix
 
 import android.util.Base64
 import android.util.Log
+import android.webkit.CookieManager
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.loadExtractor
-import org.jsoup.Jsoup
+import com.lagradost.cloudstream3.utils.newExtractorLink
+import com.lagradost.nicehttp.NiceResponse
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
+import org.jsoup.Jsoup
+import java.net.URL
 import java.net.URLDecoder
 import java.net.URLEncoder
-import com.lagradost.cloudstream3.utils.newExtractorLink
 
 class AnimePhoenixProvider : MainAPI() {
     override var mainUrl = "https://anime-phoenix.com"
@@ -22,12 +27,108 @@ class AnimePhoenixProvider : MainAPI() {
         TvType.AnimeMovie
     )
 
+    private val userAgent = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"
+    private var savedCookies: String? = null
+    private val cfMutex = Mutex()
+
+    private fun buildHeaders(referer: String? = null): MutableMap<String, String> {
+        val headers = mutableMapOf(
+            "User-Agent" to userAgent,
+            "Referer" to (referer ?: mainUrl),
+            "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language" to "ar,en-US;q=0.9,en;q=0.8",
+            "Upgrade-Insecure-Requests" to "1"
+        )
+        savedCookies?.let { headers["Cookie"] = it }
+        return headers
+    }
+
+    private suspend fun httpGet(url: String, referer: String? = null): NiceResponse {
+        var currentRequestUrl = url
+        var headers = buildHeaders(referer)
+
+        var res = app.get(currentRequestUrl, headers = headers, timeout = 30)
+        if (res.code in listOf(403, 503, 429)) {
+            cfMutex.withLock {
+                val currentCookies = CookieManager.getInstance().getCookie(currentRequestUrl)
+                if (currentCookies != null && currentCookies != savedCookies && currentCookies.contains("cf_clearance")) {
+                    savedCookies = currentCookies
+                } else {
+                    val activity = CommonActivity.activity
+                    if (activity != null) {
+                        val solverResult = CloudflareSolver.solve(activity, currentRequestUrl, userAgent)
+                        if (solverResult != null) {
+                            if (!solverResult.cookies.isNullOrEmpty()) {
+                                savedCookies = solverResult.cookies
+                            }
+                            if (solverResult.finalUrl != currentRequestUrl) {
+                                try {
+                                    val newHost = URL(solverResult.finalUrl).host
+                                    mainUrl = "https://$newHost"
+                                } catch (_: Exception) {}
+                                currentRequestUrl = solverResult.finalUrl
+                            }
+                        }
+                    }
+                }
+            }
+            headers = buildHeaders(referer)
+            res = app.get(currentRequestUrl, headers = headers, timeout = 30)
+        }
+        return res
+    }
+
+    private suspend fun httpPost(url: String, data: Map<String, String>, referer: String? = null): NiceResponse {
+        var currentRequestUrl = url
+        var headers = buildHeaders(referer).apply {
+            put("X-Requested-With", "XMLHttpRequest")
+            put("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+        }
+
+        var res = app.post(currentRequestUrl, data = data, headers = headers, timeout = 30)
+        if (res.code in listOf(403, 503, 429)) {
+            cfMutex.withLock {
+                val currentCookies = CookieManager.getInstance().getCookie(currentRequestUrl)
+                if (currentCookies != null && currentCookies != savedCookies && currentCookies.contains("cf_clearance")) {
+                    savedCookies = currentCookies
+                } else {
+                    val activity = CommonActivity.activity
+                    if (activity != null) {
+                        val solverResult = CloudflareSolver.solve(activity, currentRequestUrl, userAgent)
+                        if (solverResult != null) {
+                            if (!solverResult.cookies.isNullOrEmpty()) {
+                                savedCookies = solverResult.cookies
+                            }
+                            if (solverResult.finalUrl != currentRequestUrl) {
+                                try {
+                                    val newHost = URL(solverResult.finalUrl).host
+                                    mainUrl = "https://$newHost"
+                                } catch (_: Exception) {}
+                                currentRequestUrl = solverResult.finalUrl
+                            }
+                        }
+                    }
+                }
+            }
+            headers = buildHeaders(referer).apply {
+                put("X-Requested-With", "XMLHttpRequest")
+                put("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+            }
+            res = app.post(currentRequestUrl, data = data, headers = headers, timeout = 30)
+        }
+        return res
+    }
+
     override suspend fun getMainPage(
         page: Int,
         request: MainPageRequest
     ): HomePageResponse? {
         val url = if (page == 1) mainUrl else "$mainUrl/page/$page/"
-        val document = app.get(url, headers = customHeaders).document
+        val document = try {
+            httpGet(url).document
+        } catch (e: Exception) {
+            return null
+        }
 
         val homePageRows = mutableListOf<HomePageList>()
         val latestSection = document.selectFirst("main.FJ-Phoenix-Anastasia-Latest")
@@ -87,10 +188,11 @@ class AnimePhoenixProvider : MainAPI() {
         }
         return newHomePageResponse(homePageRows, hasNext = true)
     }
+
     private suspend fun getNonce(query: String): String {
         return try {
             val searchLandingUrl = "$mainUrl/search/?q=${URLEncoder.encode(query, "UTF-8")}"
-            val html = app.get(searchLandingUrl).text
+            val html = httpGet(searchLandingUrl).text
             val nonceRegex = """"nonce"\s*:\s*"([a-f0-9]+)"""".toRegex()
             nonceRegex.find(html)?.groupValues?.get(1) ?: "25ccbcb8fb"
         } catch (e: Exception) {
@@ -103,12 +205,8 @@ class AnimePhoenixProvider : MainAPI() {
         val searchResults = mutableListOf<SearchResponse>()
 
         try {
-            val response = app.post(
+            val response = httpPost(
                 "$mainUrl/wp-admin/admin-ajax.php",
-                headers = mapOf(
-                    "X-Requested-With" to "XMLHttpRequest",
-                    "Content-Type" to "application/x-www-form-urlencoded; charset=UTF-8"
-                ),
                 data = mapOf(
                     "action" to "phoenix_search",
                     "nonce" to nonce,
@@ -122,7 +220,8 @@ class AnimePhoenixProvider : MainAPI() {
                     "page" to "1",
                     "per_page" to "25",
                     "dropdown" to "0"
-                )
+                ),
+                referer = "$mainUrl/search/?q=${URLEncoder.encode(query, "UTF-8")}"
             ).text
 
             val json = JSONObject(response)
@@ -153,7 +252,7 @@ class AnimePhoenixProvider : MainAPI() {
         } catch (e: Exception) {
             try {
                 val searchUrl = "$mainUrl/search/?q=${URLEncoder.encode(query, "UTF-8")}"
-                val response = app.get(searchUrl).text
+                val response = httpGet(searchUrl).text
                 val soup = Jsoup.parse(response)
                 soup.select("div.FJ-episode-wrap").forEach { wrap ->
                     val titleEl = wrap.selectFirst("a.FJ-Phoenix-Anastasia-EpCard-Name")
@@ -171,22 +270,15 @@ class AnimePhoenixProvider : MainAPI() {
         }
         return searchResults
     }
-    private val customHeaders = mapOf(
-        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
-        "Accept-Language" to "ar,en-US;q=0.9,en;q=0.8",
-        "Referer" to mainUrl
-    )
-
 
     override suspend fun load(url: String): LoadResponse? {
         println("AnimePhoenix_DEBUG: Entering load() with url = $url")
-        android.util.Log.d("AnimePhoenix", "Entering load() with url = $url")
+        Log.d("AnimePhoenix", "Entering load() with url = $url")
 
         val response = try {
-            app.get(url, headers = customHeaders)
+            httpGet(url)
         } catch (e: Exception) {
-            println("AnimePhoenix_DEBUG: Exception during app.get(url): ${e.message}")
+            println("AnimePhoenix_DEBUG: Exception during httpGet(url): ${e.message}")
             return null
         }
 
@@ -225,7 +317,7 @@ class AnimePhoenixProvider : MainAPI() {
             val episodesPageUrl = "${finalUrl.removeSuffix("/")}/episodes/"
 
             try {
-                val epResponse = app.get(episodesPageUrl, headers = customHeaders)
+                val epResponse = httpGet(episodesPageUrl, referer = finalUrl)
                 val epDocument = epResponse.document
                 val epHtml = epResponse.text
                 val firstGroup = epDocument.select("div#episodesGrid a.FJ-episode-wrap").mapNotNull { item ->
@@ -239,7 +331,7 @@ class AnimePhoenixProvider : MainAPI() {
                         this.name = cleanTitle
                         this.episode = epNum
                         this.season = 1
-                        this.posterUrl = poster // تعيين بوستر المسلسل للحلقة
+                        this.posterUrl = poster
                     }
                 }
 
@@ -255,7 +347,7 @@ class AnimePhoenixProvider : MainAPI() {
 
                     if (totalPages > 1 && token != null && sig != null) {
                         val ajaxUrl = "$mainUrl/wp-admin/admin-ajax.php?action=fj_get_episodes&token=${URLEncoder.encode(token, "UTF-8")}&sig=$sig&page=$totalPages&sort=oldest&search="
-                        val ajaxResponse = app.get(ajaxUrl, headers = customHeaders).text
+                        val ajaxResponse = httpGet(ajaxUrl, referer = episodesPageUrl).text
                         val json = JSONObject(ajaxResponse)
 
                         if (json.optBoolean("success")) {
@@ -274,7 +366,7 @@ class AnimePhoenixProvider : MainAPI() {
                                         this.name = cleanTitle
                                         this.episode = epNum
                                         this.season = 1
-                                        this.posterUrl = poster // تعيين بوستر المسلسل للحلقة
+                                        this.posterUrl = poster
                                     }
                                 }
 
@@ -295,7 +387,7 @@ class AnimePhoenixProvider : MainAPI() {
                                             this.name = "$titlePrefix$num"
                                             this.episode = num
                                             this.season = 1
-                                            this.posterUrl = poster // تعيين بوستر المسلسل للحلقة المستحدثة
+                                            this.posterUrl = poster
                                         })
                                     }
 
@@ -317,7 +409,7 @@ class AnimePhoenixProvider : MainAPI() {
                             this.name = epTitle
                             this.episode = epNum
                             this.season = 1
-                            this.posterUrl = poster // تعيين بوستر المسلسل في خطة التراجع
+                            this.posterUrl = poster
                         })
                     }
                 }
@@ -337,7 +429,11 @@ class AnimePhoenixProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val document = app.get(data).document
+        val document = try {
+            httpGet(data).document
+        } catch (e: Exception) {
+            return false
+        }
         val serverLinks = document.select("a.server-link")
 
         serverLinks.forEach { sLink ->
