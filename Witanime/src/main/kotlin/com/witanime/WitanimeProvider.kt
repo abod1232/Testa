@@ -35,6 +35,7 @@ class WitAnime : MainAPI() {
     override var lang = "ar"
 
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie)
+    
     private val customUserAgent =
         "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Mobile Safari/537.36"
 
@@ -249,7 +250,7 @@ class WitAnime : MainAPI() {
             }
         }
 
-        private fun checkMegaPlayback(player: Any) {
+        private checkMegaPlayback(player: Any) {
             val currentTime = System.currentTimeMillis()
             synchronized(WitAnime::class.java) {
                 if (WitAnime.isWebViewOpen || (currentTime - WitAnime.lastWebViewOpenTime) < 10000L || activeDialog?.isShowing == true) return
@@ -345,6 +346,10 @@ class WitAnime : MainAPI() {
         res.close()
         return Jsoup.parse(body)
     }
+
+    // ==========================================
+    // 1. الصفحة الرئيسية (Main Page)
+    // ==========================================
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         return withContext(Dispatchers.IO) {
             val document = fetchDocument(mainUrl)
@@ -396,6 +401,10 @@ class WitAnime : MainAPI() {
             newHomePageResponse(homePageList)
         }
     }
+
+    // ==========================================
+    // 2. البحث (Search)
+    // ==========================================
     override suspend fun search(query: String): List<SearchResponse> {
         return withContext(Dispatchers.IO) {
             val url = "$mainUrl/search?q=$query"
@@ -413,6 +422,10 @@ class WitAnime : MainAPI() {
             }.distinctBy { it.url }
         }
     }
+
+    // ==========================================
+    // 3. جلب تفاصيل الأنمي والبوستر والحلقات والتقييم (Load)
+    // ==========================================
     override suspend fun load(url: String): LoadResponse {
         return withContext(Dispatchers.IO) {
             val document = fetchDocument(url)
@@ -460,7 +473,7 @@ class WitAnime : MainAPI() {
             }
 
             val ratingText = document.selectFirst("span[dir='ltr']:has(svg)")?.text()?.trim()
-            val rating = ratingText?.toFloatOrNull()
+            val rating = ratingText?.toDoubleOrNull()
 
             val episodes = mutableListOf<Episode>()
 
@@ -492,12 +505,41 @@ class WitAnime : MainAPI() {
                 this.tags = genres
                 this.year = year
                 this.showStatus = status
-                
+
+                // التقييم الدقيق بنظام Score.from10
+                this.score = rating?.let {
+                    Score.from10(it)
+                }
+
                 addEpisodes(DubStatus.Subbed, episodes.distinctBy { it.data })
             }
         }
     }
+
+    // ==========================================
+    // 4. جلب روابط المشاهدة والتحميل بنظام الدفعات (مطابق لبايثون مع تمرير السيسون للبوابة)
+    // ==========================================
     data class ServerItem(val quality: String, val label: String, val token: String, val isStream: Boolean)
+
+    // كلاس جلسة يحفظ الكوكيز ويعيد إرسالها في كل خطوة تماماً مثل requests.Session()
+    class BatchSession(val client: OkHttpClient) {
+        val cookieStore = mutableMapOf<String, String>()
+
+        fun saveCookies(res: okhttp3.Response) {
+            res.headers("Set-Cookie").forEach { header ->
+                val cookiePart = header.substringBefore(";")
+                val eqIdx = cookiePart.indexOf("=")
+                if (eqIdx > 0) {
+                    val k = cookiePart.substring(0, eqIdx).trim()
+                    val v = cookiePart.substring(eqIdx + 1).trim()
+                    cookieStore[k] = v
+                }
+            }
+        }
+
+        fun makeCookieHeader(): String =
+            cookieStore.entries.joinToString("; ") { "${it.key}=${it.value}" }
+    }
 
     override suspend fun loadLinks(
         data: String,
@@ -512,23 +554,8 @@ class WitAnime : MainAPI() {
                     .followSslRedirects(false)
                     .callTimeout(20, TimeUnit.SECONDS)
                     .build()
-                suspend fun fetchServersAndToken(): Pair<Map<String, String>, List<ServerItem>>? {
-                    val cookieStore = mutableMapOf<String, String>()
 
-                    fun saveCookiesFrom(res: okhttp3.Response) {
-                        res.headers("Set-Cookie").forEach { header ->
-                            val cookiePart = header.substringBefore(";")
-                            val eqIdx = cookiePart.indexOf("=")
-                            if (eqIdx > 0) {
-                                val k = cookiePart.substring(0, eqIdx).trim()
-                                val v = cookiePart.substring(eqIdx + 1).trim()
-                                cookieStore[k] = v
-                            }
-                        }
-                    }
-
-                    fun makeCookieHeader(): String =
-                        cookieStore.entries.joinToString("; ") { "${it.key}=${it.value}" }
+                suspend fun fetchServersAndToken(batchSession: BatchSession): Pair<Map<String, String>, List<ServerItem>>? {
                     val cacheBusterUrl = "$data?t=${System.currentTimeMillis() / 1000}"
                     val randomUa = rotatingUas.random()
 
@@ -541,7 +568,7 @@ class WitAnime : MainAPI() {
                         .build()
 
                     val pageRes = directClient.newCall(pageReq).execute()
-                    saveCookiesFrom(pageRes)
+                    batchSession.saveCookies(pageRes)
                     val pageHtml = pageRes.body?.string().orEmpty()
                     pageRes.close()
 
@@ -566,7 +593,7 @@ class WitAnime : MainAPI() {
                         put("Sec-Fetch-Dest", "empty")
                         put("Sec-Fetch-Mode", "cors")
                         put("Sec-Fetch-Site", "same-origin")
-                        put("Cookie", makeCookieHeader())
+                        put("Cookie", batchSession.makeCookieHeader())
                     }
 
                     val sourcesReq = Request.Builder()
@@ -576,7 +603,7 @@ class WitAnime : MainAPI() {
                         .build()
 
                     val sourcesRes = directClient.newCall(sourcesReq).execute()
-                    saveCookiesFrom(sourcesRes)
+                    batchSession.saveCookies(sourcesRes)
                     val sourcesJsonStr = sourcesRes.body?.string().orEmpty()
                     sourcesRes.close()
 
@@ -587,6 +614,8 @@ class WitAnime : MainAPI() {
                     val downloads = json.optJSONObject("downloads")
 
                     val allServers = mutableListOf<ServerItem>()
+
+                    // تجميع سيرفرات المشاهدة
                     players?.let { p ->
                         for (q in p.keys()) {
                             val arr = p.optJSONArray(q) ?: continue
@@ -598,6 +627,8 @@ class WitAnime : MainAPI() {
                             }
                         }
                     }
+
+                    // تجميع سيرفرات التنزيل
                     downloads?.let { d ->
                         for (q in d.keys()) {
                             val arr = d.optJSONArray(q) ?: continue
@@ -612,13 +643,17 @@ class WitAnime : MainAPI() {
 
                     return Pair(sourcesHeaders, allServers)
                 }
+
                 val batchSize = 9
                 val maxProcessed = 18
                 var processedCount = 0
                 var totalServers: Int? = null
 
                 while (true) {
-                    val fetchResult = fetchServersAndToken() ?: break
+                    // إنشاء جلسة جديدة كلياً لكل دفعة
+                    val batchSession = BatchSession(directClient)
+
+                    val fetchResult = fetchServersAndToken(batchSession) ?: break
                     val sourcesHeaders = fetchResult.first
                     var allServers = fetchResult.second
                     if (allServers.isEmpty()) break
@@ -639,21 +674,34 @@ class WitAnime : MainAPI() {
                         val gateUrl = "https://witanime.site/watch/$gateEndpoint/${s.token}"
 
                         try {
+                            // أ) إرسال طلب التفعيل المسبق (مع تمرير السيسون المحدث دائماً)
                             val sReq = Request.Builder()
                                 .url(sourceUrl)
-                                .apply { sourcesHeaders.forEach { (k, v) -> header(k, v) } }
+                                .apply {
+                                    sourcesHeaders.forEach { (k, v) -> header(k, v) }
+                                    header("Cookie", batchSession.makeCookieHeader())
+                                }
                                 .post(RequestBody.create(null, ByteArray(0)))
                                 .build()
 
                             val sRes = directClient.newCall(sReq).execute()
+                            batchSession.saveCookies(sRes) // حفظ الكوكيز المحدثة من source
                             sRes.close()
+
+                            // ب) طلب البوابة مع إرسال السيسون (Cookie) المحدثة صراحة
                             val gReq = Request.Builder()
                                 .url(gateUrl)
-                                .apply { exactGateHeaders.forEach { (k, v) -> header(k, v) } }
+                                .apply {
+                                    exactGateHeaders.forEach { (k, v) -> header(k, v) }
+                                    header("Cookie", batchSession.makeCookieHeader()) // <--- تمرير السيسون للبوابة!
+                                }
                                 .get()
                                 .build()
 
                             val gRes = directClient.newCall(gReq).execute()
+                            batchSession.saveCookies(gRes) // حفظ الكوكيز المحدثة من gate
+
+                            // استخراج رابط الـ Location الحقيقي من البوابة
                             var embedUrl = gRes.header("Location") ?: gRes.header("location")
 
                             if (embedUrl.isNullOrBlank()) {
@@ -663,6 +711,8 @@ class WitAnime : MainAPI() {
                                 embedUrl = match?.groupValues?.get(1)
                             }
                             gRes.close()
+
+                            // تمرير الرابط لمشغلات التطبيق
                             if (!embedUrl.isNullOrBlank() && embedUrl.startsWith("http")) {
                                 val typeLabel = if (s.isStream) "مشاهدة" else "تنزيل"
                                 val displayName = "${s.label.uppercase()} (${s.quality}) [$typeLabel]"
@@ -697,6 +747,7 @@ class WitAnime : MainAPI() {
                                     }
                                 }
                             }
+
                             if (i < currentBatch.size - 1) {
                                 delay(2000)
                             }
@@ -707,6 +758,7 @@ class WitAnime : MainAPI() {
                     }
 
                     processedCount += currentBatch.size
+
                     if (processedCount >= (totalServers ?: 0) || processedCount >= maxProcessed) {
                         break
                     } else {
