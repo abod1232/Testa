@@ -13,15 +13,14 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
-
 data class SolverResult(val finalUrl: String, val cookies: String?)
 
 object CloudflareSolver {
-    private const val TAG = "CF_Cookie_Hunter_Visible"
+    private const val TAG = "CF_Cookie_Hunter_Hidden"
 
     suspend fun solve(activity: Activity?, initialUrl: String, userAgent: String): SolverResult? {
         return suspendCoroutine { continuation ->
-            Log.d(TAG, "🕵️ بدء حل التحقق للرابط: $initialUrl (عرض الـ WebView)")
+            Log.d(TAG, "🕵️ بدء رحلة صيد الكوكيز للرابط: $initialUrl (في الخلفية)")
 
             if (activity == null || activity.isFinishing) {
                 Log.e(TAG, "Activity غير متاح.")
@@ -41,11 +40,11 @@ object CloudflareSolver {
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
                 webView.alpha = 1.0f
-                webView.translationX = 0f
-                webView.translationY = 0f
-                webView.isFocusable = true
-                webView.isFocusableInTouchMode = true
-                webView.isClickable = true
+webView.translationX = 0f
+webView.translationY = 0f
+webView.isFocusable = true
+webView.isFocusableInTouchMode = true
+webView.isClickable = true
 
                 webView.settings.apply {
                     javaScriptEnabled = true
@@ -67,12 +66,12 @@ object CloudflareSolver {
                 fun finishSuccess(finalUrl: String, reason: String = "غير معروف") {
                     if (!isSolved) {
                         isSolved = true
-                        Log.i(TAG, "إغلاق الـ WebView | السبب: $reason | الرابط النهائي: $finalUrl")
+                        Log.i(TAG, "إغلاق المخفي | السبب: $reason | الرابط النهائي: $finalUrl")
 
                         cookieManager.flush()
                         val finalCookies = cookieManager.getCookie(finalUrl)
                         if (!finalCookies.isNullOrEmpty()) {
-                            Log.w(TAG, "🍪 تم استخراج الكوكيز بنجاح: $finalCookies")
+                            Log.w(TAG, "🍪 تم صيد الكوكيز بنجاح في الخلفية: $finalCookies")
                         } else {
                             Log.e(TAG, "⚠️ انتهت العملية ولم يتم العثور على أي كوكيز!")
                         }
@@ -88,7 +87,6 @@ object CloudflareSolver {
                 pollingHandler.postDelayed({
                     finishSuccess(webView.url ?: initialUrl, "Timeout - 60s")
                 }, 60000)
-
                 fun simulateRealTouch(view: WebView, cssX: Float, cssY: Float) {
                     val density = activity.resources.displayMetrics.density
                     val realX = cssX * density
@@ -126,7 +124,7 @@ object CloudflareSolver {
                                         var margin = Math.round(Math.max(8, r.width * 0.03));
                                         var centerY = r.top + (r.height / 2);
                                         var rightSideX = r.right - (size / 2) - margin;
-                                        var leftSideX = r.left + (size / 2) - margin;
+                                        var leftSideX = r.left + (size / 2) + margin;
                                         return rightSideX + "," + centerY + "|" + leftSideX + "," + centerY;
                                     }catch(e){ return "ERROR"; }
                                 })();
@@ -136,7 +134,7 @@ object CloudflareSolver {
                                 try {
                                     val clean = res?.removeSurrounding("\"")
                                     if (clean != null && clean.contains("|")) {
-                                        Log.d(TAG, "🤖 محاولة النقر التلقائي...")
+                                        Log.d(TAG, "🤖 جاري النقر التلقائي في الخلفية...")
                                         isProcessingClick = true
                                         val sides = clean.split("|")
                                         val (rx, ry) = sides[0].split(",").map { it.toFloatOrNull() }
@@ -147,25 +145,21 @@ object CloudflareSolver {
                                                 simulateRealTouch(webView, lx, ly)
                                                 pollingHandler.postDelayed({ isProcessingClick = false }, 3000)
                                             }, 250)
-                                        } else {
-                                            isProcessingClick = false
-                                        }
+                                        } else { isProcessingClick = false }
                                     }
-                                } catch (e: Exception) {
-                                    isProcessingClick = false
-                                }
+                                } catch (e: Exception) { isProcessingClick = false }
                             }
                             pollingHandler.postDelayed(this, 2000)
                         }
                     }
                     pollingHandler.post(runnable)
                 }
-
                 fun checkBypassSuccess() {
                     if (isSolved) return
 
                     val currentLiveUrl = webView.url ?: initialUrl
                     val currentCookies = cookieManager.getCookie(currentLiveUrl)
+
                     if (currentCookies != null && currentCookies.contains("cf_clearance")) {
                         finishSuccess(currentLiveUrl, "تم صيد الكوكيز بنجاح")
                         return
@@ -178,20 +172,18 @@ object CloudflareSolver {
                     override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                         super.onPageStarted(view, url, favicon)
                         if (url != null && url != initialUrl) {
-                            Log.w(TAG, "🔄 إعادة توجيه إلى: $url")
+                            Log.w(TAG, "🔄 إعادة توجيه في الخلفية إلى: $url")
                         }
                     }
 
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
                         isProcessingClick = false
-                        startPolling()       // محاولة النقر التلقائي
-                        checkBypassSuccess() // مراقبة ظهور الكوكي لإغلاق النافذة تلقائياً
+                        startPolling() // بدء محاولة النقر
+                        checkBypassSuccess() // بدء مراقبة الكوكيز
                     }
                 }
-
                 rootView.addView(webView)
-                webView.bringToFront()
                 webView.loadUrl(initialUrl)
             }
         }
