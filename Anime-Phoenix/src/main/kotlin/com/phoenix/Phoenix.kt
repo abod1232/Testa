@@ -16,6 +16,8 @@ import org.jsoup.Jsoup
 import java.net.URL
 import java.net.URLDecoder
 import java.net.URLEncoder
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 
 class AnimePhoenixProvider : MainAPI() {
     override var mainUrl = "https://anime-phoenix.com"
@@ -256,8 +258,39 @@ class AnimePhoenixProvider : MainAPI() {
         return searchResults
     }
 
+    
+
+// ... داخل كلاس AnimePhoenixProvider ...
+
+    // دالة توليد التوقيع الرقمي HMAC-SHA256 كما في ملفات جافاسكريبت الموقع
+    private fun computeSearchSignature(
+        query: String,
+        timestamp: Long,
+        publicKey: String,
+        type: String = "all",
+        genre: String = "",
+        status: String = "",
+        year: String = "",
+        season: String = "",
+        page: Int = 1,
+        sort: String = "relevance"
+    ): String {
+        return try {
+            val canonical = "$timestamp:$query:$type:$genre:$status:$year:$season:$page:$sort"
+            val mac = Mac.getInstance("HmacSHA256")
+            val secretKey = SecretKeySpec(publicKey.toByteArray(Charsets.UTF_8), "HmacSHA256")
+            mac.init(secretKey)
+            val hashBytes = mac.doFinal(canonical.toByteArray(Charsets.UTF_8))
+            hashBytes.joinToString("") { "%02x".format(it) }
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
     override suspend fun search(query: String): List<SearchResponse> {
         val searchLandingUrl = "$mainUrl/search/?q=${URLEncoder.encode(query, "UTF-8")}"
+        
+        // 1. استخراج الـ public_key والـ api_url من صفحة البحث
         val pageHtml = try {
             httpGet(searchLandingUrl).text
         } catch (e: Exception) {
@@ -265,57 +298,71 @@ class AnimePhoenixProvider : MainAPI() {
         }
 
         val publicKey = Regex(""""public_key"\s*:\s*"([^"]+)"""")
-            .find(pageHtml)?.groupValues?.get(1) 
+            .find(pageHtml)?.groupValues?.get(1)
             ?: "c8052e98457156515d839dd050a95ac1b862437995778d89422a45f117478009"
 
         val rawApiUrl = Regex(""""api_url"\s*:\s*"([^"]+)"""")
             .find(pageHtml)?.groupValues?.get(1)?.replace("\\/", "/")
             ?: "$mainUrl/api/search.php"
-        try {
-            val getApiUrl = "$rawApiUrl?query=${URLEncoder.encode(query, "UTF-8")}&public_key=$publicKey&type=all&page=1"
-            val getResponse = httpGet(getApiUrl, referer = searchLandingUrl).text
-            val results = parseSearchJson(getResponse)
-            if (results.isNotEmpty()) return results
-        } catch (e: Exception) {
+
+        // 2. توليد الطابع الزمني والتوقيع الرقمي
+        val ts = System.currentTimeMillis() / 1000
+        val signature = computeSearchSignature(query = query, timestamp = ts, publicKey = publicKey)
+
+        // 3. بناء الرابط والهيدرز المطابقة لكود الموقع الأصلي
+        val encodedQ = URLEncoder.encode(query, "UTF-8")
+        val apiUrl = "$rawApiUrl?q=$encodedQ&type=all&sort=relevance&page=1&per_page=25&dropdown=0"
+
+        val searchHeaders = buildHeaders(referer = searchLandingUrl).apply {
+            put("X-Requested-With", "XMLHttpRequest")
+            put("Accept", "application/json, text/javascript, */*; q=0.01")
+            if (signature.isNotEmpty()) {
+                put("X-PX-Timestamp", ts.toString())
+                put("X-PX-Signature", signature)
+            }
         }
+
+        // 4. إرسال الطلب ومعالجة الـ JSON
         try {
-            val postResponse = httpPost(
-                rawApiUrl,
-                data = mapOf(
-                    "query" to query,
-                    "q" to query,
-                    "public_key" to publicKey,
-                    "type" to "all",
-                    "page" to "1"
-                ),
-                referer = searchLandingUrl
-            ).text
-            val results = parseSearchJson(postResponse)
-            if (results.isNotEmpty()) return results
+            val responseText = app.get(apiUrl, headers = searchHeaders).text
+            val json = JSONObject(responseText)
+
+            if (json.optBoolean("success")) {
+                val data = json.optJSONObject("data") ?: return emptyList()
+                val resultsArray = data.optJSONArray("results") ?: return emptyList()
+                val searchResults = mutableListOf<SearchResponse>()
+
+                for (i in 0 until resultsArray.length()) {
+                    val item = resultsArray.optJSONObject(i) ?: continue
+                    val titleAr = item.optString("title_ar")
+                    val titleEn = item.optString("title_en")
+                    val title = if (titleAr.isNotBlank()) titleAr else titleEn
+                    val href = item.optString("url")
+                    val poster = item.optString("thumbnail_url")
+                    val itemType = item.optString("item_type")
+
+                    if (title.isNotEmpty() && href.isNotEmpty()) {
+                        val tvType = if (itemType == "movie" || href.contains("/movies/")) {
+                            TvType.AnimeMovie
+                        } else {
+                            TvType.Anime
+                        }
+
+                        searchResults.add(
+                            newAnimeSearchResponse(title, href, tvType).apply {
+                                this.posterUrl = poster
+                            }
+                        )
+                    }
+                }
+                return searchResults
+            }
         } catch (e: Exception) {
-        }
-        try {
-            val ajaxUrl = "$mainUrl/wp-admin/admin-ajax.php"
-            val ajaxResponse = httpPost(
-                ajaxUrl,
-                data = mapOf(
-                    "action" to "phoenix_search",
-                    "q" to query,
-                    "query" to query,
-                    "public_key" to publicKey,
-                    "type" to "all",
-                    "page" to "1"
-                ),
-                referer = searchLandingUrl
-            ).text
-            val results = parseSearchJson(ajaxResponse)
-            if (results.isNotEmpty()) return results
-        } catch (e: Exception) {
+            e.printStackTrace()
         }
 
         return emptyList()
     }
-
     override suspend fun load(url: String): LoadResponse? {
         println("AnimePhoenix_DEBUG: Entering load() with url = $url")
         Log.d("AnimePhoenix", "Entering load() with url = $url")
