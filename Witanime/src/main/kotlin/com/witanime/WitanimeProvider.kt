@@ -329,10 +329,6 @@ class WitAnime : MainAPI() {
         res.close()
         return Jsoup.parse(body)
     }
-
-    // ==========================================
-    // 1. الصفحة الرئيسية (Main Page)
-    // ==========================================
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         return withContext(Dispatchers.IO) {
             val document = fetchDocument(mainUrl)
@@ -384,10 +380,6 @@ class WitAnime : MainAPI() {
             newHomePageResponse(homePageList)
         }
     }
-
-    // ==========================================
-    // 2. البحث (Search)
-    // ==========================================
     override suspend fun search(query: String): List<SearchResponse> {
         return withContext(Dispatchers.IO) {
             val url = "$mainUrl/search?q=$query"
@@ -405,10 +397,6 @@ class WitAnime : MainAPI() {
             }.distinctBy { it.url }
         }
     }
-
-    // ==========================================
-    // 3. جلب تفاصيل الأنمي والبوستر والحلقات (Load)
-    // ==========================================
     override suspend fun load(url: String): LoadResponse {
         return withContext(Dispatchers.IO) {
             val document = fetchDocument(url)
@@ -493,10 +481,6 @@ class WitAnime : MainAPI() {
             }
         }
     }
-
-    // ==========================================
-    // 4. جلب الروابط بنظام الدفعات (دفعتين × 9 = 18 سيرفر كحد أقصى)
-    // ==========================================
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -520,7 +504,6 @@ class WitAnime : MainAPI() {
                 var totalAvailableServers = 0
 
                 while (true) {
-                    // مسح الكوكيز القديمة تماماً لكل دفعة لبدء جلسة جديدة نظيفة
                     val cookieStore = mutableMapOf<String, String>()
 
                     fun saveCookiesFrom(res: okhttp3.Response) {
@@ -537,8 +520,6 @@ class WitAnime : MainAPI() {
 
                     fun makeCookieHeader(): String =
                         cookieStore.entries.joinToString("; ") { "${it.key}=${it.value}" }
-
-                    // 1. فتح الصفحة بجلسة جديدة وتخطي الكاش عبر ?t= و User-Agent عشوائي
                     val cacheBusterUrl = "$data?t=${System.currentTimeMillis()}"
                     val randomUa = rotatingUas.random()
 
@@ -557,11 +538,7 @@ class WitAnime : MainAPI() {
                     val csrfToken = Regex("""name=['"]csrf-token['"]\s+content=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                         ?: Regex("""data-csrf=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                         ?: break
-
-                    // مهلة 1.3 ثانية مثل كود بايثون
                     delay(1300)
-
-                    // 2. طلب مصفوفة السيرفرات عبر POST
                     val sourcesPattern = Regex("""sourcesUrl:\s*['"]([^'"]+)['"]""")
                     val rawSources = sourcesPattern.find(pageHtml)?.groupValues?.get(1)?.replace("\\/", "/")
                         ?: "${data.trimEnd('/')}/sources"
@@ -593,12 +570,8 @@ class WitAnime : MainAPI() {
                     val json = JSONObject(sourcesJsonStr)
                     val players = json.optJSONObject("players")
                     val downloads = json.optJSONObject("downloads")
-
-                    // تجميع وحصر السيرفرات عند أول دفعة فقط
                     if (allServersList == null) {
                         val collected = mutableListOf<ServerItem>()
-
-                        // تجميع سيرفرات المشاهدة
                         players?.let { p ->
                             for (q in p.keys()) {
                                 val arr = p.optJSONArray(q) ?: continue
@@ -610,8 +583,6 @@ class WitAnime : MainAPI() {
                                 }
                             }
                         }
-
-                        // تجميع سيرفرات التنزيل
                         downloads?.let { d ->
                             for (q in d.keys()) {
                                 val arr = d.optJSONArray(q) ?: continue
@@ -623,8 +594,6 @@ class WitAnime : MainAPI() {
                                 }
                             }
                         }
-
-                        // الحد الأقصى 18 سيرفر
                         allServersList = collected.take(maxProcessed)
                         totalAvailableServers = allServersList.size
                     }
@@ -632,8 +601,6 @@ class WitAnime : MainAPI() {
                     val serverPool = allServersList ?: break
                     val currentBatch = serverPool.drop(processedCount).take(batchSize)
                     if (currentBatch.isEmpty()) break
-
-                    // 3. معالجة السيرفرات داخل الدفعة الحالية (9 سيرفرات)
                     for ((i, server) in currentBatch.withIndex()) {
                         try {
                             val sourceEndpoint = if (server.isStream) "stream-source" else "download-source"
@@ -641,8 +608,6 @@ class WitAnime : MainAPI() {
 
                             val sourceUrl = "https://witanime.site/watch/$sourceEndpoint/${server.token}"
                             val gateUrl = "https://witanime.site/watch/$gateEndpoint/${server.token}"
-
-                            // أ) إرسال طلب التفعيل المسبق (بدون Referer)
                             val sReq = Request.Builder()
                                 .url(sourceUrl)
                                 .apply {
@@ -661,8 +626,6 @@ class WitAnime : MainAPI() {
                             val sRes = directClient.newCall(sReq).execute()
                             saveCookiesFrom(sRes)
                             sRes.close()
-
-                            // ب) طلب البوابة مباشرة لالتقاط الـ 302 (بدون Referer)
                             val gReq = Request.Builder()
                                 .url(gateUrl)
                                 .apply {
@@ -684,8 +647,6 @@ class WitAnime : MainAPI() {
 
                             val gRes = directClient.newCall(gReq).execute()
                             saveCookiesFrom(gRes)
-
-                            // استخراج رابط الـ iFrame / Embed المباشر من ترويسة التحويل (كود 302)
                             var embedUrl = gRes.header("Location") ?: gRes.header("location")
 
                             if (embedUrl.isNullOrBlank()) {
@@ -695,8 +656,6 @@ class WitAnime : MainAPI() {
                                 embedUrl = match?.groupValues?.get(1)
                             }
                             gRes.close()
-
-                            // إرسال الرابط الصافي لمشغلات التطبيق
                             if (!embedUrl.isNullOrBlank() && embedUrl.startsWith("http")) {
                                 val typeLabel = if (server.isStream) "مشاهدة" else "تنزيل"
                                 val displayName = "${server.label} (${server.quality}) [$typeLabel]"
@@ -718,8 +677,6 @@ class WitAnime : MainAPI() {
                                     loadExtractor(embedUrl, data, subtitleCallback, callback)
                                 }
                             }
-
-                            // فاصل ثانيتين بين السيرفرات داخل الدفعة الواحدة
                             if (i < currentBatch.size - 1) {
                                 delay(2000)
                             }
@@ -730,12 +687,9 @@ class WitAnime : MainAPI() {
                     }
 
                     processedCount += currentBatch.size
-
-                    // التوقف عند الوصول إلى الحد الأقصى (18 سيرفر) أو عند انتهاء السيرفرات
                     if (processedCount >= totalAvailableServers || processedCount >= maxProcessed) {
                         break
                     } else {
-                        // انتظار 5 ثوانٍ كاملة قبل طلب الدفعة الثانية وتجديد الجلسة
                         delay(5000)
                     }
                 }
