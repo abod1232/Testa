@@ -201,75 +201,35 @@ class AnimePhoenixProvider : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val nonce = getNonce(query)
-        val searchResults = mutableListOf<SearchResponse>()
+    val searchUrl = "$mainUrl/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}"
+    val document = httpGet(searchUrl).document
 
-        try {
-            val response = httpPost(
-                "$mainUrl/wp-admin/admin-ajax.php",
-                data = mapOf(
-                    "action" to "phoenix_search",
-                    "nonce" to nonce,
-                    "q" to query,
-                    "type" to "all",
-                    "genre" to "",
-                    "status" to "",
-                    "year" to "",
-                    "season" to "",
-                    "sort" to "relevance",
-                    "page" to "1",
-                    "per_page" to "25",
-                    "dropdown" to "0"
-                ),
-                referer = "$mainUrl/search/?q=${URLEncoder.encode(query, "UTF-8")}"
-            ).text
+    // استهداف بطاقات الأنمي داخل شبكة نتائج البحث
+    val cards = document.select("section div.grid > a[data-preview], section div.grid > a[href*='/anime/'], section div.grid > a[href*='/movie/']")
 
-            val json = JSONObject(response)
-            if (json.optBoolean("success")) {
-                val data = json.getJSONObject("data")
-                val results = data.getJSONArray("results")
+    return cards.mapNotNull { card ->
+        val href = card.attr("href")?.trim() ?: return@mapNotNull null
+        val fullUrl = fixUrlNull(href) ?: return@mapNotNull null
 
-                for (i in 0 until results.length()) {
-                    val item = results.getJSONObject(i)
-                    val titleAr = item.optString("title_ar")
-                    val titleEn = item.optString("title_en")
-                    val title = if (titleAr.isNotEmpty()) titleAr else titleEn
-                    val href = item.optString("url")
-                    val poster = item.optString("thumbnail_url")
-                    val itemType = item.optString("item_type")
+        // استخراج العنوان
+        val title = card.selectFirst("h3")?.text()?.trim()
+            ?: card.selectFirst("img")?.attr("alt")?.trim()
+            ?: return@mapNotNull null
 
-                    val tvType = if (itemType == "movie") TvType.AnimeMovie else TvType.Anime
-
-                    if (title.isNotEmpty() && href.isNotEmpty()) {
-                        searchResults.add(
-                            newAnimeSearchResponse(title, href, tvType).apply {
-                                this.posterUrl = poster
-                            }
-                        )
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            try {
-                val searchUrl = "$mainUrl/search/?q=${URLEncoder.encode(query, "UTF-8")}"
-                val response = httpGet(searchUrl).text
-                val soup = Jsoup.parse(response)
-                soup.select("div.FJ-episode-wrap").forEach { wrap ->
-                    val titleEl = wrap.selectFirst("a.FJ-Phoenix-Anastasia-EpCard-Name")
-                    val linkEl = wrap.selectFirst("a.FJ-episode-img-box") ?: wrap.selectFirst("a")
-                    val title = titleEl?.text() ?: ""
-                    val href = linkEl?.attr("href") ?: ""
-                    if (title.isNotEmpty() && href.isNotEmpty()) {
-                        searchResults.add(
-                            newAnimeSearchResponse(title, href, TvType.Anime)
-                        )
-                    }
-                }
-            } catch (inner: Exception) {
-            }
+        // استخراج البوستر
+        val poster = card.selectFirst("img")?.let { img ->
+            img.attr("src").ifEmpty { img.attr("data-src") }
         }
-        return searchResults
+
+        // تحديد نوع العمل (فيلم أو أنمي)
+        val isMovie = href.contains("/movie/") || card.text().contains("فيلم")
+        val tvType = if (isMovie) TvType.AnimeMovie else TvType.Anime
+
+        newAnimeSearchResponse(title, fullUrl, tvType) {
+            this.posterUrl = poster
+        }
     }
+}
 
     override suspend fun load(url: String): LoadResponse? {
         println("AnimePhoenix_DEBUG: Entering load() with url = $url")
