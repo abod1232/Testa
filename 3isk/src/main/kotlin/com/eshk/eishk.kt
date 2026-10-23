@@ -1,6 +1,5 @@
 package com.eshk
 
-
 import android.util.Base64
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -150,69 +149,91 @@ class AnimeRift : MainAPI() {
         return bos.toByteArray()
     }
 
-    private suspend fun ensureInitialized(forceRefresh: Boolean = false) {
-        if (!forceRefresh) {
+    // تهيئة سريعة وفورية بدون أي اتصال بشبكة فايربيس
+    private fun ensureInitialized() {
+        if (!fid.isNullOrEmpty() && !gatewayBaseUrl.isNullOrEmpty() && !deviceId.isNullOrEmpty()) {
+            return
+        }
+
+        val disk = loadFromDisk()
+        if (disk != null) {
+            fid = disk["fid"]
+            firebaseToken = disk["firebaseToken"]
+            gatewayBaseUrl = disk["gatewayBaseUrl"]
+            deviceId = disk["deviceId"]
+            sessionKey = disk["sessionKey"]
+            syntheticBuildId = disk["syntheticBuildId"]
+            syntheticDeviceInfoJson = disk["syntheticDeviceInfoJson"]
+
+            if (!gatewayBaseUrl.isNullOrEmpty()) {
+                mainUrl = gatewayBaseUrl!!
+            }
+
             if (!fid.isNullOrEmpty() && !gatewayBaseUrl.isNullOrEmpty() && !deviceId.isNullOrEmpty()) {
                 return
             }
-
-            val disk = loadFromDisk()
-            if (disk != null) {
-                fid = disk["fid"]
-                firebaseToken = disk["firebaseToken"]
-                gatewayBaseUrl = disk["gatewayBaseUrl"]
-                deviceId = disk["deviceId"]
-                sessionKey = disk["sessionKey"]
-                syntheticBuildId = disk["syntheticBuildId"]
-                syntheticDeviceInfoJson = disk["syntheticDeviceInfoJson"]
-
-                if (!fid.isNullOrEmpty() && !gatewayBaseUrl.isNullOrEmpty() && !deviceId.isNullOrEmpty()) {
-                    return
-                }
-            }
         }
 
-        withContext(Dispatchers.IO) {
-            if (gatewayBaseUrl.isNullOrEmpty()) {
-                gatewayBaseUrl = mainUrl
-            }
+        // إذا كان التطبيق يعمل لأول مرة، نبدأ فوراً بالرابط الافتراضي بدون أي تأخير
+        gatewayBaseUrl = gatewayBaseUrl ?: mainUrl
+        if (fid.isNullOrEmpty()) {
+            fid = UUID.randomUUID().toString().replace("-", "").take(22)
+        }
+        if (deviceId.isNullOrEmpty()) {
+            deviceId = "$fid:${generateFcmToken()}"
+        }
+        if (syntheticBuildId.isNullOrEmpty() || syntheticDeviceInfoJson.isNullOrEmpty()) {
+            val (buildId, deviceInfoJson) = generateSyntheticDevice()
+            syntheticBuildId = buildId
+            syntheticDeviceInfoJson = deviceInfoJson
+        }
 
-            try {
-                registerFirebaseInstallation()
-            } catch (e: Exception) {
-                android.util.Log.e(name, "Firebase registration failed: ${e.message}")
-            }
-            if (fid.isNullOrEmpty()) {
-                fid = UUID.randomUUID().toString().replace("-", "").take(22)
-            }
-
-            try {
-                fetchRemoteConfig()
-            } catch (e: Exception) {
-                android.util.Log.e(name, "Fetch RemoteConfig failed, using mainUrl: ${e.message}")
-                gatewayBaseUrl = mainUrl
-            }
-
-            try {
-                registerDevice()
-            } catch (e: Exception) {
-                android.util.Log.e(name, "Register device failed: ${e.message}")
-                if (deviceId.isNullOrEmpty()) {
-                    deviceId = "${fid ?: ""}:${generateFcmToken()}"
-                }
-            }
-
-            val map = mapOf(
-                "fid" to (fid ?: ""),
+        saveToDisk(
+            mapOf(
+                "fid" to fid!!,
                 "firebaseToken" to (firebaseToken ?: ""),
-                "gatewayBaseUrl" to (gatewayBaseUrl ?: mainUrl),
-                "deviceId" to (deviceId ?: ""),
+                "gatewayBaseUrl" to gatewayBaseUrl!!,
+                "deviceId" to deviceId!!,
                 "sessionKey" to (sessionKey ?: ""),
-                "syntheticBuildId" to (syntheticBuildId ?: "BP2A.250605.015"),
-                "syntheticDeviceInfoJson" to (syntheticDeviceInfoJson ?: "{}")
+                "syntheticBuildId" to syntheticBuildId!!,
+                "syntheticDeviceInfoJson" to syntheticDeviceInfoJson!!
             )
-            saveToDisk(map)
+        )
+    }
+
+    // يتم استدعاء هذه الدالة فقط في حالة فشل الاتصال بالرابط الأساسي
+    private suspend fun recoverFromFirebase() = withContext(Dispatchers.IO) {
+        android.util.Log.d(name, "⚠️ فشل الاتصال بالسيرفر الحالي. جاري الاتصال بـ Firebase لجلب الرابط المحدث وتحديثه نهائياً...")
+        try {
+            registerFirebaseInstallation()
+        } catch (e: Exception) {
+            android.util.Log.e(name, "Firebase registration: ${e.message}")
         }
+
+        try {
+            fetchRemoteConfig()
+        } catch (e: Exception) {
+            android.util.Log.e(name, "Firebase RemoteConfig: ${e.message}")
+        }
+
+        try {
+            registerDevice()
+        } catch (e: Exception) {
+            android.util.Log.e(name, "Device registration: ${e.message}")
+        }
+
+        // حفظ الرابط المحدث نهائياً في التخزين الدائم
+        val map = mapOf(
+            "fid" to (fid ?: ""),
+            "firebaseToken" to (firebaseToken ?: ""),
+            "gatewayBaseUrl" to (gatewayBaseUrl ?: mainUrl),
+            "deviceId" to (deviceId ?: ""),
+            "sessionKey" to (sessionKey ?: ""),
+            "syntheticBuildId" to (syntheticBuildId ?: "BP2A.250605.015"),
+            "syntheticDeviceInfoJson" to (syntheticDeviceInfoJson ?: "{}")
+        )
+        saveToDisk(map)
+        android.util.Log.d(name, "✅ تم تحديث الرابط بنجاح إلى: $gatewayBaseUrl")
     }
 
     private fun registerFirebaseInstallation() {
@@ -234,15 +255,12 @@ class AnimeRift : MainAPI() {
             .build()
 
         val response = app.baseClient.newCall(request).execute()
-        if (!response.isSuccessful) {
-            android.util.Log.e(name, "Firebase returned code: ${response.code}")
-            return
-        }
+        if (!response.isSuccessful) return
 
         val body = response.body?.string() ?: return
         val json = mapper.readTree(body)
-        fid = json.get("fid")?.asText()
-        firebaseToken = json.get("authToken")?.get("token")?.asText()
+        fid = json.get("fid")?.asText() ?: fid
+        firebaseToken = json.get("authToken")?.get("token")?.asText() ?: firebaseToken
     }
 
     private suspend fun fetchRemoteConfig() {
@@ -273,6 +291,7 @@ class AnimeRift : MainAPI() {
             val configUrl = json.get("entries")?.get("anime_rift_android_gateway_base_url_v4")?.asText()?.replace("\"", "")
             if (!configUrl.isNullOrEmpty()) {
                 gatewayBaseUrl = configUrl
+                mainUrl = configUrl
             }
         }
     }
@@ -303,8 +322,15 @@ class AnimeRift : MainAPI() {
         sessionKey = json.get("sessionKey")?.asText()
     }
 
-    private suspend fun apiCall(url: String, scope: String, method: String = "GET", body: Map<String, Any?>? = null, isRetry: Boolean = false): JsonNode {
+    private suspend fun apiCall(
+        url: String,
+        scope: String,
+        method: String = "GET",
+        body: Map<String, Any?>? = null,
+        isRetry: Boolean = false
+    ): JsonNode {
         ensureInitialized()
+        val currentBase = gatewayBaseUrl ?: mainUrl
         val integrityToken = generateIntegrityToken(scope)
         val timezone = generateDeviceTimezone()
 
@@ -332,11 +358,21 @@ class AnimeRift : MainAPI() {
                 "PUT" -> app.put(url, headers = headers, json = body)
                 else -> app.get(url, headers = headers)
             }
+
+            if (!response.isSuccessful && !isRetry) {
+                recoverFromFirebase()
+                val updatedBase = gatewayBaseUrl ?: mainUrl
+                val retryUrl = if (url.startsWith(currentBase)) url.replace(currentBase, updatedBase) else url
+                return apiCall(retryUrl, scope, method, body, isRetry = true)
+            }
             return response.parsed<JsonNode>()
         } catch (e: Exception) {
-            if (!isRetry && (e.message?.contains("401") == true || e.message?.contains("403") == true)) {
-                ensureInitialized(forceRefresh = true)
-                return apiCall(url, scope, method, body, isRetry = true)
+            // في حالة فشل الاتصال بالرابط القديم، نجلب الرابط الجديد ونعيد المحاولة
+            if (!isRetry) {
+                recoverFromFirebase()
+                val updatedBase = gatewayBaseUrl ?: mainUrl
+                val retryUrl = if (url.startsWith(currentBase)) url.replace(currentBase, updatedBase) else url
+                return apiCall(retryUrl, scope, method, body, isRetry = true)
             }
             throw e
         }
@@ -365,7 +401,7 @@ class AnimeRift : MainAPI() {
                 list.add(
                     newAnimeSearchResponse(
                         name = item.get("title")?.asText() ?: "",
-                        url = "$mainUrl/api/v4/library/details/${item.get("_id")?.asText()}"
+                        url = "$baseUrl/api/v4/library/details/${item.get("_id")?.asText()}"
                     ) {
                         this.posterUrl = item.get("medium_picture")?.asText() ?: item.get("main_picture")?.asText()
                         this.year = item.get("release_year")?.asInt()
@@ -400,7 +436,7 @@ class AnimeRift : MainAPI() {
                 results.add(
                     newAnimeSearchResponse(
                         name = item.get("title")?.asText() ?: "",
-                        url = "$mainUrl/api/v4/library/details/${item.get("_id")?.asText()}"
+                        url = "$baseUrl/api/v4/library/details/${item.get("_id")?.asText()}"
                     ) {
                         this.posterUrl = item.get("medium_picture")?.asText() ?: item.get("main_picture")?.asText()
                         this.year = item.get("release_year")?.asInt()
@@ -433,7 +469,7 @@ class AnimeRift : MainAPI() {
             allRelated.add(
                 newAnimeSearchResponse(
                     name = rec.get("title")?.asText() ?: "",
-                    url = "$mainUrl/api/v4/library/details/${rec.get("_id")?.asText()}"
+                    url = "$baseUrl/api/v4/library/details/${rec.get("_id")?.asText()}"
                 ) {
                     this.posterUrl = rec.get("main_picture")?.asText()
                     this.score = recRating?.let { Score.from10(it) }
@@ -642,13 +678,13 @@ class AnimeRift : MainAPI() {
                             }
                         }
                     } catch (e: Exception) {
-                        android.util.Log.e(name, "LoadLinks single item error: ${e.message}")
+                        android.util.Log.e(name, "LoadLinks error: ${e.message}")
                     }
                 }
             }
             return@withContext true
         } catch (e: Exception) {
-            android.util.Log.e(name, "LoadLinks fatal error: ${e.message}")
+            android.util.Log.e(name, "LoadLinks fatal: ${e.message}")
             return@withContext false
         }
     }
