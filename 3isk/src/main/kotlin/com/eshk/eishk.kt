@@ -390,8 +390,6 @@ class AnimeRift : MainAPI() {
                 }
                 throw Exception("HTTP $statusCode: $rawBody")
             }
-
-            // طباعة جزء من الرد لمعاينته في الـ Logs
             val preview = if (rawBody.length > 500) rawBody.substring(0, 500) + "... [مقتطع]" else rawBody
             Log.d(TAG, "📄 [BODY PREVIEW]: $preview")
 
