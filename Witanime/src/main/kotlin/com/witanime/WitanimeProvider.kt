@@ -250,7 +250,7 @@ class WitAnime : MainAPI() {
             }
         }
 
-        private checkMegaPlayback(player: Any) {
+        private fun checkMegaPlayback(player: Any) {
             val currentTime = System.currentTimeMillis()
             synchronized(WitAnime::class.java) {
                 if (WitAnime.isWebViewOpen || (currentTime - WitAnime.lastWebViewOpenTime) < 10000L || activeDialog?.isShowing == true) return
