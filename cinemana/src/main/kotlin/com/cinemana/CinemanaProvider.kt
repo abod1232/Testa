@@ -595,12 +595,17 @@ class Cinemana(val context: Context) : MainAPI() {
         newSearchResponseList(finalResults, hasMore)
     }
 
-    override suspend fun load(url: String): LoadResponse? {
+        override suspend fun load(url: String): LoadResponse? {
         val extractedId = url.substringAfterLast("/")
         val detailsUrl = "$mainUrl/api/android/allVideoInfo/id/$extractedId"
 
+        val headers = mapOf(
+            "User-Agent" to "Dalvik/2.1.0 (Linux; U; Android 13; M2101K7AG Build/SKQ1.210908.001)",
+            "Accept" to "application/json"
+        )
+
         val detailsMap = try {
-            app.get(detailsUrl).parsedSafe<Map<String, Any>>()
+            app.get(detailsUrl, headers = headers).parsedSafe<Map<String, Any>>()
         } catch (e: Exception) {
             null
         } ?: return null
@@ -637,6 +642,7 @@ class Cinemana(val context: Context) : MainAPI() {
                 ), roleString = null
             )
         } ?: emptyList()
+
         val writersList = detailsMap["writersInfo"] as? List<*>
         val writersMapped = writersList?.mapNotNull { item ->
             val map = item as? Map<*, *> ?: return@mapNotNull null
@@ -647,6 +653,7 @@ class Cinemana(val context: Context) : MainAPI() {
                 ?: "defaultImages/not_available.jpg"
             ActorData(Actor(name = name, image = image), roleString = "الكاتب")
         } ?: emptyList()
+
         val directorsList = detailsMap["directorsInfo"] as? List<*>
         val directorsMapped = directorsList?.mapNotNull { item ->
             val map = item as? Map<*, *> ?: return@mapNotNull null
@@ -657,6 +664,7 @@ class Cinemana(val context: Context) : MainAPI() {
                 ?: "defaultImages/not_available.jpg"
             ActorData(Actor(name = name, image = image), roleString = "المخرج")
         } ?: emptyList()
+
         val combinedActors = actorsList + writersMapped + directorsMapped
         val likes = detailsMap["videoLikesNumber"]?.toString()
             ?: detailsMap["Likes"]?.toString()
@@ -667,6 +675,7 @@ class Cinemana(val context: Context) : MainAPI() {
         val combinedTags = listOf("👍 $likes", "👎 $dislikes") + genresList
         val durationSec = detailsMap["duration"]?.toString()?.toDoubleOrNull()?.toInt()
         val durationInMinutes = durationSec?.let { it / 60 }
+        
         val recsUrl = "https://recommend.shabakaty.com/api/recommendation/recommend/"
         val recsList = try {
             val recsResponse = app.post(
@@ -675,7 +684,8 @@ class Cinemana(val context: Context) : MainAPI() {
                     "MovieId" to extractedId,
                     "MovieName" to (details.enTitle ?: title),
                     "ReProcessIfExpired" to true
-                )
+                ),
+                headers = headers
             ).parsedSafe<Map<String, Any>>()
 
             (recsResponse?.get("recommendations") as? List<*>)?.mapNotNull {
@@ -687,56 +697,77 @@ class Cinemana(val context: Context) : MainAPI() {
         }
 
         return if (details.kind == 2) {
-            val seasonsAndEpisodesUrl = "$mainUrl/api/android/videoSeason/id/$extractedId"
-
-            val episodesResponse = try {
-                app.get(seasonsAndEpisodesUrl).parsedSafe<List<Map<String, Any>>>()
+            // 1. جلب قائمة المواسم عبر الـ API الجديد
+            val seasonsUrl = "$mainUrl/api/android/videoSeasonNumber/id/$extractedId"
+            val seasonsResponse = try {
+                app.get(seasonsUrl, headers = headers).parsedSafe<List<Map<String, Any>>>()
             } catch (e: Exception) {
                 null
             }
 
             val episodes = mutableListOf<Episode>()
-            val seasonsMap = mutableMapOf<Int, MutableList<Episode>>()
+            val seasonNumbers = seasonsResponse?.mapNotNull { 
+                it["season"]?.toString()?.toIntOrNull() 
+            }?.distinct()?.sorted() ?: listOf(1)
 
-            episodesResponse?.forEach { episodeMap ->
-                val epDetails = episodeMap.toCinemanaItem()
-                if (epDetails.nb != null && (epDetails.enTitle != null || epDetails.arTitle != null)) {
-                    val epNum = (epDetails.episodeNummer as? String)?.toIntOrNull() ?: 1
-                    val sNum = (epDetails.season as? String)?.toIntOrNull() ?: 1
-                    val epDurationSec =
-                        episodeMap["duration"]?.toString()?.toDoubleOrNull()?.toInt()
-                    val epDurationInMinutes = epDurationSec?.let { it / 60 }
+            // 2. جلب الحلقات بناءً على أرقام المواسم المتوفرة
+            seasonNumbers.forEach { sNum ->
+                // محاولة جلب الحلقات لكل موسم (إذا كان الـ API يدعم تصفية الموسم أو يجلبها كاملة)
+                val seasonsAndEpisodesUrl = "$mainUrl/api/android/videoSeason/id/$extractedId"
+                val episodesResponse = try {
+                    app.get(seasonsAndEpisodesUrl, headers = headers).parsedSafe<List<Map<String, Any>>>()
+                } catch (e: Exception) {
+                    null
+                }
 
-                    seasonsMap.getOrPut(sNum) { mutableListOf() }.add(
-                        newEpisode(epDetails.nb) {
-                            this.name = "الموسم $sNum - الحلقة $epNum"
-                            this.season = sNum
-                            this.episode = epNum
-                            this.posterUrl = epDetails.imgObjUrl ?: posterUrl
-                            this.description = epDetails.arContent?.takeIf { it.isNotBlank() }
-                                ?: epDetails.enContent
-                            this.runTime = epDurationInMinutes
+                episodesResponse?.forEach { episodeMap ->
+                    val epDetails = episodeMap.toCinemanaItem()
+                    if (epDetails.nb != null && (epDetails.enTitle != null || epDetails.arTitle != null)) {
+                        val epNum = (epDetails.episodeNummer as? String)?.toIntOrNull() ?: 1
+                        val sNumParsed = (epDetails.season as? String)?.toIntOrNull() ?: 1
+                        
+                        // إضافة الحلقة فقط إذا كانت تنتمي للموسم الحالي في حلقة التكرار
+                        if (sNumParsed == sNum) {
+                            val epDurationSec = episodeMap["duration"]?.toString()?.toDoubleOrNull()?.toInt()
+                            val epDurationInMinutes = epDurationSec?.let { it / 60 }
+
+                            // منع تكرار إضافة نفس الحلقة إذا كانت مكررة في استجابة السيرفر
+                            if (episodes.none { it.id == epDetails.nb }) {
+                                episodes.add(
+                                    newEpisode(epDetails.nb) {
+                                        this.name = "الموسم $sNum - الحلقة $epNum"
+                                        this.season = sNum
+                                        this.episode = epNum
+                                        this.posterUrl = epDetails.imgObjUrl ?: posterUrl
+                                        this.description = epDetails.arContent?.takeIf { it.isNotBlank() }
+                                            ?: epDetails.enContent
+                                        this.runTime = epDurationInMinutes
+                                    }
+                                )
+                            }
                         }
-                    )
+                    }
                 }
             }
 
-            seasonsMap.keys.sorted().forEach { sNum ->
-                seasonsMap[sNum]?.sortBy { it.episode }
-                seasonsMap[sNum]?.let { episodes.addAll(it) }
-            }
+            // ترتيب الحلقات نهائياً حسب الموسم ثم رقم الحلقة
+            val finalEpisodes = episodes.sortedWith(compareBy({ it.season }, { it.episode }))
 
-            newTvSeriesLoadResponse(title, extractedId, TvType.TvSeries, episodes) {
-                this.posterUrl = posterUrl; this.plot = plot; this.year = year; this.score =
-                finalRatingScore
+            newTvSeriesLoadResponse(title, extractedId, TvType.TvSeries, finalEpisodes) {
+                this.posterUrl = posterUrl
+                this.plot = plot
+                this.year = year
+                this.score = finalRatingScore
                 this.tags = combinedTags
                 this.actors = combinedActors
                 this.recommendations = recsList
             }
         } else {
             newMovieLoadResponse(title, extractedId, TvType.Movie, extractedId) {
-                this.posterUrl = posterUrl; this.plot = plot; this.year = year; this.score =
-                finalRatingScore
+                this.posterUrl = posterUrl
+                this.plot = plot
+                this.year = year
+                this.score = finalRatingScore
                 this.tags = combinedTags
                 this.actors = combinedActors
                 this.recommendations = recsList
@@ -744,6 +775,7 @@ class Cinemana(val context: Context) : MainAPI() {
             }
         }
     }
+
 
     private fun extractQuality(resolution: String?): Int {
         if (resolution == null) return Qualities.Unknown.value
