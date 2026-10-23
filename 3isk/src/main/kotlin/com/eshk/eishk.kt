@@ -172,7 +172,6 @@ class AnimeRift : MainAPI() {
         }
 
         withContext(Dispatchers.IO) {
-            // اعتماد mainUrl كقيمة افتراضية مسبقاً
             if (gatewayBaseUrl.isNullOrEmpty()) {
                 gatewayBaseUrl = mainUrl
             }
@@ -182,8 +181,6 @@ class AnimeRift : MainAPI() {
             } catch (e: Exception) {
                 android.util.Log.e(name, "Firebase registration failed: ${e.message}")
             }
-
-            // تأمين fid احتياطي إذا لم يتم جلبه من فايربيس
             if (fid.isNullOrEmpty()) {
                 fid = UUID.randomUUID().toString().replace("-", "").take(22)
             }
