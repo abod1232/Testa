@@ -595,7 +595,7 @@ class Cinemana(val context: Context) : MainAPI() {
         newSearchResponseList(finalResults, hasMore)
     }
 
-        override suspend fun load(url: String): LoadResponse? {
+            override suspend fun load(url: String): LoadResponse? {
         val extractedId = url.substringAfterLast("/")
         val detailsUrl = "$mainUrl/api/android/allVideoInfo/id/$extractedId"
 
@@ -708,6 +708,7 @@ class Cinemana(val context: Context) : MainAPI() {
             val seasonNumbers = seasonsResponse?.mapNotNull { 
                 it["season"]?.toString()?.toIntOrNull() 
             }?.distinct()?.sorted() ?: listOf(1)
+
             seasonNumbers.forEach { sNum ->
                 val seasonsAndEpisodesUrl = "$mainUrl/api/android/videoSeason/id/$extractedId"
                 val episodesResponse = try {
@@ -721,27 +722,29 @@ class Cinemana(val context: Context) : MainAPI() {
                     if (epDetails.nb != null && (epDetails.enTitle != null || epDetails.arTitle != null)) {
                         val epNum = (epDetails.episodeNummer as? String)?.toIntOrNull() ?: 1
                         val sNumParsed = (epDetails.season as? String)?.toIntOrNull() ?: 1
+                        
                         if (sNumParsed == sNum) {
                             val epDurationSec = episodeMap["duration"]?.toString()?.toDoubleOrNull()?.toInt()
                             val epDurationInMinutes = epDurationSec?.let { it / 60 }
-                            if (episodes.none { it.id == epDetails.nb }) {
-                                episodes.add(
-                                    newEpisode(epDetails.nb) {
-                                        this.name = "الموسم $sNum - الحلقة $epNum"
-                                        this.season = sNum
-                                        this.episode = epNum
-                                        this.posterUrl = epDetails.imgObjUrl ?: posterUrl
-                                        this.description = epDetails.arContent?.takeIf { it.isNotBlank() }
-                                            ?: epDetails.enContent
-                                        this.runTime = epDurationInMinutes
-                                    }
-                                )
-                            }
+
+                            episodes.add(
+                                newEpisode(epDetails.nb) {
+                                    this.name = "الموسم $sNum - الحلقة $epNum"
+                                    this.season = sNum
+                                    this.episode = epNum
+                                    this.posterUrl = epDetails.imgObjUrl ?: posterUrl
+                                    this.description = epDetails.arContent?.takeIf { it.isNotBlank() }
+                                        ?: epDetails.enContent
+                                    this.runTime = epDurationInMinutes
+                                }
+                            )
                         }
                     }
                 }
             }
-            val finalEpisodes = episodes.sortedWith(compareBy({ it.season }, { it.episode }))
+
+            // إزالة التكرار بناءً على بيانات الحلقة (data) وترتيبها بشكل صحيح
+            val finalEpisodes = episodes.distinctBy { it.data }.sortedWith(compareBy({ it.season }, { it.episode }))
 
             newTvSeriesLoadResponse(title, extractedId, TvType.TvSeries, finalEpisodes) {
                 this.posterUrl = posterUrl
@@ -765,6 +768,7 @@ class Cinemana(val context: Context) : MainAPI() {
             }
         }
     }
+
 
 
     private fun extractQuality(resolution: String?): Int {
