@@ -742,8 +742,6 @@ class Cinemana(val context: Context) : MainAPI() {
                     }
                 }
             }
-
-            // إزالة التكرار بناءً على بيانات الحلقة (data) وترتيبها بشكل صحيح
             val finalEpisodes = episodes.distinctBy { it.data }.sortedWith(compareBy({ it.season }, { it.episode }))
 
             newTvSeriesLoadResponse(title, extractedId, TvType.TvSeries, finalEpisodes) {
