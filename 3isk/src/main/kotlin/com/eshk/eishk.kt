@@ -148,8 +148,6 @@ class AnimeRift : MainAPI() {
         java.util.zip.GZIPOutputStream(bos).use { it.write(data.toByteArray()) }
         return bos.toByteArray()
     }
-
-    // تهيئة سريعة وفورية بدون أي اتصال بشبكة فايربيس
     private fun ensureInitialized() {
         if (!fid.isNullOrEmpty() && !gatewayBaseUrl.isNullOrEmpty() && !deviceId.isNullOrEmpty()) {
             return
@@ -173,8 +171,6 @@ class AnimeRift : MainAPI() {
                 return
             }
         }
-
-        // إذا كان التطبيق يعمل لأول مرة، نبدأ فوراً بالرابط الافتراضي بدون أي تأخير
         gatewayBaseUrl = gatewayBaseUrl ?: mainUrl
         if (fid.isNullOrEmpty()) {
             fid = UUID.randomUUID().toString().replace("-", "").take(22)
@@ -200,8 +196,6 @@ class AnimeRift : MainAPI() {
             )
         )
     }
-
-    // يتم استدعاء هذه الدالة فقط في حالة فشل الاتصال بالرابط الأساسي
     private suspend fun recoverFromFirebase() = withContext(Dispatchers.IO) {
         android.util.Log.d(name, "⚠️ فشل الاتصال بالسيرفر الحالي. جاري الاتصال بـ Firebase لجلب الرابط المحدث وتحديثه نهائياً...")
         try {
@@ -221,8 +215,6 @@ class AnimeRift : MainAPI() {
         } catch (e: Exception) {
             android.util.Log.e(name, "Device registration: ${e.message}")
         }
-
-        // حفظ الرابط المحدث نهائياً في التخزين الدائم
         val map = mapOf(
             "fid" to (fid ?: ""),
             "firebaseToken" to (firebaseToken ?: ""),
@@ -367,7 +359,6 @@ class AnimeRift : MainAPI() {
             }
             return response.parsed<JsonNode>()
         } catch (e: Exception) {
-            // في حالة فشل الاتصال بالرابط القديم، نجلب الرابط الجديد ونعيد المحاولة
             if (!isRetry) {
                 recoverFromFirebase()
                 val updatedBase = gatewayBaseUrl ?: mainUrl
