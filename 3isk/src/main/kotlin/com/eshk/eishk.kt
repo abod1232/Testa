@@ -1,12 +1,12 @@
 package com.eshk
 
 import android.util.Base64
-import android.util.Log
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -18,14 +18,12 @@ import javax.crypto.spec.SecretKeySpec
 
 class AnimeRift : MainAPI() {
 
-    override var mainUrl = "https://gateway.anime-rift.com"
+    override var mainUrl = "https://gateway.embrassme.top/api/v4"
     override var name = "AnimeRift"
     override var lang = "ar"
     override val hasMainPage = true
     override val hasDownloadSupport = true
     override val supportedTypes = setOf(TvType.Anime)
-
-    private val TAG = "AnimeRiftDebug"
 
     private val JWT_SECRET = "RIFT_JWT_SECRET_PLACEHOLDER"
     private val FIREBASE_API_KEY = "RIFT_FIREBASE_API_KEY_PLACEHOLDER"
@@ -52,9 +50,7 @@ class AnimeRift : MainAPI() {
                 val file = getCacheFile()
                 val jsonStr = ObjectMapper().writeValueAsString(data)
                 file.writeText(jsonStr)
-            } catch (e: Exception) {
-                Log.e("AnimeRiftDebug", "❌ فشل حفظ الكاش على القرص: ${e.message}")
-            }
+            } catch (_: Exception) {}
         }
 
         private fun loadFromDisk(): Map<String, String>? {
@@ -75,8 +71,7 @@ class AnimeRift : MainAPI() {
                         )
                     } else null
                 } else null
-            } catch (e: Exception) {
-                Log.e("AnimeRiftDebug", "❌ فشل قراءة الكاش: ${e.message}")
+            } catch (_: Exception) {
                 null
             }
         }
@@ -175,7 +170,6 @@ class AnimeRift : MainAPI() {
             }
 
             if (!fid.isNullOrEmpty() && !gatewayBaseUrl.isNullOrEmpty() && !deviceId.isNullOrEmpty()) {
-                Log.d(TAG, "📦 تم استرجاع الجلسة من الكاش بنجاح. Gateway: $gatewayBaseUrl | FID: $fid")
                 return
             }
         }
@@ -193,8 +187,6 @@ class AnimeRift : MainAPI() {
             syntheticDeviceInfoJson = deviceInfoJson
         }
 
-        Log.d(TAG, "⚡ تهيئة محلية أولية سريعة. Gateway: $gatewayBaseUrl | DeviceID: $deviceId")
-
         saveToDisk(
             mapOf(
                 "fid" to fid!!,
@@ -209,24 +201,17 @@ class AnimeRift : MainAPI() {
     }
 
     private suspend fun recoverFromFirebase() = withContext(Dispatchers.IO) {
-        Log.w(TAG, "🔄 [Recovery] جاري استدعاء Firebase لجلب الرابط المحدث والتوكن...")
         try {
             registerFirebaseInstallation()
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ [Recovery] خطأ Firebase Registration: ${e.message}")
-        }
+        } catch (_: Exception) {}
 
         try {
             fetchRemoteConfig()
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ [Recovery] خطأ RemoteConfig: ${e.message}")
-        }
+        } catch (_: Exception) {}
 
         try {
             registerDevice()
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ [Recovery] خطأ Device Register: ${e.message}")
-        }
+        } catch (_: Exception) {}
 
         val map = mapOf(
             "fid" to (fid ?: ""),
@@ -238,7 +223,6 @@ class AnimeRift : MainAPI() {
             "syntheticDeviceInfoJson" to (syntheticDeviceInfoJson ?: "{}")
         )
         saveToDisk(map)
-        Log.i(TAG, "✅ [Recovery] اكتمل التحديث. الرابط الدائم الجديد: $gatewayBaseUrl")
     }
 
     private fun registerFirebaseInstallation() {
@@ -260,17 +244,12 @@ class AnimeRift : MainAPI() {
             .build()
 
         val response = app.baseClient.newCall(request).execute()
-        Log.d(TAG, "📡 Firebase Installations Code: ${response.code}")
-        if (!response.isSuccessful) {
-            Log.w(TAG, "⚠️ فشل رد فايربيس (الكود ليس 200)")
-            return
-        }
+        if (!response.isSuccessful) return
 
         val body = response.body?.string() ?: return
         val json = mapper.readTree(body)
         fid = json.get("fid")?.asText() ?: fid
         firebaseToken = json.get("authToken")?.get("token")?.asText() ?: firebaseToken
-        Log.d(TAG, "🔑 تم الحصول على FID من جوجل: $fid")
     }
 
     private suspend fun fetchRemoteConfig() {
@@ -296,14 +275,12 @@ class AnimeRift : MainAPI() {
         )
 
         val res = app.post(url, headers = headers, json = payload)
-        Log.d(TAG, "📡 RemoteConfig Response Code: ${res.code}")
         if (res.isSuccessful) {
             val json = res.parsed<JsonNode>()
             val configUrl = json.get("entries")?.get("anime_rift_android_gateway_base_url_v4")?.asText()?.replace("\"", "")
             if (!configUrl.isNullOrEmpty()) {
                 gatewayBaseUrl = configUrl
                 mainUrl = configUrl
-                Log.d(TAG, "🌐 الرابط المستخرج من RemoteConfig: $configUrl")
             }
         }
     }
@@ -332,7 +309,6 @@ class AnimeRift : MainAPI() {
 
         val json = apiCall(url, "USER.AUTH.DEVICE.REGISTER", "POST", payload)
         sessionKey = json.get("sessionKey")?.asText()
-        Log.d(TAG, "📱 اكتمل تسجيل الجهاز بنجاح. SessionKey: $sessionKey")
     }
 
     private suspend fun apiCall(
@@ -365,9 +341,6 @@ class AnimeRift : MainAPI() {
             "x-os" to "android"
         )
 
-        Log.d(TAG, "🚀 [API REQUEST] $method -> $url")
-        Log.d(TAG, "📋 [HEADERS] FID: ${fid ?: "null"} | DeviceID: ${deviceId ?: "null"} | Scope: $scope")
-
         try {
             val response = when (method.uppercase()) {
                 "POST" -> app.post(url, headers = headers, json = body)
@@ -377,12 +350,14 @@ class AnimeRift : MainAPI() {
 
             val statusCode = response.code
             val rawBody = response.body?.string() ?: ""
-            Log.d(TAG, "📥 [API RESPONSE] كود الحالة: $statusCode | طول النص: ${rawBody.length}")
+
+            if (statusCode == 429 && !isRetry) {
+                delay(1500)
+                return apiCall(url, scope, method, body, isRetry = true)
+            }
 
             if (!response.isSuccessful) {
-                Log.e(TAG, "⚠️ [API ERROR] فشل الرد ($statusCode). محتوى الخطأ: $rawBody")
-                if (!isRetry) {
-                    Log.w(TAG, "🔄 إعادة المحاولة عبر Firebase...")
+                if (!isRetry && (statusCode == 404 || statusCode == 401 || statusCode == 403)) {
                     recoverFromFirebase()
                     val updatedBase = gatewayBaseUrl ?: mainUrl
                     val retryUrl = if (url.startsWith(currentBase)) url.replace(currentBase, updatedBase) else url
@@ -390,14 +365,10 @@ class AnimeRift : MainAPI() {
                 }
                 throw Exception("HTTP $statusCode: $rawBody")
             }
-            val preview = if (rawBody.length > 500) rawBody.substring(0, 500) + "... [مقتطع]" else rawBody
-            Log.d(TAG, "📄 [BODY PREVIEW]: $preview")
 
             return mapper.readTree(rawBody)
         } catch (e: Exception) {
-            Log.e(TAG, "❌ [NETWORK EXCEPTION] حدث خطأ في الاتصال: ${e.javaClass.simpleName} - ${e.message}")
-            if (!isRetry) {
-                Log.w(TAG, "🔄 جاري محاولة الاستعادة من Firebase بسبب استثناء الشبكة...")
+            if (!isRetry && e.message?.contains("429") != true) {
                 recoverFromFirebase()
                 val updatedBase = gatewayBaseUrl ?: mainUrl
                 val retryUrl = if (url.startsWith(currentBase)) url.replace(currentBase, updatedBase) else url
@@ -408,73 +379,48 @@ class AnimeRift : MainAPI() {
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        Log.d(TAG, "==================================================")
-        Log.d(TAG, "🏁 [getMainPage] بدء طلب الصفحة الرئيسية | رقم الصفحة: $page")
-
         if (page > 1) {
-            Log.d(TAG, "⏭️ الصفحة أكبر من 1، إرجاع قائمة فارغة.")
             return newHomePageResponse(emptyList(), hasNext = false)
         }
 
-        try {
-            ensureInitialized()
-            val baseUrl = gatewayBaseUrl ?: mainUrl
-            val url = "$baseUrl/library/home_content?with_genres=true"
-            Log.d(TAG, "🔗 [getMainPage] رابط الأقسام المستهدف: $url")
+        ensureInitialized()
+        val baseUrl = gatewayBaseUrl ?: mainUrl
+        val url = "$baseUrl/library/home_content?with_genres=true"
+        val json = apiCall(url, "ANIME.LIBRARY.HOME_CONTENT")
 
-            val json = apiCall(url, "ANIME.LIBRARY.HOME_CONTENT")
-            val homeLists = mutableListOf<HomePageList>()
-            val sections = json.get("sections")
+        val homeLists = mutableListOf<HomePageList>()
+        val sections = json.get("sections") ?: return newHomePageResponse(emptyList(), hasNext = false)
 
-            if (sections == null || !sections.isArray) {
-                Log.e(TAG, "❌ [getMainPage] الحقل 'sections' غير موجود أو ليس Array! محتوى الـ JSON كامل: $json")
-                return newHomePageResponse(emptyList(), hasNext = false)
-            }
+        sections.forEach { section ->
+            val title = section.get("sectionTitle")?.asText() ?: ""
+            val items = section.get("items")
+            val list = mutableListOf<SearchResponse>()
 
-            Log.d(TAG, "📑 [getMainPage] تم العثور على ${sections.size()} أقسام رئيسية.")
+            items?.forEach { item ->
+                val id = item.get("_id")?.asText() ?: ""
+                val animeTitle = item.get("title")?.asText() ?: ""
+                val ratingFloat = item.get("myAnimeList_rating")?.asDouble()?.toFloat()
 
-            sections.forEachIndexed { sIndex, section ->
-                val title = section.get("sectionTitle")?.asText() ?: "قسم بدون عنوان"
-                val items = section.get("items")
-                val list = mutableListOf<SearchResponse>()
-
-                val itemsCount = if (items != null && items.isArray) items.size() else 0
-                Log.d(TAG, "  📂 القسم [$sIndex]: '$title' يحتوي على $itemsCount أنمي.")
-
-                items?.forEach { item ->
-                    val id = item.get("_id")?.asText() ?: ""
-                    val animeTitle = item.get("title")?.asText() ?: ""
-                    val ratingFloat = item.get("myAnimeList_rating")?.asDouble()?.toFloat()
-
-                    if (id.isNotEmpty() && animeTitle.isNotEmpty()) {
-                        list.add(
-                            newAnimeSearchResponse(
-                                name = animeTitle,
-                                url = "$baseUrl/library/details/$id"
-                            ) {
-                                this.posterUrl = item.get("medium_picture")?.asText() ?: item.get("main_picture")?.asText()
-                                this.year = item.get("release_year")?.asInt()
-                                this.score = ratingFloat?.let { Score.from10(it) }
-                            }
-                        )
-                    }
-                }
-
-                if (list.isNotEmpty()) {
-                    homeLists.add(HomePageList(title, list, isHorizontalImages = true))
+                if (id.isNotEmpty() && animeTitle.isNotEmpty()) {
+                    list.add(
+                        newAnimeSearchResponse(
+                            name = animeTitle,
+                            url = "$baseUrl/library/details/$id"
+                        ) {
+                            this.posterUrl = item.get("medium_picture")?.asText() ?: item.get("main_picture")?.asText()
+                            this.year = item.get("release_year")?.asInt()
+                            this.score = ratingFloat?.let { Score.from10(it) }
+                        }
+                    )
                 }
             }
 
-            Log.i(TAG, "🎉 [getMainPage] اكتمل التحميل بنجاح! تم بناء ${homeLists.size} قوائم لعرضها.")
-            Log.d(TAG, "==================================================")
-            return newHomePageResponse(homeLists, hasNext = false)
-
-        } catch (t: Throwable) {
-            Log.e(TAG, "💥💥 [getMainPage FATAL ERROR] انهيار أثناء معالجة الصفحة الرئيسية!", t)
-            Log.e(TAG, "نوع الخطأ: ${t.javaClass.name} | الرسالة: ${t.message}")
-            t.printStackTrace()
-            throw t
+            if (list.isNotEmpty()) {
+                homeLists.add(HomePageList(title, list, isHorizontalImages = true))
+            }
         }
+
+        return newHomePageResponse(homeLists, hasNext = false)
     }
 
     override suspend fun search(query: String): List<SearchResponse>? {
@@ -508,8 +454,7 @@ class AnimeRift : MainAPI() {
 
             val hasNext = json.get("hasNext")?.asBoolean() ?: false
             newSearchResponseList(results, hasNext)
-        } catch (e: Exception) {
-            Log.e(TAG, "Search error: ${e.message}")
+        } catch (_: Exception) {
             null
         }
     }
@@ -554,9 +499,7 @@ class AnimeRift : MainAPI() {
                     }
                 )
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Episodes load error: ${e.message}")
-        }
+        } catch (_: Exception) {}
 
         val ratingFloat = item.get("myAnimeList_rating")?.asDouble()?.toFloat()
 
@@ -709,14 +652,14 @@ class AnimeRift : MainAPI() {
                             val waitTimeSeconds = directLinkJson.get("wait_time")?.asLong() ?: 5L
 
                             if (fileId.isNotEmpty() && ticket.isNotEmpty()) {
-                                kotlinx.coroutines.delay((waitTimeSeconds * 1000) + 500)
+                                delay((waitTimeSeconds * 1000) + 500)
 
                                 val tapeApiUrl = "https://api.streamtape.com/file/dl?file=$fileId&ticket=$ticket"
                                 var tapeRes = app.get(tapeApiUrl).parsed<JsonNode>()
                                 val status = tapeRes.get("status")?.asInt()
 
                                 if (status != 200) {
-                                    kotlinx.coroutines.delay(2000)
+                                    delay(2000)
                                     tapeRes = app.get(tapeApiUrl).parsed<JsonNode>()
                                 }
 
@@ -738,14 +681,11 @@ class AnimeRift : MainAPI() {
                                 }
                             }
                         }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "LoadLinks error: ${e.message}")
-                    }
+                    } catch (_: Exception) {}
                 }
             }
             return@withContext true
-        } catch (e: Exception) {
-            Log.e(TAG, "LoadLinks fatal: ${e.message}")
+        } catch (_: Exception) {
             return@withContext false
         }
     }
