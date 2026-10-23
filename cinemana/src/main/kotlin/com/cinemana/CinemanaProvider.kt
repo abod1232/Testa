@@ -697,7 +697,6 @@ class Cinemana(val context: Context) : MainAPI() {
         }
 
         return if (details.kind == 2) {
-            // 1. جلب قائمة المواسم عبر الـ API الجديد
             val seasonsUrl = "$mainUrl/api/android/videoSeasonNumber/id/$extractedId"
             val seasonsResponse = try {
                 app.get(seasonsUrl, headers = headers).parsedSafe<List<Map<String, Any>>>()
@@ -709,10 +708,7 @@ class Cinemana(val context: Context) : MainAPI() {
             val seasonNumbers = seasonsResponse?.mapNotNull { 
                 it["season"]?.toString()?.toIntOrNull() 
             }?.distinct()?.sorted() ?: listOf(1)
-
-            // 2. جلب الحلقات بناءً على أرقام المواسم المتوفرة
             seasonNumbers.forEach { sNum ->
-                // محاولة جلب الحلقات لكل موسم (إذا كان الـ API يدعم تصفية الموسم أو يجلبها كاملة)
                 val seasonsAndEpisodesUrl = "$mainUrl/api/android/videoSeason/id/$extractedId"
                 val episodesResponse = try {
                     app.get(seasonsAndEpisodesUrl, headers = headers).parsedSafe<List<Map<String, Any>>>()
@@ -725,13 +721,9 @@ class Cinemana(val context: Context) : MainAPI() {
                     if (epDetails.nb != null && (epDetails.enTitle != null || epDetails.arTitle != null)) {
                         val epNum = (epDetails.episodeNummer as? String)?.toIntOrNull() ?: 1
                         val sNumParsed = (epDetails.season as? String)?.toIntOrNull() ?: 1
-                        
-                        // إضافة الحلقة فقط إذا كانت تنتمي للموسم الحالي في حلقة التكرار
                         if (sNumParsed == sNum) {
                             val epDurationSec = episodeMap["duration"]?.toString()?.toDoubleOrNull()?.toInt()
                             val epDurationInMinutes = epDurationSec?.let { it / 60 }
-
-                            // منع تكرار إضافة نفس الحلقة إذا كانت مكررة في استجابة السيرفر
                             if (episodes.none { it.id == epDetails.nb }) {
                                 episodes.add(
                                     newEpisode(epDetails.nb) {
@@ -749,8 +741,6 @@ class Cinemana(val context: Context) : MainAPI() {
                     }
                 }
             }
-
-            // ترتيب الحلقات نهائياً حسب الموسم ثم رقم الحلقة
             val finalEpisodes = episodes.sortedWith(compareBy({ it.season }, { it.episode }))
 
             newTvSeriesLoadResponse(title, extractedId, TvType.TvSeries, finalEpisodes) {
