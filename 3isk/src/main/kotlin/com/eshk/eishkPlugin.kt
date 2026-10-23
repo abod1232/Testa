@@ -6,6 +6,6 @@ import android.content.Context
 @CloudstreamPlugin
 class eishkPlugin: Plugin() {
     override fun load(context: Context) {
-        registerMainAPI(FiveTVProvider())
+        registerMainAPI(AnimeRift())
     }
 }
