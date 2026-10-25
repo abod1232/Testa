@@ -19,11 +19,6 @@ import java.nio.charset.StandardCharsets
 import java.util.UUID
 import kotlin.random.Random
 
-// =========================================================================
-// 1. عائلة StreamWish و VidHide و EarnVids و StreamHG الموحدة
-//    - فك ضغط JsUnpacker وقراءة مصفوفات links.hls4 || hls3 || hls2
-// =========================================================================
-
 open class ArabicStreamWishExtractor(
     override val name: String = "StreamWish",
     override val mainUrl: String = "https://streamwish.fun"
@@ -43,8 +38,6 @@ open class ArabicStreamWishExtractor(
 
         val combined = ArabicExtractorUtils.unpackScripts(pageHtml)
         val hlsCandidates = LinkedHashSet<String>()
-
-        // 1. قراءة كائن var links = { "hls4": "...", "hls2": "..." }
         Regex("""var\s+links\s*=\s*(\{[^;]+\})""").find(combined)?.groupValues?.get(1)?.let { rawJson ->
             runCatching {
                 val obj = JSONObject(rawJson)
@@ -54,8 +47,6 @@ open class ArabicStreamWishExtractor(
                 }
             }
         }
-
-        // 2. البحث البديل بالـ Regex
         if (hlsCandidates.isEmpty()) {
             Regex("""["'](?:hls4|hls2|hls3|hls|file)["']\s*:\s*["']([^"']+\.m3u8[^"']*)["']""").findAll(combined).forEach { m ->
                 resolveUrl(m.groupValues[1].replace("\\/", "/"), origin)?.let { hlsCandidates.add(it) }
@@ -90,17 +81,11 @@ open class ArabicStreamWishExtractor(
         }
     }
 }
-
-// النطاقات التابعة لعائلة StreamWish ترث من نفس الكلاس
 class VidHideExtractor : ArabicStreamWishExtractor("VidHide", "https://vidhidepro.com")
 class EarnVidsExtractor : ArabicStreamWishExtractor("EarnVids", "https://morencius.com")
 class StreamHgExtractor : ArabicStreamWishExtractor("StreamHG", "https://vibuxer.com")
 class HanerixExtractor : ArabicStreamWishExtractor("Hanerix", "https://hanerix.com")
 class FilelionsExtractor : ArabicStreamWishExtractor("Filelions", "https://filelions.to")
-
-// =========================================================================
-// 2. عائلة مشغلات الـ Packer السريعة (LuluStream / TukTukVIP / Videoland)
-// =========================================================================
 
 open class ArabicPackerExtractor(
     override val name: String = "LuluStream",
@@ -150,10 +135,6 @@ class TukTukVipExtractor : ArabicPackerExtractor("TukTukVIP", "https://lolololu.
 class VideolandExtractor : ArabicPackerExtractor("Videoland", "https://videoland.sbs")
 class UpDownExtractor : ArabicPackerExtractor("UpDown", "https://updown.icu")
 class OkStreamExtractor : ArabicPackerExtractor("OkStream", "https://okstream.online")
-
-// =========================================================================
-// 3. عائلة DoodStream الموحدة (playmogo / dsvplay / myvidplay / d000d)
-// =========================================================================
 
 open class ArabicDoodExtractor(
     override val name: String = "DoodStream",
@@ -207,10 +188,6 @@ open class ArabicDoodExtractor(
 class PlaymogoExtractor : ArabicDoodExtractor("Playmogo", "https://playmogo.com")
 class MyVidPlayExtractor : ArabicDoodExtractor("MyVidPlay", "https://myvidplay.com")
 
-// =========================================================================
-// 4. سيرفر VOE (فك التشفير الذكي خماسي المراحل: ROT13 + Char-Shift + Reverse)
-// =========================================================================
-
 class ArabicVoeExtractor : ExtractorApi() {
     override val name = "VOE"
     override val mainUrl = "https://voe.sx"
@@ -241,8 +218,6 @@ class ArabicVoeExtractor : ExtractorApi() {
 
         val origin = ArabicExtractorUtils.originOf(currentUrl) ?: mainUrl
         val headers = mapOf("User-Agent" to ArabicExtractorUtils.DEFAULT_UA, "Referer" to "$origin/", "Origin" to origin)
-
-        // فك حزمة JSON المشفرة
         val rawPayload = Regex("""<script[^>]*type=["']application/json["'][^>]*>\s*\[\s*"([^"]+)"\s*\]\s*</script>""").find(html)?.groupValues?.get(1)
         if (!rawPayload.isNullOrBlank()) {
             val decoded = decodeVoe(rawPayload)
@@ -266,8 +241,6 @@ class ArabicVoeExtractor : ExtractorApi() {
                 }
             }
         }
-
-        // البديل العادي
         Regex("""['"]hls['"]\s*:\s*['"]([^'"]+)['"]""").find(html)?.groupValues?.get(1)?.let { raw ->
             val hls = if (raw.startsWith("http")) raw else runCatching {
                 String(Base64.decode(raw, Base64.DEFAULT), Charsets.UTF_8)
@@ -279,7 +252,6 @@ class ArabicVoeExtractor : ExtractorApi() {
     }
 
     private fun decodeVoe(input: String): JSONObject? = runCatching {
-        // الخطوة 1: فك ROT13
         val rot = buildString(input.length) {
             for (c in input) {
                 when (c) {
@@ -289,23 +261,15 @@ class ArabicVoeExtractor : ExtractorApi() {
                 }
             }
         }
-        // الخطوة 2: مسح علامات التمويه
         var cleaned = rot
         for (m in listOf("@$", "^^", "~@", "%?", "*~", "!!", "#&")) cleaned = cleaned.replace(m, "")
-        // الخطوة 3: Base64 decode
         val step1 = String(Base64.decode(cleaned, Base64.DEFAULT), Charsets.ISO_8859_1)
-        // الخطوة 4: إزاحة الحروف بمقدار -3 وعكس النص
         val shifted = CharArray(step1.length) { i -> (step1[i].code - 3).toChar() }
         val reversed = String(shifted).reversed()
-        // الخطوة 5: Base64 النهائي -> JSON
         val jsonStr = String(Base64.decode(reversed, Base64.DEFAULT), Charsets.UTF_8)
         JSONObject(jsonStr)
     }.getOrNull()
 }
-
-// =========================================================================
-// 5. سيرفر StreamTape و MixDrop و Mp4Upload
-// =========================================================================
 
 class ArabicStreamTapeExtractor : ExtractorApi() {
     override val name = "StreamTape"
@@ -412,10 +376,6 @@ class ArabicMp4UploadExtractor : ExtractorApi() {
     }
 }
 
-// =========================================================================
-// 6. سيرفرات Videas و Videa.hu (من كود WitAnime)
-// =========================================================================
-
 class ArabicVideasExtractor : ExtractorApi() {
     override val name = "Videas"
     override val mainUrl = "https://app.videas.com"
@@ -449,8 +409,6 @@ class ArabicVideasExtractor : ExtractorApi() {
             val item = items.optJSONObject(idx) ?: continue
             val asset = item.optJSONObject("asset") ?: continue
             val assetUid = asset.optString("uid")
-
-            // ترجمات
             asset.optJSONArray("subtitles")?.let { subs ->
                 for (s in 0 until subs.length()) {
                     val sub = subs.optJSONObject(s) ?: continue
@@ -576,10 +534,6 @@ class ArabicVideaExtractor : ExtractorApi() {
     }
 }
 
-// =========================================================================
-// 7. السيرفرات الاجتماعية الروسية (OkRu و VK Video)
-// =========================================================================
-
 class ArabicOkRuExtractor : ExtractorApi() {
     override val name = "OkRu"
     override val mainUrl = "https://ok.ru"
@@ -654,10 +608,6 @@ class ArabicVkExtractor : ExtractorApi() {
         }
     }
 }
-
-// =========================================================================
-// 8. سيرفرات التخزين السحابي والتنزيل المباشر (مصفاة من الـ ZIP)
-// =========================================================================
 
 class ArabicMediaFireExtractor : ExtractorApi() {
     override val name = "MediaFire"
