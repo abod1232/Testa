@@ -266,9 +266,12 @@ open class ArabicMegaMaxExtractor(
         val dataRaw = props.optJSONObject("streams")?.optString("data").orEmpty()
         if (dataRaw.isBlank()) return
 
-        val plain = if (dataRaw.contains("\"ct\"")) {
+        // ✅ الكود المصحح:
+        val plain = (if (dataRaw.contains("\"ct\"")) {
             decryptCryptoJs(dataRaw, LEECH_KEY)
-        } else dataRaw ?: return
+        } else {
+            dataRaw
+        })?.trim() ?: return
 
         val streamHeaders = mapOf(
             "User-Agent" to ArabicExtractorUtils.DEFAULT_UA,
@@ -277,7 +280,7 @@ open class ArabicMegaMaxExtractor(
         )
 
         val sourcesArr = runCatching {
-            if (plain.trim().startsWith("[")) JSONArray(plain.trim()) else JSONArray().put(JSONObject(plain.trim()))
+            if (plain.startsWith("[")) JSONArray(plain) else JSONArray().put(JSONObject(plain))
         }.getOrNull() ?: return
 
         for (i in 0 until sourcesArr.length()) {
