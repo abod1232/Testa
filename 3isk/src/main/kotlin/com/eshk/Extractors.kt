@@ -25,10 +25,6 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
-// =========================================================================
-// 1. الأدوات المشتركة والتشفير العام (Shared Utilities)
-// =========================================================================
-
 object ArabicExtractorUtils {
     const val DEFAULT_UA =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
@@ -117,11 +113,6 @@ object ArabicExtractorUtils {
     }
 }
 
-// =========================================================================
-// 2. عائلة Vidstack الموحدة (UPNShare / StreamP2P / RPMShare)
-//    - مفاتيح AES-128-CBC الثابتة لجميع هذه النطاقات
-// =========================================================================
-
 open class ArabicVidstackExtractor(
     override val name: String = "Vidstack",
     override val mainUrl: String = "https://megamax.uns.bio"
@@ -209,10 +200,6 @@ class UpnShareExtractor : ArabicVidstackExtractor("UPNShare", "https://megamax.u
 class StreamP2PExtractor : ArabicVidstackExtractor("StreamP2P", "https://megamax.strp2p.site")
 class RpmShareExtractor : ArabicVidstackExtractor("RPMShare", "https://megamax.rpmplay.me")
 
-// =========================================================================
-// 3. عائلة MegaMax & Share4Max (Leech HLS/MP4 + المرايا عبر Inertia)
-// =========================================================================
-
 open class ArabicMegaMaxExtractor(
     override val name: String = "MegaMax",
     override val mainUrl: String = "https://megamax.me"
@@ -228,11 +215,7 @@ open class ArabicMegaMaxExtractor(
         val hashId = Regex("""/(?:iframe|d|download|e|f|mirror)/([A-Za-z0-9_-]+)""").find(url)?.groupValues?.get(1) ?: return
         val origin = ArabicExtractorUtils.originOf(url) ?: mainUrl
         val refUrl = referer ?: "$origin/"
-
-        // 1. فحص بث HLS المشفر المباشر (/e/<id>)
         extractLeechHls(hashId, origin, refUrl, subtitleCallback, callback)
-
-        // 2. فحص تحميل MP4 المباشر (/d/<id>)
         extractLeechDirectMp4(hashId, origin, refUrl, callback)
     }
 
@@ -271,8 +254,6 @@ open class ArabicMegaMaxExtractor(
         }.getOrNull() ?: return
 
         val props = runCatching { JSONObject(partialRes).optJSONObject("props") }.getOrNull() ?: return
-
-        // الترجمات إن وجدت
         props.optJSONArray("subtitles")?.let { subs ->
             for (i in 0 until subs.length()) {
                 val s = subs.optJSONObject(i) ?: continue
@@ -408,10 +389,6 @@ open class ArabicMegaMaxExtractor(
 
 class Share4MaxExtractor : ArabicMegaMaxExtractor("Share4Max", "https://share4max.com")
 
-// =========================================================================
-// 4. عائلة Byse الموحدة (فك تشفير AES-256-GCM النظيف عبر معادلة Version)
-// =========================================================================
-
 open class ArabicByseExtractor(
     override val name: String = "Byse",
     override val mainUrl: String = "https://byseqekaho.com"
@@ -447,8 +424,6 @@ open class ArabicByseExtractor(
         val version = playback.optInt("version", 1)
         val iv = ArabicExtractorUtils.b64UrlDecode(playback.optString("iv"))
         val payload = ArabicExtractorUtils.b64UrlDecode(playback.optString("payload"))
-
-        // خوارزمية تركيب المفتاح عبر معادلة [version, 31 - version]
         val total = keyParts.length()
         val candidateKeys = ArrayList<ByteArray>()
         if (version in 1..20 && version <= total && (31 - version) in 1..total) {
@@ -503,16 +478,10 @@ open class ArabicByseExtractor(
         }
     }
 }
-
-// نطاقات Byse المتعددة ترث من نفس الكلاس
 class ByseSxExtractor : ArabicByseExtractor("Byse", "https://byse.sx")
 class ByseQekahoExtractor : ArabicByseExtractor("ByseQekaho", "https://byseqekaho.com")
 class ByseRaguciExtractor : ArabicByseExtractor("ByseRaguci", "https://byseraguci.com")
 class ByseZejataosExtractor : ArabicByseExtractor("ByseZejataos", "https://bysezejataos.com")
-
-// =========================================================================
-// 5. سيرفر FireStream (محلل الـ token-blob الرسمي)
-// =========================================================================
 
 class ArabicFireStreamExtractor : ExtractorApi() {
     override val name = "FireStream"
@@ -538,8 +507,6 @@ class ArabicFireStreamExtractor : ExtractorApi() {
         val finalUrl = res.url.ifBlank { embedUrl }
         val finalOrigin = ArabicExtractorUtils.originOf(finalUrl) ?: "https://firestream.site"
         val doc = res.document
-
-        // ترجمات
         doc.selectFirst("script#video-data")?.data()?.let { raw ->
             runCatching {
                 val subs = JSONObject(raw).optJSONObject("video")?.optJSONArray("subtitles")
@@ -593,10 +560,6 @@ class ArabicFireStreamExtractor : ExtractorApi() {
         }
     }
 }
-
-// =========================================================================
-// 6. سيرفر Vidara (استخراج مباشر من الـ API مع الترجمات)
-// =========================================================================
 
 class ArabicVidaraExtractor : ExtractorApi() {
     override val name = "Vidara"
@@ -661,10 +624,6 @@ class ArabicVidaraExtractor : ExtractorApi() {
         }
     }
 }
-
-// =========================================================================
-// 7. سيرفر YonaPlay و DotPlay (جلسات مشفرة بنظام AES-256-GCM)
-// =========================================================================
 
 class ArabicYonaPlayExtractor : ExtractorApi() {
     override val name = "YonaPlay"
