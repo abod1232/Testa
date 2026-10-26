@@ -267,45 +267,21 @@ class TukTukHd : MainAPI() {
 
                 allMirrorsWithQuality.amap { (mirror, qualityInt) ->
                     val rawLink = mirror.link ?: return@amap
-                    val link = if (rawLink.startsWith("//")) "https:$rawLink" else rawLink
-                    val displayName = mirror.symbol ?: mirror.driver ?: "Server"
+                    // 1. تصحيح الروابط التي تبدأ بـ // بإضافة البروتوكول
+                    val link = if (rawLink.startsWith("//")) "https:$rawLink" else rawLink.trim()
+                    if (!link.startsWith("http")) return@amap
 
-                    when {
-                        mirror.symbol?.equals("TukTukVIP", ignoreCase = true) == true -> {
-                            TukTukVipExtractor().getUrl(link, playerUrl, subtitleCallback) { extractorLink ->
-                                if (extractorLink.quality == Qualities.Unknown.value) extractorLink.quality = qualityInt
-                                callback(extractorLink)
-                            }
+                    // 2. إرسال الرابط مباشرة إلى loadExtractor بالطريقة النظامية الصحيحة
+                    loadExtractor(
+                        url = link,
+                        referer = playerUrl, // تمرير رابط المشغل كـ Referer إجباري لفك الحظر
+                        subtitleCallback = subtitleCallback
+                    ) { extractorLink ->
+                        // حقن الجودة إذا كان المستخرج لم يتعرف عليها
+                        if (extractorLink.quality == Qualities.Unknown.value) {
+                            extractorLink.quality = qualityInt
                         }
-                        mirror.driver?.contains("upn", ignoreCase = true) == true ||
-                        mirror.driver?.contains("rpm", ignoreCase = true) == true ||
-                        link.contains("upns.", ignoreCase = true) ||
-                        link.contains("uns.bio", ignoreCase = true) -> {
-                            UpnShareExtractor().getUrl(link, playerUrl, subtitleCallback) { extractorLink ->
-                                if (extractorLink.quality == Qualities.Unknown.value) extractorLink.quality = qualityInt
-                                callback(extractorLink)
-                            }
-                        }
-                        mirror.driver?.contains("byse", ignoreCase = true) == true -> {
-                            ArabicByseExtractor().getUrl(link, playerUrl, subtitleCallback) { extractorLink ->
-                                if (extractorLink.quality == Qualities.Unknown.value) extractorLink.quality = qualityInt
-                                callback(extractorLink)
-                            }
-                        }
-                        mirror.driver?.contains("lulustream", ignoreCase = true) == true -> {
-                            LuluStreamExtractor().getUrl(link, playerUrl, subtitleCallback) { extractorLink ->
-                                if (extractorLink.quality == Qualities.Unknown.value) extractorLink.quality = qualityInt
-                                callback(extractorLink)
-                            }
-                        }
-                        else -> {
-                            loadExtractor(link, subtitleCallback) { extractorLink ->
-                                if (extractorLink.quality == Qualities.Unknown.value) {
-                                    extractorLink.quality = qualityInt
-                                }
-                                callback(extractorLink)
-                            }
-                        }
+                        callback(extractorLink)
                     }
                 }
             }
