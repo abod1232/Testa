@@ -225,8 +225,10 @@ class TukTukHd : MainAPI() {
         if (iframeCrypt.isEmpty()) return false
 
         try {
+            // 1. فك تشفير رابط مشغل الفيديو الرئيسي
             val playerUrl = String(Base64.decode(iframeCrypt, Base64.DEFAULT))
 
+            // 2. طلب أولي لجلب الكوكيز والـ Version الخاصة بـ Inertia
             val initialResponse = app.get(
                 playerUrl,
                 headers = mapOf(
@@ -240,6 +242,7 @@ class TukTukHd : MainAPI() {
             val version = Regex(""""version":"([^"]+)"""").find(initialResponse.text)?.groupValues?.get(1)
 
             if (xsrfToken != null && version != null) {
+                // 3. بناء ترويسات Inertia لجلب مصفوفة السيرفرات والجودات
                 val inertiaHeaders = mapOf(
                     "X-XSRF-TOKEN" to xsrfToken,
                     "X-Inertia" to "true",
@@ -265,30 +268,40 @@ class TukTukHd : MainAPI() {
                     } ?: emptyList()
                 }
 
+                // 4. استخراج روابط السيرفرات بالتوازي
                 allMirrorsWithQuality.amap { (mirror, qualityInt) ->
                     val rawLink = mirror.link ?: return@amap
                     val link = if (rawLink.startsWith("//")) "https:$rawLink" else rawLink.trim()
                     if (!link.startsWith("http")) return@amap
-                    if (mirror.symbol?.equals("TukTukVIP", ignoreCase = true) == true || link.contains("lolololu.website")) {
-                        TukTukVipExtractor().getUrl(link, playerUrl, subtitleCallback) { extractorLink ->
-                            if (extractorLink.quality == Qualities.Unknown.value) {
-                                extractorLink.quality = qualityInt
+
+                    when {
+                        // أ) سيرفر TukTukVIP (يُرسل لمستخرجه المخصص لفك حظر 403)
+                        mirror.symbol?.equals("TukTukVIP", ignoreCase = true) == true || link.contains("lolololu.website") -> {
+                            TukTukVipExtractor().getUrl(link, playerUrl, subtitleCallback) { extractorLink ->
+                                if (extractorLink.quality == Qualities.Unknown.value) {
+                                    extractorLink.quality = qualityInt
+                                }
+                                callback(extractorLink)
                             }
-                            callback(extractorLink)
                         }
-                    } else {
-                        loadExtractor(
-                            url = link,
-                            referer = playerUrl,
-                            subtitleCallback = subtitleCallback
-                        ) { extractorLink ->
-                            if (extractorLink.quality == Qualities.Unknown.value) {
-                                extractorLink.quality = qualityInt
+
+                        // ب) باقي السيرفرات (UPN, Byse, Lulu, StreamWish... إلخ) تمر تلقائياً عبر loadExtractor
+                        else -> {
+                            loadExtractor(
+                                url = link,
+                                referer = playerUrl, // تمرير رابط المشغل كـ Referer ضروري جداً لمنع الحظر
+                                subtitleCallback = subtitleCallback
+                            ) { extractorLink ->
+                                if (extractorLink.quality == Qualities.Unknown.value) {
+                                    extractorLink.quality = qualityInt
+                                }
+                                callback(extractorLink)
                             }
-                            callback(extractorLink)
                         }
                     }
                 }
+            }
+
         } catch (e: Exception) {
             e.printStackTrace()
         }
