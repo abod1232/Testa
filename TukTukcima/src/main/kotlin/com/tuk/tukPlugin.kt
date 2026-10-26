@@ -9,13 +9,13 @@ class TukTukHdPlugin : Plugin() {
 
     override fun load(context: Context) {
         registerMainAPI(TukTukHd())
-        
+        registerExtractorAPI(VideolandExtractor())
         registerCustomExtractors()
     }
 
     private fun registerCustomExtractors() {
         val extractors = listOf(
-            VideolandExtractor(),
+            
             UpnShareExtractor(),
             UpnShareTukTukExtractor(),
             UpnShareBioExtractor(),
