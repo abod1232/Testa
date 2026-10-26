@@ -271,15 +271,12 @@ class TukTukHd : MainAPI() {
                     val displayName = mirror.symbol ?: mirror.driver ?: "Server"
 
                     when {
-                        // 1. سيرفر TukTukVIP
                         mirror.symbol?.equals("TukTukVIP", ignoreCase = true) == true -> {
                             TukTukVipExtractor().getUrl(link, playerUrl, subtitleCallback) { extractorLink ->
                                 if (extractorLink.quality == Qualities.Unknown.value) extractorLink.quality = qualityInt
                                 callback(extractorLink)
                             }
                         }
-
-                        // 2. سيرفر UPNShare و RPMShare و Vidstack (الحل هنا!)
                         mirror.driver?.contains("upn", ignoreCase = true) == true ||
                         mirror.driver?.contains("rpm", ignoreCase = true) == true ||
                         link.contains("upns.", ignoreCase = true) ||
@@ -289,24 +286,18 @@ class TukTukHd : MainAPI() {
                                 callback(extractorLink)
                             }
                         }
-
-                        // 3. سيرفر Byse
                         mirror.driver?.contains("byse", ignoreCase = true) == true -> {
                             ArabicByseExtractor().getUrl(link, playerUrl, subtitleCallback) { extractorLink ->
                                 if (extractorLink.quality == Qualities.Unknown.value) extractorLink.quality = qualityInt
                                 callback(extractorLink)
                             }
                         }
-
-                        // 4. سيرفر LuluStream
                         mirror.driver?.contains("lulustream", ignoreCase = true) == true -> {
                             LuluStreamExtractor().getUrl(link, playerUrl, subtitleCallback) { extractorLink ->
                                 if (extractorLink.quality == Qualities.Unknown.value) extractorLink.quality = qualityInt
                                 callback(extractorLink)
                             }
                         }
-
-                        // 5. باقي السيرفرات العادية تمر عبر loadExtractor
                         else -> {
                             loadExtractor(link, subtitleCallback) { extractorLink ->
                                 if (extractorLink.quality == Qualities.Unknown.value) {
