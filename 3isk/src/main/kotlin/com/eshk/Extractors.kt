@@ -113,11 +113,24 @@ object ArabicExtractorUtils {
     }
 }
 
+// =========================================================================
+// 2. عائلة Vidstack الموحدة (UPNShare / StreamP2P / RPMShare) - مصححة بالكامل
+// =========================================================================
+
 open class ArabicVidstackExtractor(
-    override val name: String = "Vidstack",
-    override val mainUrl: String = "https://megamax.uns.bio"
+    override val name: String = "UPNShare",
+    override val mainUrl: String = "https://upns.one"
 ) : ExtractorApi() {
     override val requiresReferer = true
+
+    // تمكين كلاودستريم من التعرف على كل مشتقات دومينات UPNShare
+    override fun requiresUrl(url: String): Boolean {
+        val h = runCatching { URI(url).host?.lowercase().orEmpty() }.getOrDefault("")
+        return h.contains("upns.") || h.contains("uns.bio") ||
+                h.contains("upnshare") || h.contains("strp2p.") ||
+                h.contains("p2pstream.") || h.contains("rpmplay.") ||
+                h.contains("rpmvid.") || h.contains("rpmvip.")
+    }
 
     override suspend fun getUrl(
         url: String,
@@ -125,20 +138,30 @@ open class ArabicVidstackExtractor(
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
+        // استخراج معرف الفيديو من بعد الهاش (#) أو من مسار الرابط
         val videoId = url.substringAfterLast('#', "")
-            .substringBefore('&').substringBefore('?')
-            .trim().ifEmpty {
+            .substringAfterLast('/')
+            .substringBefore('&')
+            .substringBefore('?')
+            .trim()
+            .ifEmpty {
                 url.substringBefore('?').substringBefore('#').trimEnd('/')
-                    .substringAfterLast('/').takeIf { it.isNotBlank() && !it.contains('.') }.orEmpty()
+                    .substringAfterLast('/')
+                    .takeIf { it.isNotBlank() && !it.contains('.') }
+                    .orEmpty()
             }
         if (videoId.isBlank()) return
 
         val host = runCatching { URI(url).host?.lowercase().orEmpty() }.getOrDefault("")
+        val originFromUrl = ArabicExtractorUtils.originOf(url) ?: "https://$host"
+
+        // الأولوية دائماً للدومين القادم من الرابط مباشرة لمنع خطأ 400 Bad Tenant
         val candidateOrigins = buildList {
-            if (host.contains("rpmplay")) add("https://megamax.rpmplay.me")
-            if (host.contains("uns.bio") || host.contains("upns")) add("https://megamax.uns.bio")
-            if (host.contains("strp2p") || host.contains("p2pstream")) add("https://megamax.strp2p.site")
-            ArabicExtractorUtils.originOf(url)?.let { add(it) }
+            add(originFromUrl)
+            if (host == "rpmplay.me") add("https://megamax.rpmplay.me")
+            if (host == "uns.bio") add("https://megamax.uns.bio")
+            if (host == "strp2p.site") add("https://megamax.strp2p.site")
+            if (host == "upns.one") add("https://tuktuk.upns.one")
             add(mainUrl)
         }.distinct()
 
@@ -149,25 +172,57 @@ open class ArabicVidstackExtractor(
                 "Origin" to origin,
                 "Accept" to "*/*"
             )
-            val rawHex = runCatching {
-                app.get("$origin/api/v1/video?id=$videoId", headers = reqHeaders).text.trim().trim('"')
+
+            val rawText = runCatching {
+                app.get("$origin/api/v1/video?id=$videoId", headers = reqHeaders).text
             }.getOrNull() ?: continue
 
-            if (rawHex.length < 32 || rawHex.startsWith("{") || rawHex.length % 2 != 0) continue
+            val cleanHex = rawText.trim().trim('"').replace(Regex("""\s+"""), "")
+            if (cleanHex.length < 32 || cleanHex.length % 2 != 0 || cleanHex.startsWith("{")) continue
 
-            val cipherBytes = ByteArray(rawHex.length / 2) { idx ->
-                rawHex.substring(idx * 2, idx * 2 + 2).toInt(16).toByte()
+            val cipherBytes = ByteArray(cleanHex.length / 2) { idx ->
+                cleanHex.substring(idx * 2, idx * 2 + 2).toInt(16).toByte()
             }
+
             val decrypted = ArabicExtractorUtils.aesCbcDecrypt(KEY, IV, cipherBytes) ?: continue
             val json = runCatching { JSONObject(decrypted) }.getOrNull() ?: continue
 
             val streamUrls = LinkedHashSet<String>()
-            for (field in listOf("cfNative", "source", "cf")) {
-                val link = json.optString(field).trim()
-                if (link.startsWith("http")) streamUrls.add(link)
-                else if (link.startsWith("//")) streamUrls.add("https:$link")
-                else if (link.startsWith("/")) streamUrls.add("$origin$link")
+
+            // دالة مرنة تقرأ الروابط سواء كانت نصوصاً صريحة أو داخل كائنات ومصفوفات
+            fun collectFromNode(key: String) {
+                val node = json.opt(key) ?: return
+                when (node) {
+                    is String -> {
+                        val v = node.trim()
+                        if (v.startsWith("http")) streamUrls.add(v)
+                        else if (v.startsWith("//")) streamUrls.add("https:$v")
+                        else if (v.startsWith("/")) streamUrls.add("$origin$v")
+                    }
+                    is JSONArray -> {
+                        for (i in 0 until node.length()) {
+                            val item = node.opt(i)
+                            if (item is String && item.startsWith("http")) streamUrls.add(item)
+                            else if (item is JSONObject) {
+                                val f = item.optString("file").ifBlank { item.optString("url") }
+                                if (f.startsWith("http")) streamUrls.add(f)
+                            }
+                        }
+                    }
+                    is JSONObject -> {
+                        val keys = node.keys()
+                        while (keys.hasNext()) {
+                            val v = node.optString(keys.next())
+                            if (v.startsWith("http")) streamUrls.add(v)
+                        }
+                    }
+                }
             }
+
+            collectFromNode("cfNative")
+            collectFromNode("source")
+            collectFromNode("cf")
+            collectFromNode("streams")
 
             if (streamUrls.isNotEmpty()) {
                 val streamHeaders = mapOf(
@@ -196,9 +251,9 @@ open class ArabicVidstackExtractor(
     }
 }
 
-class UpnShareExtractor : ArabicVidstackExtractor("UPNShare", "https://megamax.uns.bio")
-class StreamP2PExtractor : ArabicVidstackExtractor("StreamP2P", "https://megamax.strp2p.site")
-class RpmShareExtractor : ArabicVidstackExtractor("RPMShare", "https://megamax.rpmplay.me")
+class UpnShareExtractor : ArabicVidstackExtractor("UPNShare", "https://upns.one")
+class StreamP2PExtractor : ArabicVidstackExtractor("StreamP2P", "https://strp2p.site")
+class RpmShareExtractor : ArabicVidstackExtractor("RPMShare", "https://rpmplay.me")
 
 open class ArabicMegaMaxExtractor(
     override val name: String = "MegaMax",
