@@ -8,6 +8,53 @@ import android.content.Context
 class TukTukHdPlugin: Plugin() {
     override fun load(context: Context) {
         registerMainAPI(TukTukHd())
-        registerExtractorAPI(VideolandExtractor())
+        registerCustomExtractors()
+    }
+    private fun registerCustomExtractors() {
+        val extractors = listOf(
+            UpnShareExtractor(),
+            StreamP2PExtractor(),
+            VideolandExtractor(),
+            RpmShareExtractor(),
+            ArabicMegaMaxExtractor(),
+            Share4MaxExtractor(),
+            ArabicByseExtractor(),
+            ByseSxExtractor(),
+            ByseQekahoExtractor(),
+            ByseRaguciExtractor(),
+            ByseZejataosExtractor(),
+            ArabicFireStreamExtractor(),
+            ArabicVidaraExtractor(),
+            ArabicYonaPlayExtractor(),
+            DotPlayExtractor(),
+            ArabicStreamWishExtractor(),
+            VidHideExtractor(),
+            EarnVidsExtractor(),
+            StreamHgExtractor(),
+            HanerixExtractor(),
+            FilelionsExtractor(),
+            ArabicPackerExtractor(),
+            LuluStreamExtractor(),
+            TukTukVipExtractor(),
+            VideolandExtractor(),
+            UpDownExtractor(),
+            OkStreamExtractor(),
+            ArabicDoodExtractor(),
+            PlaymogoExtractor(),
+            MyVidPlayExtractor(),
+            ArabicVoeExtractor(),
+            ArabicStreamTapeExtractor(),
+            ArabicMixdropExtractor(),
+            ArabicMp4UploadExtractor(),
+            ArabicVideasExtractor(),
+            ArabicVideaExtractor(),
+            ArabicOkRuExtractor(),
+            ArabicVkExtractor(),
+            ArabicMediaFireExtractor(),
+            ArabicPixelDrainExtractor(),
+            ArabicFourSharedExtractor(),
+            ArabicGoFileExtractor()
+        )
+        extractors.forEach { registerExtractorAPI(it) }
     }
 }
