@@ -246,9 +246,6 @@ class P2PStreamVipExtractor : ArabicVidstackExtractor("StreamP2P", "https://p2ps
 
 class RpmShareExtractor : ArabicVidstackExtractor("RPMShare", "https://rpmplay.me")
 class RpmShareMegaMaxExtractor : ArabicVidstackExtractor("RPMShare", "https://megamax.rpmplay.me")
-// =========================================================================
-// سيرفر TukTukVIP المخصص بالترويسات الإجبارية لمنع خطأ 403
-// =========================================================================
 
 class TukTukVipExtractor : ExtractorApi() {
     override var name = "TukTukVIP"
@@ -278,8 +275,6 @@ class TukTukVipExtractor : ExtractorApi() {
         val regex = Regex("""https://[^"']+?/hls\d+/[^"']+?/master\.(?:txt|m3u8)(?:\?[^"']*)?""")
         val matches = regex.findAll(unpackedHtml).toList()
         if (matches.isEmpty()) return
-
-        // ترويسات فك حظر 403 لمشغل ExoPlayer
         val playHeaders = mapOf(
             "sec-ch-ua-platform" to "\"Android\"",
             "sec-ch-ua" to "\"Chromium\";v=\"124\", \"Not-A.Brand\";v=\"99\"",
