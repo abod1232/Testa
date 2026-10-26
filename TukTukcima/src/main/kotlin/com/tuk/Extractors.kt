@@ -236,7 +236,7 @@ open class ArabicVidstackExtractor(
 }
 class UpnShareExtractor : ArabicVidstackExtractor("UPNShare", "https://upns.one")
 class UpnShareTukTukExtractor : ArabicVidstackExtractor("UPNShare", "https://tuktuk.upns.one")
-class VideolandExtractor : ArabicPackerExtractor("Videoland", "https://videoland.sbs")
+
 class UpnShareBioExtractor : ArabicVidstackExtractor("UPNShare", "https://uns.bio")
 class UpnShareMegaMaxExtractor : ArabicVidstackExtractor("UPNShare", "https://megamax.uns.bio")
 
@@ -246,6 +246,70 @@ class P2PStreamVipExtractor : ArabicVidstackExtractor("StreamP2P", "https://p2ps
 
 class RpmShareExtractor : ArabicVidstackExtractor("RPMShare", "https://rpmplay.me")
 class RpmShareMegaMaxExtractor : ArabicVidstackExtractor("RPMShare", "https://megamax.rpmplay.me")
+// =========================================================================
+// سيرفر TukTukVIP المخصص بالترويسات الإجبارية لمنع خطأ 403
+// =========================================================================
+
+class TukTukVipExtractor : ExtractorApi() {
+    override var name = "TukTukVIP"
+    override var mainUrl = "https://lolololu.website"
+    override val requiresReferer = true
+
+    override suspend fun getUrl(
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        val originUrl = ArabicExtractorUtils.originOf(url) ?: mainUrl
+
+        val response = runCatching {
+            app.get(
+                url,
+                referer = referer ?: "$originUrl/",
+                headers = mapOf(
+                    "User-Agent" to ArabicExtractorUtils.DEFAULT_UA,
+                    "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+                )
+            ).text
+        }.getOrNull() ?: return
+
+        val unpackedHtml = ArabicExtractorUtils.unpackScripts(response)
+        val regex = Regex("""https://[^"']+?/hls\d+/[^"']+?/master\.(?:txt|m3u8)(?:\?[^"']*)?""")
+        val matches = regex.findAll(unpackedHtml).toList()
+        if (matches.isEmpty()) return
+
+        // ترويسات فك حظر 403 لمشغل ExoPlayer
+        val playHeaders = mapOf(
+            "sec-ch-ua-platform" to "\"Android\"",
+            "sec-ch-ua" to "\"Chromium\";v=\"124\", \"Not-A.Brand\";v=\"99\"",
+            "sec-ch-ua-mobile" to "?1",
+            "accept" to "*/*",
+            "origin" to originUrl,
+            "sec-fetch-site" to "cross-site",
+            "sec-fetch-mode" to "cors",
+            "sec-fetch-dest" to "empty"
+        )
+
+        matches.forEach { match ->
+            val link = match.value
+            val isM3u8 = link.contains(".m3u8") || link.contains(".txt")
+
+            callback.invoke(
+                newExtractorLink(
+                    source = this.name,
+                    name = this.name,
+                    url = link,
+                    type = if (isM3u8) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                ) {
+                    this.referer = "$originUrl/"
+                    this.quality = Qualities.P1080.value
+                    this.headers = playHeaders
+                }
+            )
+        }
+    }
+}
 open class ArabicMegaMaxExtractor(
     override val name: String = "MegaMax",
     override val mainUrl: String = "https://megamax.me"
