@@ -1,4 +1,4 @@
-package com.eshk
+package com.tuk
 
 import android.util.Base64
 import com.lagradost.cloudstream3.SubtitleFile
