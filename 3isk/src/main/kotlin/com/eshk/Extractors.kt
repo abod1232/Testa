@@ -265,8 +265,6 @@ open class ArabicMegaMaxExtractor(
 
         val dataRaw = props.optJSONObject("streams")?.optString("data").orEmpty()
         if (dataRaw.isBlank()) return
-
-        // ✅ الكود المصحح:
         val plain = (if (dataRaw.contains("\"ct\"")) {
             decryptCryptoJs(dataRaw, LEECH_KEY)
         } else {
