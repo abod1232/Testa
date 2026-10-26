@@ -113,10 +113,6 @@ object ArabicExtractorUtils {
     }
 }
 
-// =========================================================================
-// 2. عائلة Vidstack الموحدة (UPNShare / StreamP2P / RPMShare) - بدون requiresUrl
-// =========================================================================
-
 open class ArabicVidstackExtractor(
     override val name: String = "UPNShare",
     override val mainUrl: String = "https://upns.one"
@@ -238,8 +234,6 @@ open class ArabicVidstackExtractor(
         private val IV = "1234567890oiuytr".toByteArray(Charsets.UTF_8)
     }
 }
-
-// كلاسات تغطي جميع دومينات ومرايا UPN و Vidstack المتداولة في المواقع:
 class UpnShareExtractor : ArabicVidstackExtractor("UPNShare", "https://upns.one")
 class UpnShareTukTukExtractor : ArabicVidstackExtractor("UPNShare", "https://tuktuk.upns.one")
 class UpnShareBioExtractor : ArabicVidstackExtractor("UPNShare", "https://uns.bio")
