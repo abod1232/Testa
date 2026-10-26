@@ -14,6 +14,7 @@ class TukTukHdPlugin : Plugin() {
 
     private fun registerCustomExtractors() {
         val extractors = listOf(
+            videoland(),
             UpnShareExtractor(),
             UpnShareTukTukExtractor(),
             UpnShareBioExtractor(),
