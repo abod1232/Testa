@@ -113,18 +113,15 @@ object ArabicExtractorUtils {
     }
 }
 
+// =========================================================================
+// 2. عائلة Vidstack الموحدة (UPNShare / StreamP2P / RPMShare) - بدون requiresUrl
+// =========================================================================
+
 open class ArabicVidstackExtractor(
     override val name: String = "UPNShare",
     override val mainUrl: String = "https://upns.one"
 ) : ExtractorApi() {
     override val requiresReferer = true
-    override fun requiresUrl(url: String): Boolean {
-        val h = runCatching { URI(url).host?.lowercase().orEmpty() }.getOrDefault("")
-        return h.contains("upns.") || h.contains("uns.bio") ||
-                h.contains("upnshare") || h.contains("strp2p.") ||
-                h.contains("p2pstream.") || h.contains("rpmplay.") ||
-                h.contains("rpmvid.") || h.contains("rpmvip.")
-    }
 
     override suspend fun getUrl(
         url: String,
@@ -147,12 +144,13 @@ open class ArabicVidstackExtractor(
 
         val host = runCatching { URI(url).host?.lowercase().orEmpty() }.getOrDefault("")
         val originFromUrl = ArabicExtractorUtils.originOf(url) ?: "https://$host"
+
         val candidateOrigins = buildList {
             add(originFromUrl)
-            if (host == "rpmplay.me") add("https://megamax.rpmplay.me")
-            if (host == "uns.bio") add("https://megamax.uns.bio")
-            if (host == "strp2p.site") add("https://megamax.strp2p.site")
-            if (host == "upns.one") add("https://tuktuk.upns.one")
+            if (host.contains("rpmplay")) add("https://megamax.rpmplay.me")
+            if (host.contains("uns.bio")) add("https://megamax.uns.bio")
+            if (host.contains("strp2p")) add("https://megamax.strp2p.site")
+            if (host.contains("upns.one")) add("https://tuktuk.upns.one")
             add(mainUrl)
         }.distinct()
 
@@ -179,6 +177,7 @@ open class ArabicVidstackExtractor(
             val json = runCatching { JSONObject(decrypted) }.getOrNull() ?: continue
 
             val streamUrls = LinkedHashSet<String>()
+
             fun collectFromNode(key: String) {
                 val node = json.opt(key) ?: return
                 when (node) {
@@ -240,10 +239,18 @@ open class ArabicVidstackExtractor(
     }
 }
 
+// كلاسات تغطي جميع دومينات ومرايا UPN و Vidstack المتداولة في المواقع:
 class UpnShareExtractor : ArabicVidstackExtractor("UPNShare", "https://upns.one")
-class StreamP2PExtractor : ArabicVidstackExtractor("StreamP2P", "https://strp2p.site")
-class RpmShareExtractor : ArabicVidstackExtractor("RPMShare", "https://rpmplay.me")
+class UpnShareTukTukExtractor : ArabicVidstackExtractor("UPNShare", "https://tuktuk.upns.one")
+class UpnShareBioExtractor : ArabicVidstackExtractor("UPNShare", "https://uns.bio")
+class UpnShareMegaMaxExtractor : ArabicVidstackExtractor("UPNShare", "https://megamax.uns.bio")
 
+class StreamP2PExtractor : ArabicVidstackExtractor("StreamP2P", "https://strp2p.site")
+class StreamP2PMegaMaxExtractor : ArabicVidstackExtractor("StreamP2P", "https://megamax.strp2p.site")
+class P2PStreamVipExtractor : ArabicVidstackExtractor("StreamP2P", "https://p2pstream.vip")
+
+class RpmShareExtractor : ArabicVidstackExtractor("RPMShare", "https://rpmplay.me")
+class RpmShareMegaMaxExtractor : ArabicVidstackExtractor("RPMShare", "https://megamax.rpmplay.me")
 open class ArabicMegaMaxExtractor(
     override val name: String = "MegaMax",
     override val mainUrl: String = "https://megamax.me"
