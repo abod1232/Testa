@@ -133,7 +133,6 @@ open class ArabicPackerExtractor(
 
 class LuluStreamExtractor : ArabicPackerExtractor("LuluStream", "https://luluvdo.com")
 class TukTukVipExtractor : ArabicPackerExtractor("TukTukVIP", "https://lolololu.website")
-class VideolandExtractor : ArabicPackerExtractor("Videoland", "https://videoland.sbs")
 class UpDownExtractor : ArabicPackerExtractor("UpDown", "https://updown.icu")
 class OkStreamExtractor : ArabicPackerExtractor("OkStream", "https://okstream.online")
 
