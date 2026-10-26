@@ -267,17 +267,13 @@ class TukTukHd : MainAPI() {
 
                 allMirrorsWithQuality.amap { (mirror, qualityInt) ->
                     val rawLink = mirror.link ?: return@amap
-                    // 1. تصحيح الروابط التي تبدأ بـ // بإضافة البروتوكول
                     val link = if (rawLink.startsWith("//")) "https:$rawLink" else rawLink.trim()
                     if (!link.startsWith("http")) return@amap
-
-                    // 2. إرسال الرابط مباشرة إلى loadExtractor بالطريقة النظامية الصحيحة
                     loadExtractor(
                         url = link,
                         referer = playerUrl, // تمرير رابط المشغل كـ Referer إجباري لفك الحظر
                         subtitleCallback = subtitleCallback
                     ) { extractorLink ->
-                        // حقن الجودة إذا كان المستخرج لم يتعرف عليها
                         if (extractorLink.quality == Qualities.Unknown.value) {
                             extractorLink.quality = qualityInt
                         }
