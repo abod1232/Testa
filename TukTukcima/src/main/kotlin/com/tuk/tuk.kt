@@ -269,8 +269,6 @@ class TukTukHd : MainAPI() {
                     val rawLink = mirror.link ?: return@amap
                     val link = if (rawLink.startsWith("//")) "https:$rawLink" else rawLink.trim()
                     if (!link.startsWith("http")) return@amap
-
-                    // إذا كان السيرفر TukTukVIP، أرسله لمستخرجه المزود بترويسات الحماية فوراً
                     if (mirror.symbol?.equals("TukTukVIP", ignoreCase = true) == true || link.contains("lolololu.website")) {
                         TukTukVipExtractor().getUrl(link, playerUrl, subtitleCallback) { extractorLink ->
                             if (extractorLink.quality == Qualities.Unknown.value) {
@@ -279,7 +277,6 @@ class TukTukHd : MainAPI() {
                             callback(extractorLink)
                         }
                     } else {
-                        // باقي السيرفرات تعمل عبر loadExtractor العادي
                         loadExtractor(
                             url = link,
                             referer = playerUrl,
