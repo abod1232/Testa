@@ -236,6 +236,7 @@ open class ArabicVidstackExtractor(
 }
 class UpnShareExtractor : ArabicVidstackExtractor("UPNShare", "https://upns.one")
 class UpnShareTukTukExtractor : ArabicVidstackExtractor("UPNShare", "https://tuktuk.upns.one")
+class VideolandExtractor : ArabicPackerExtractor("Videoland", "https://videoland.sbs")
 class UpnShareBioExtractor : ArabicVidstackExtractor("UPNShare", "https://uns.bio")
 class UpnShareMegaMaxExtractor : ArabicVidstackExtractor("UPNShare", "https://megamax.uns.bio")
 
