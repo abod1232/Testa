@@ -113,17 +113,11 @@ object ArabicExtractorUtils {
     }
 }
 
-// =========================================================================
-// 2. عائلة Vidstack الموحدة (UPNShare / StreamP2P / RPMShare) - مصححة بالكامل
-// =========================================================================
-
 open class ArabicVidstackExtractor(
     override val name: String = "UPNShare",
     override val mainUrl: String = "https://upns.one"
 ) : ExtractorApi() {
     override val requiresReferer = true
-
-    // تمكين كلاودستريم من التعرف على كل مشتقات دومينات UPNShare
     override fun requiresUrl(url: String): Boolean {
         val h = runCatching { URI(url).host?.lowercase().orEmpty() }.getOrDefault("")
         return h.contains("upns.") || h.contains("uns.bio") ||
@@ -138,7 +132,6 @@ open class ArabicVidstackExtractor(
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
-        // استخراج معرف الفيديو من بعد الهاش (#) أو من مسار الرابط
         val videoId = url.substringAfterLast('#', "")
             .substringAfterLast('/')
             .substringBefore('&')
@@ -154,8 +147,6 @@ open class ArabicVidstackExtractor(
 
         val host = runCatching { URI(url).host?.lowercase().orEmpty() }.getOrDefault("")
         val originFromUrl = ArabicExtractorUtils.originOf(url) ?: "https://$host"
-
-        // الأولوية دائماً للدومين القادم من الرابط مباشرة لمنع خطأ 400 Bad Tenant
         val candidateOrigins = buildList {
             add(originFromUrl)
             if (host == "rpmplay.me") add("https://megamax.rpmplay.me")
@@ -188,8 +179,6 @@ open class ArabicVidstackExtractor(
             val json = runCatching { JSONObject(decrypted) }.getOrNull() ?: continue
 
             val streamUrls = LinkedHashSet<String>()
-
-            // دالة مرنة تقرأ الروابط سواء كانت نصوصاً صريحة أو داخل كائنات ومصفوفات
             fun collectFromNode(key: String) {
                 val node = json.opt(key) ?: return
                 when (node) {
