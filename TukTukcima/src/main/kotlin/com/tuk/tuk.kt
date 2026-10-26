@@ -269,19 +269,29 @@ class TukTukHd : MainAPI() {
                     val rawLink = mirror.link ?: return@amap
                     val link = if (rawLink.startsWith("//")) "https:$rawLink" else rawLink.trim()
                     if (!link.startsWith("http")) return@amap
-                    loadExtractor(
-                        url = link,
-                        referer = playerUrl, // تمرير رابط المشغل كـ Referer إجباري لفك الحظر
-                        subtitleCallback = subtitleCallback
-                    ) { extractorLink ->
-                        if (extractorLink.quality == Qualities.Unknown.value) {
-                            extractorLink.quality = qualityInt
+
+                    // إذا كان السيرفر TukTukVIP، أرسله لمستخرجه المزود بترويسات الحماية فوراً
+                    if (mirror.symbol?.equals("TukTukVIP", ignoreCase = true) == true || link.contains("lolololu.website")) {
+                        TukTukVipExtractor().getUrl(link, playerUrl, subtitleCallback) { extractorLink ->
+                            if (extractorLink.quality == Qualities.Unknown.value) {
+                                extractorLink.quality = qualityInt
+                            }
+                            callback(extractorLink)
                         }
-                        callback(extractorLink)
+                    } else {
+                        // باقي السيرفرات تعمل عبر loadExtractor العادي
+                        loadExtractor(
+                            url = link,
+                            referer = playerUrl,
+                            subtitleCallback = subtitleCallback
+                        ) { extractorLink ->
+                            if (extractorLink.quality == Qualities.Unknown.value) {
+                                extractorLink.quality = qualityInt
+                            }
+                            callback(extractorLink)
+                        }
                     }
                 }
-            }
-
         } catch (e: Exception) {
             e.printStackTrace()
         }
