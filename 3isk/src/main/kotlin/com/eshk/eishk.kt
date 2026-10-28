@@ -1,525 +1,291 @@
 package com.eshk
 
-import android.util.Base64
-import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.ObjectMapper
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.utils.*
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
-import java.io.File
-import java.text.SimpleDateFormat
-import java.util.*
-import javax.crypto.Mac
-import javax.crypto.spec.SecretKeySpec
+import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.ExtractorLinkType
+import com.lagradost.cloudstream3.utils.Qualities
+import com.lagradost.cloudstream3.utils.newExtractorLink
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 
-class AnimeRift : MainAPI() {
+class OscarTvProvider : MainAPI() {
 
-    override var mainUrl = "https://gateway.embrassme.top/api/v4"
-    override var name = "AnimeRift"
+    override var name = "Oscar TV"
+    override var mainUrl = "https://ostv-11-11.xyz"
     override var lang = "ar"
     override val hasMainPage = true
     override val hasDownloadSupport = true
-    override val supportedTypes = setOf(TvType.Anime)
-
-    private val JWT_SECRET = "RIFT_JWT_SECRET_PLACEHOLDER"
-    private val FIREBASE_API_KEY = "RIFT_FIREBASE_API_KEY_PLACEHOLDER"
-    private val FIREBASE_APP_ID = "RIFT_FIREBASE_APP_ID_PLACEHOLDER"
-    private val ANDROID_PACKAGE = "com.riftapps.animerift"
-    private val ANDROID_CERT = "AF40CE82A52AA4107F311D8B9727D01C8D02250B"
+    override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime, TvType.Live)
 
     companion object {
-        private var fid: String? = null
-        private var firebaseToken: String? = null
-        private var gatewayBaseUrl: String? = null
-        private var sessionKey: String? = null
-        private var deviceId: String? = null
-        private var syntheticBuildId: String? = null
-        private var syntheticDeviceInfoJson: String? = null
+        private const val STEP1 = "https://flech.tn/scrapefinal/dramabox/step1_prepare_oscar.php"
+        private const val PLAY_UA = "TDMuaHLS99"
+        private val json = Json { ignoreUnknownKeys = true }
+    }
 
-        private fun getCacheFile(): File {
-            val tmp = System.getProperty("java.io.tmpdir") ?: "."
-            return File(tmp, "anime_rift_session_store.json")
+    private fun JsonObject.str(vararg keys: String): String? {
+        for (k in keys) {
+            val v = this[k]?.let { try { it.jsonPrim() } catch (_: Exception) { null } }
+            if (!v.isNullOrBlank() && v != "null") return v
         }
-
-        private fun saveToDisk(data: Map<String, String>) {
-            try {
-                val file = getCacheFile()
-                val jsonStr = ObjectMapper().writeValueAsString(data)
-                file.writeText(jsonStr)
-            } catch (_: Exception) {}
-        }
-
-        private fun loadFromDisk(): Map<String, String>? {
-            return try {
-                val file = getCacheFile()
-                if (file.exists()) {
-                    val text = file.readText()
-                    if (text.isNotBlank()) {
-                        val node = ObjectMapper().readTree(text)
-                        mapOf(
-                            "fid" to (node.get("fid")?.asText() ?: ""),
-                            "firebaseToken" to (node.get("firebaseToken")?.asText() ?: ""),
-                            "gatewayBaseUrl" to (node.get("gatewayBaseUrl")?.asText() ?: ""),
-                            "deviceId" to (node.get("deviceId")?.asText() ?: ""),
-                            "sessionKey" to (node.get("sessionKey")?.asText() ?: ""),
-                            "syntheticBuildId" to (node.get("syntheticBuildId")?.asText() ?: ""),
-                            "syntheticDeviceInfoJson" to (node.get("syntheticDeviceInfoJson")?.asText() ?: "")
-                        )
-                    } else null
-                } else null
-            } catch (_: Exception) {
-                null
-            }
-        }
+        return null
     }
 
-    private val mapper = ObjectMapper()
+    private fun Any?.jsonPrim(): String? = try {
+        (this as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+    } catch (_: Exception) { null }
 
-    private fun generateSyntheticDevice(): Pair<String, String> {
-        val brands = listOf(
-            Triple("google", "Google", "Pixel 8 Pro"),
-            Triple("google", "Google", "Pixel 7"),
-            Triple("samsung", "samsung", "Galaxy S23"),
-            Triple("xiaomi", "Xiaomi", "Xiaomi 13")
-        )
-        val selected = brands.random()
-        val randomNum = "${Random().nextInt(899999) + 100000}.015"
-        val buildId = "AP2A.240805.$randomNum"
-        val uniqueTag = UUID.randomUUID().toString().substring(0, 8)
+    private fun JsonObject.int(key: String): Int? = str(key)?.toDoubleOrNull()?.toInt()
 
-        val deviceInfo = mapOf(
-            "model" to selected.third,
-            "brand" to selected.first,
-            "manufacturer" to selected.second,
-            "device" to selected.first,
-            "hardware" to "qcom",
-            "product" to selected.first,
-            "androidVersion" to "14",
-            "sdkInt" to 34,
-            "securityPatch" to "2025-01-01",
-            "isPhysicalDevice" to true,
-            "supportedAbis" to listOf("arm64-v8a"),
-            "tags" to "release-keys",
-            "type" to "user",
-            "buildId" to buildId,
-            "host" to "build-server-$uniqueTag",
-            "fingerprint" to "${selected.first}/${selected.third}/${selected.first}:14/$buildId/V.1e9a_$uniqueTag:user/release-keys"
-        )
-        return Pair(buildId, mapper.writeValueAsString(deviceInfo))
-    }
+    /** CDN guard redirects playback to a 1-min "تنوية" notice without this cookie (from deep_link) */
+    private fun JsonObject.playCookie(): String? = try {
+        str("deep_link")?.substringAfter("cookies=", "")?.takeIf { it.isNotBlank() }
+            ?.substringBefore("&")?.let { java.net.URLDecoder.decode(it, "UTF-8") }
+    } catch (_: Exception) { null }
 
-    private fun base64UrlEncode(bytes: ByteArray): String {
-        return Base64.encodeToString(
-            bytes,
-            Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP
-        )
-    }
+    private fun JsonObject.arr(key: String): List<JsonObject> =
+        ((this[key] as? JsonArray)?.mapNotNull { it as? JsonObject }) ?: emptyList()
 
-    private fun generateIntegrityToken(scope: String): String {
-        val now = System.currentTimeMillis() / 1000
-        val exp = now + 60
-        val header = base64UrlEncode("""{"alg":"HS256","typ":"JWT"}""".toByteArray())
-        val payload = base64UrlEncode("""{"scope":"$scope","exp":$exp,"iat":$now}""".toByteArray())
-        val toSign = "$header.$payload"
-        val secretKey = SecretKeySpec(JWT_SECRET.toByteArray(), "HmacSHA256")
-        val mac = Mac.getInstance("HmacSHA256")
-        mac.init(secretKey)
-        val signature = base64UrlEncode(mac.doFinal(toSign.toByteArray()))
-        return "$toSign.$signature"
-    }
+    /** flech.tn computes fresh X-Iron-* headers per URL -> required for every API call */
+    private suspend fun call(path: String): JsonObject? = try {
+        val url = "$mainUrl/$path"
+        val h = json.parseToJsonElement(
+            app.post(
+                STEP1,
+                headers = mapOf(
+                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
+                    "Content-Type" to "application/x-www-form-urlencoded",
+                ),
+                data = mapOf("url" to url),
+            ).text
+        ).let { (it as? JsonObject)?.get("headers") as? JsonObject }
+        if (h == null) return null
+        val headers = h.entries.mapNotNull { (k, v) ->
+            (v as? kotlinx.serialization.json.JsonPrimitive)?.content?.let { k to it }
+        }.filter { it.first !in setOf("Host", "Connection") }.toMap()
+        (app.get(url, headers = headers).text).jsonObjectSafe()
+    } catch (_: Exception) { null }
 
-    private fun generateFcmToken(): String {
-        val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-        return "APA91b" + (1..80).map { chars.random() }.joinToString("")
-    }
+    private fun String.jsonObjectSafe(): JsonObject? = try {
+        json.parseToJsonElement(this) as? JsonObject
+    } catch (_: Exception) { null }
 
-    private fun generateDeviceTimezone(): String {
-        val now = Date()
-        val format = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US)
-        val nano = Random().nextInt(999999).toString().padStart(6, '0')
-        return "${format.format(now)}.$nano"
-    }
+    private fun JsonObject.data(): JsonObject? = this["data"] as? JsonObject
+    private fun JsonObject.dataArr(): List<JsonObject> =
+        ((this["data"] as? JsonArray)?.mapNotNull { it as? JsonObject }) ?: emptyList()
 
-    private fun gzipCompress(data: String): ByteArray {
-        val bos = java.io.ByteArrayOutputStream()
-        java.util.zip.GZIPOutputStream(bos).use { it.write(data.toByteArray()) }
-        return bos.toByteArray()
-    }
-
-    private fun ensureInitialized() {
-        if (!fid.isNullOrEmpty() && !gatewayBaseUrl.isNullOrEmpty() && !deviceId.isNullOrEmpty()) {
-            return
-        }
-
-        val disk = loadFromDisk()
-        if (disk != null) {
-            fid = disk["fid"]
-            firebaseToken = disk["firebaseToken"]
-            gatewayBaseUrl = disk["gatewayBaseUrl"]
-            deviceId = disk["deviceId"]
-            sessionKey = disk["sessionKey"]
-            syntheticBuildId = disk["syntheticBuildId"]
-            syntheticDeviceInfoJson = disk["syntheticDeviceInfoJson"]
-
-            if (!gatewayBaseUrl.isNullOrEmpty()) {
-                mainUrl = gatewayBaseUrl!!
-            }
-
-            if (!fid.isNullOrEmpty() && !gatewayBaseUrl.isNullOrEmpty() && !deviceId.isNullOrEmpty()) {
-                return
-            }
-        }
-
-        gatewayBaseUrl = gatewayBaseUrl ?: mainUrl
-        if (fid.isNullOrEmpty()) {
-            fid = UUID.randomUUID().toString().replace("-", "").take(22)
-        }
-        if (deviceId.isNullOrEmpty()) {
-            deviceId = "$fid:${generateFcmToken()}"
-        }
-        if (syntheticBuildId.isNullOrEmpty() || syntheticDeviceInfoJson.isNullOrEmpty()) {
-            val (buildId, deviceInfoJson) = generateSyntheticDevice()
-            syntheticBuildId = buildId
-            syntheticDeviceInfoJson = deviceInfoJson
-        }
-
-        saveToDisk(
-            mapOf(
-                "fid" to fid!!,
-                "firebaseToken" to (firebaseToken ?: ""),
-                "gatewayBaseUrl" to gatewayBaseUrl!!,
-                "deviceId" to deviceId!!,
-                "sessionKey" to (sessionKey ?: ""),
-                "syntheticBuildId" to syntheticBuildId!!,
-                "syntheticDeviceInfoJson" to syntheticDeviceInfoJson!!
-            )
-        )
-    }
-
-    private suspend fun recoverFromFirebase() = withContext(Dispatchers.IO) {
-        try {
-            registerFirebaseInstallation()
-        } catch (_: Exception) {}
-
-        try {
-            fetchRemoteConfig()
-        } catch (_: Exception) {}
-
-        try {
-            registerDevice()
-        } catch (_: Exception) {}
-
-        val map = mapOf(
-            "fid" to (fid ?: ""),
-            "firebaseToken" to (firebaseToken ?: ""),
-            "gatewayBaseUrl" to (gatewayBaseUrl ?: mainUrl),
-            "deviceId" to (deviceId ?: ""),
-            "sessionKey" to (sessionKey ?: ""),
-            "syntheticBuildId" to (syntheticBuildId ?: "BP2A.250605.015"),
-            "syntheticDeviceInfoJson" to (syntheticDeviceInfoJson ?: "{}")
-        )
-        saveToDisk(map)
-    }
-
-    private fun registerFirebaseInstallation() {
-        val url = "https://firebaseinstallations.googleapis.com/v1/projects/anime-rift-4142e/installations"
-        val payloadStr = """{"fid":"","appId":"$FIREBASE_APP_ID","authVersion":"FIS_v2","sdkVersion":"a:19.1.0"}"""
-
-        val request = okhttp3.Request.Builder()
-            .url(url)
-            .post(gzipCompress(payloadStr).toRequestBody("application/json; charset=UTF-8".toMediaType()))
-            .addHeader("Content-Type", "application/json")
-            .addHeader("Accept", "application/json")
-            .addHeader("Content-Encoding", "gzip")
-            .addHeader("Cache-Control", "no-cache")
-            .addHeader("X-Android-Package", ANDROID_PACKAGE)
-            .addHeader("X-Android-Cert", ANDROID_CERT)
-            .addHeader("x-goog-api-key", FIREBASE_API_KEY)
-            .addHeader("x-firebase-client", "H4sIAAAAAAAA_6tWykhNLCpJSk0sKVayio7VUSpLLSrOzM9TslIyUqoFAFyivEQfAAAA")
-            .addHeader("User-Agent", "Dalvik/2.1.0 (Linux; U; Android 14; Pixel 8 Pro Build/AP2A.240805.015)")
-            .build()
-
-        val response = app.baseClient.newCall(request).execute()
-        if (!response.isSuccessful) return
-
-        val body = response.body?.string() ?: return
-        val json = mapper.readTree(body)
-        fid = json.get("fid")?.asText() ?: fid
-        firebaseToken = json.get("authToken")?.get("token")?.asText() ?: firebaseToken
-    }
-
-    private suspend fun fetchRemoteConfig() {
-        val url = "https://firebaseremoteconfig.googleapis.com/v1/projects/536921039715/namespaces/firebase:fetch"
-        val payload = mapOf(
-            "appVersion" to "3.13.5",
-            "appInstanceIdToken" to (firebaseToken ?: ""),
-            "appBuild" to "68",
-            "appInstanceId" to (fid ?: ""),
-            "analyticsUserProperties" to emptyMap<String, String>(),
-            "appId" to FIREBASE_APP_ID,
-            "platformVersion" to "34",
-            "sdkVersion" to "23.0.1",
-            "packageName" to ANDROID_PACKAGE
-        )
-
-        val headers = mapOf(
-            "X-Goog-Api-Key" to FIREBASE_API_KEY,
-            "X-Android-Package" to ANDROID_PACKAGE,
-            "X-Android-Cert" to ANDROID_CERT,
-            "X-Goog-Firebase-Installations-Auth" to (firebaseToken ?: ""),
-            "Content-Type" to "application/json"
-        )
-
-        val res = app.post(url, headers = headers, json = payload)
-        if (res.isSuccessful) {
-            val json = res.parsed<JsonNode>()
-            val configUrl = json.get("entries")?.get("anime_rift_android_gateway_base_url_v4")?.asText()?.replace("\"", "")
-            if (!configUrl.isNullOrEmpty()) {
-                gatewayBaseUrl = configUrl
-                mainUrl = configUrl
-            }
+    private fun JsonObject.toSearch(tvType: TvType): SearchResponse? {
+        val id = int("id") ?: return null
+        val title = str("title_ar", "title_en", "name") ?: return null
+        val poster = str("poster")?.let { if (it.startsWith("http")) it else "$mainUrl$it" }
+        return if (tvType == TvType.Movie) {
+            newMovieSearchResponse(title, "oscar://movie/$id", TvType.Movie) { this.posterUrl = poster }
+        } else {
+            val kind = if (tvType == TvType.Anime) "anime" else "serie"
+            newTvSeriesSearchResponse(title, "oscar://$kind/$id", tvType) { this.posterUrl = poster }
         }
     }
 
-    private suspend fun registerDevice() {
-        val baseUrl = gatewayBaseUrl ?: mainUrl
-        val url = "$baseUrl/auth/register/device"
-        val fcmToken = generateFcmToken()
-        deviceId = "${fid ?: ""}:$fcmToken"
-        val (buildId, deviceInfoJson) = generateSyntheticDevice()
-        syntheticBuildId = buildId
-        syntheticDeviceInfoJson = deviceInfoJson
+    private suspend fun list(path: String, tvType: TvType): List<SearchResponse> =
+        call(path)?.dataArr()?.mapNotNull { it.toSearch(tvType) } ?: emptyList()
 
-        val payload = mapOf(
-            "deviceId" to deviceId,
-            "current_app_version" to "3.13.5",
-            "device_os" to "android",
-            "device_environment" to "production",
-            "device_info" to deviceInfoJson,
-            "install_source" to "IS_INSTALLED_FROM_PLAY_PACKAGE_INSTALLER",
-            "deviceOsId" to buildId,
-            "firebaseInstallationId" to fid,
-            "apn_token" to null,
-            "install_mode" to 2
-        )
+    private suspend fun searchOne(pathPrefix: String, query: String, tvType: TvType): List<SearchResponse> =
+        call("$pathPrefix/?page=1&limit=20&search=${java.net.URLEncoder.encode(query, "UTF-8")}")
+            ?.dataArr()?.mapNotNull { it.toSearch(tvType) } ?: emptyList()
 
-        val json = apiCall(url, "USER.AUTH.DEVICE.REGISTER", "POST", payload)
-        sessionKey = json.get("sessionKey")?.asText()
-    }
-
-    private suspend fun apiCall(
-        url: String,
-        scope: String,
-        method: String = "GET",
-        body: Map<String, Any?>? = null,
-        isRetry: Boolean = false
-    ): JsonNode {
-        ensureInitialized()
-        val currentBase = gatewayBaseUrl ?: mainUrl
-        val integrityToken = generateIntegrityToken(scope)
-        val timezone = generateDeviceTimezone()
-
-        val headers = mapOf(
-            "x-device-os-id" to (syntheticBuildId ?: "AP2A.240805.015"),
-            "user-agent" to "Dart/3.10 (dart:io)",
-            "x-device-release-version" to "3.13.5",
-            "x-firebase-app-check" to "null",
-            "authorization" to "Bearer null",
-            "content-type" to "application/json; charset=UTF-8",
-            "x-installation-source" to "IS_INSTALLED_FROM_PLAY_PACKAGE_INSTALLER",
-            "integrity" to "Bearer $integrityToken",
-            "accept" to "application/json",
-            "x-firebase-id" to (fid ?: ""),
-            "x-device-id" to (deviceId ?: ""),
-            "x-device-timezone" to timezone,
-            "x-device-language" to "ar",
-            "x-platform" to "Mobile",
-            "x-os" to "android"
-        )
-
-        try {
-            val response = when (method.uppercase()) {
-                "POST" -> app.post(url, headers = headers, json = body)
-                "PUT" -> app.put(url, headers = headers, json = body)
-                else -> app.get(url, headers = headers)
-            }
-
-            val statusCode = response.code
-            val rawBody = response.body?.string() ?: ""
-
-            if (statusCode == 429 && !isRetry) {
-                delay(1500)
-                return apiCall(url, scope, method, body, isRetry = true)
-            }
-
-            if (!response.isSuccessful) {
-                if (!isRetry && (statusCode == 404 || statusCode == 401 || statusCode == 403)) {
-                    recoverFromFirebase()
-                    val updatedBase = gatewayBaseUrl ?: mainUrl
-                    val retryUrl = if (url.startsWith(currentBase)) url.replace(currentBase, updatedBase) else url
-                    return apiCall(retryUrl, scope, method, body, isRetry = true)
-                }
-                throw Exception("HTTP $statusCode: $rawBody")
-            }
-
-            return mapper.readTree(rawBody)
-        } catch (e: Exception) {
-            if (!isRetry && e.message?.contains("429") != true) {
-                recoverFromFirebase()
-                val updatedBase = gatewayBaseUrl ?: mainUrl
-                val retryUrl = if (url.startsWith(currentBase)) url.replace(currentBase, updatedBase) else url
-                return apiCall(retryUrl, scope, method, body, isRetry = true)
-            }
-            throw e
-        }
-    }
+    override val mainPage = mainPageOf(
+        "movies_top" to "رائج اليوم",
+        "latest_episodes" to "أحدث الحلقات",
+        "armovies" to "أحدث الأفلام العربية",
+        "arseries" to "أحدث الإضافات العربية",
+        "oscar://movies/" to "أفلام",
+        "oscar://series/" to "مسلسلات",
+        "oscar://anime/" to "أنمي",
+        "oscar://channels/" to "قنوات مباشرة",
+    )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        if (page > 1) {
-            return newHomePageResponse(emptyList(), hasNext = false)
-        }
-
-        ensureInitialized()
-        val baseUrl = gatewayBaseUrl ?: mainUrl
-        val url = "$baseUrl/library/home_content?with_genres=true"
-        val json = apiCall(url, "ANIME.LIBRARY.HOME_CONTENT")
-
-        val homeLists = mutableListOf<HomePageList>()
-        val sections = json.get("sections") ?: return newHomePageResponse(emptyList(), hasNext = false)
-
-        sections.forEach { section ->
-            val title = section.get("sectionTitle")?.asText() ?: ""
-            val items = section.get("items")
-            val list = mutableListOf<SearchResponse>()
-
-            items?.forEach { item ->
-                val id = item.get("_id")?.asText() ?: ""
-                val animeTitle = item.get("title")?.asText() ?: ""
-                val ratingFloat = item.get("myAnimeList_rating")?.asDouble()?.toFloat()
-
-                if (id.isNotEmpty() && animeTitle.isNotEmpty()) {
-                    list.add(
-                        newAnimeSearchResponse(
-                            name = animeTitle,
-                            url = "$baseUrl/library/details/$id"
-                        ) {
-                            this.posterUrl = item.get("medium_picture")?.asText() ?: item.get("main_picture")?.asText()
-                            this.year = item.get("release_year")?.asInt()
-                            this.score = ratingFloat?.let { Score.from10(it) }
+        val data = request.data
+        val items: List<SearchResponse> = when {
+            data == "movies_top" || data == "latest_episodes" || data == "armovies" || data == "arseries" -> {
+                if (page > 1) emptyList() else {
+                    val home = call("api/v2/home.php?app_version=15") ?: return newHomePageResponse(request.name, emptyList())
+                    val sections = (home["data"] as? JsonObject)?.arr("sections") ?: emptyList()
+                    val sec = when (data) {
+                        "armovies" -> sections.firstOrNull {
+                            it.str("section_type") == "movies" &&
+                                ((it["content_filters"] as? JsonObject)?.int("category_id") == 3 || it.str("title_ar") == "أحدث الأفلام العربية")
                         }
-                    )
+                        "arseries" -> sections.firstOrNull {
+                            it.str("section_type") == "latest_additions" &&
+                                (it.int("content_category_filter") == 1 || it.str("title_ar") == "أحدث الإضافات العربية")
+                        }
+                        else -> sections.firstOrNull { it.str("section_type") == data }
+                    } ?: return newHomePageResponse(request.name, emptyList())
+                    sec.arr("items").mapNotNull { o ->
+                        if (o.containsKey("home_team")) return@mapNotNull null
+                        val id = o.int("item_id") ?: o.int("id") ?: return@mapNotNull null
+                        val sTitle = o.str("series_title")
+                        if (sTitle != null && o.containsKey("season_id")) {
+                            val sn = o.int("season_number") ?: 1
+                            val ep = o.int("episode_number") ?: 0
+                            val epPoster = o.str("series_poster", "series_banner")?.let { if (it.startsWith("http")) it else "$mainUrl$it" }
+                            return@mapNotNull newMovieSearchResponse(
+                                if (sn > 1) "$sTitle — م$sn:ح$ep" else "$sTitle — حلقة $ep",
+                                "oscar://ep/$id", TvType.Movie
+                            ) { this.posterUrl = epPoster }
+                        }
+                        val itemType = o.str("item_type") ?: if (o.containsKey("episode_count")) "serie" else "movie"
+                        val title = o.str("title_ar", "title_en") ?: return@mapNotNull null
+                        val poster = o.str("poster", "image")?.let { if (it.startsWith("http")) it else "$mainUrl$it" }
+                        when (itemType) {
+                            "movie" -> newMovieSearchResponse(title, "oscar://movie/$id", TvType.Movie) { this.posterUrl = poster }
+                            "anime" -> newTvSeriesSearchResponse(title, "oscar://anime/$id", TvType.Anime) { this.posterUrl = poster }
+                            else -> newTvSeriesSearchResponse(title, "oscar://serie/$id", TvType.TvSeries) { this.posterUrl = poster }
+                        }
+                    }
                 }
             }
-
-            if (list.isNotEmpty()) {
-                homeLists.add(HomePageList(title, list, isHorizontalImages = true))
-            }
+            data.startsWith("oscar://movies/") -> list("api/movies/?page=$page&limit=20", TvType.Movie)
+            data.startsWith("oscar://series/") -> list("api/series/?page=$page&limit=20", TvType.TvSeries)
+            data.startsWith("oscar://anime/") -> list("api/anime/?page=$page&limit=20&anime_type=tv,ova,ona,special,movie", TvType.Anime)
+            data.startsWith("oscar://channels/") ->
+                call("api/channels/?page=$page&limit=20")?.dataArr()?.mapNotNull { o ->
+                    val id = o.int("id") ?: return@mapNotNull null
+                    val chName = o.str("name") ?: return@mapNotNull null
+                    val logo = o.str("logo")?.let { if (it.startsWith("http")) it else "$mainUrl$it" }
+                    newTvSeriesSearchResponse(chName, "oscar://channel/$id", TvType.Live) { this.posterUrl = logo }
+                } ?: emptyList()
+            else -> emptyList()
         }
-
-        return newHomePageResponse(homeLists, hasNext = false)
+        return newHomePageResponse(request.name, items)
     }
 
-    override suspend fun search(query: String): List<SearchResponse>? {
-        return search(query, 1)?.items
+    override suspend fun search(query: String): List<SearchResponse> {
+        val q = java.net.URLEncoder.encode(query.trim(), "UTF-8")
+        if (q.isBlank()) return emptyList()
+        return coroutineScope {
+            listOf(
+                async { searchOne("api/movies", query, TvType.Movie) },
+                async { searchOne("api/series", query, TvType.TvSeries) },
+                async { searchOne("api/anime", query, TvType.Anime) },
+            ).awaitAll().flatten()
+        }.distinctBy { it.url }
     }
 
-    override suspend fun search(query: String, page: Int): SearchResponseList? {
-        ensureInitialized()
-        val baseUrl = gatewayBaseUrl ?: mainUrl
-        val apiPage = (page - 1).coerceAtLeast(0)
-        val url = "$baseUrl/library/search?page=$apiPage&sort_by=release_year&sort_direction=1&text_direction=jp"
+    private fun JsonObject.poster2(): String? = str("poster")?.let { if (it.startsWith("http")) it else "$mainUrl$it" }
 
-        return try {
-            val json = apiCall(url, "ANIME.LIBRARY.SEARCH", method = "POST", body = mapOf("query" to query))
-            val items = json.get("items") ?: return null
+    override suspend fun load(url: String): LoadResponse? {
+        if (!url.contains("oscar://")) return null
+        val parts = url.substringAfter("oscar://").split("/")
+        val kind = parts.firstOrNull() ?: return null
+        val id = parts.getOrNull(1) ?: return null
 
-            val results = mutableListOf<SearchResponse>()
-            items.forEach { item ->
-                val ratingFloat = item.get("myAnimeList_rating")?.asDouble()?.toFloat()
-                results.add(
-                    newAnimeSearchResponse(
-                        name = item.get("title")?.asText() ?: "",
-                        url = "$baseUrl/library/details/${item.get("_id")?.asText()}"
-                    ) {
-                        this.posterUrl = item.get("medium_picture")?.asText() ?: item.get("main_picture")?.asText()
-                        this.year = item.get("release_year")?.asInt()
-                        this.score = ratingFloat?.let { Score.from10(it) }
-                    }
-                )
+        return when {
+            kind == "channel" -> {
+                val ch = call("api/channels/show.php?id=$id")?.data() ?: return null
+                val name = ch.str("name") ?: "Channel $id"
+                val streams = ch.arr("streams")
+                if (streams.isEmpty()) return null
+                val packed = streams.mapNotNull { st ->
+                    val u = st.str("stream_url")?.substringBefore("#") ?: return@mapNotNull null
+                    val q = st.str("quality") ?: ""
+                    "$u::$q"
+                }.joinToString("||")
+                newMovieLoadResponse(name, url, TvType.Live, "oscar://ch/$packed") {
+                    this.posterUrl = ch.str("logo")?.let { if (it.startsWith("http")) it else "$mainUrl$it" }
+                }
             }
-
-            val hasNext = json.get("hasNext")?.asBoolean() ?: false
-            newSearchResponseList(results, hasNext)
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    override suspend fun load(url: String): LoadResponse {
-        ensureInitialized()
-        val baseUrl = gatewayBaseUrl ?: mainUrl
-        val animeId = url.substringAfterLast("/")
-        val detailUrl = "$baseUrl/library/details/$animeId"
-        val json = apiCall(detailUrl, "ANIME.LIBRARY.DETAILS")
-        val item = json.get("item") ?: throw ErrorLoadingException("Failed to load anime details")
-
-        val allRelated = mutableListOf<AnimeSearchResponse>()
-        val others = json.get("others")
-
-        others?.get("recommendations")?.forEach { rec ->
-            val recRating = rec.get("myAnimeList_rating")?.asDouble()?.toFloat()
-            allRelated.add(
-                newAnimeSearchResponse(
-                    name = rec.get("title")?.asText() ?: "",
-                    url = "$baseUrl/library/details/${rec.get("_id")?.asText()}"
+            kind == "movie" -> {
+                val d = call("api/movies/show.php?id=$id")?.data() ?: return null
+                val title = d.str("title_ar", "title_en") ?: return null
+                val tags = d.arr("genres").mapNotNull { it.str("name") }
+                newMovieLoadResponse(title, url, TvType.Movie, "oscar://player/movies/$id") {
+                    this.posterUrl = d.poster2()
+                    this.plot = d.str("story")
+                    this.year = d.int("release_year") ?: d.str("release_date")?.take(4)?.toIntOrNull()
+                    this.tags = tags
+                }
+            }
+            kind == "ep" -> {
+                var d = call("api/episodes/show.php?id=$id")?.data()
+                var anime = false
+                if (d == null) {
+                    d = call("api/anime/episodes/show.php?id=$id")?.data()
+                    anime = true
+                }
+                if (d == null) return null
+                val sTitle = d.str("series_title") ?: d.str("title_ar", "title_en") ?: return null
+                val sn = d.int("season_number") ?: 1
+                val ep = d.int("episode_number") ?: 0
+                newMovieLoadResponse(
+                    if (sn > 1) "$sTitle — م$sn حلقة $ep" else "$sTitle — حلقة $ep",
+                    url, TvType.Movie, "oscar://ep/$anime/$id"
                 ) {
-                    this.posterUrl = rec.get("main_picture")?.asText()
-                    this.score = recRating?.let { Score.from10(it) }
-                } as AnimeSearchResponse
-            )
-        }
-
-        val episodesList = mutableListOf<Episode>()
-        try {
-            val episodeUrl = "$baseUrl/library/episodes/$animeId?sort_by_latest=1&with_arcs=true&with_favorites=true"
-            val epJson = apiCall(episodeUrl, "ANIME.LIBRARY.EPISODES.ALL")
-            epJson.get("items")?.forEach { ep ->
-                val epNumber = ep.get("episode_number")?.asInt() ?: 1
-                val epId = ep.get("_id")?.asText() ?: ""
-                episodesList.add(
-                    newEpisode(data = "$animeId|$epId|$epNumber") {
-                        this.name = "الحلقة $epNumber"
-                        this.episode = epNumber
-                        this.season = 1
-                        this.posterUrl = ep.get("thumbnail")?.asText()
+                    this.posterUrl = d.str("series_poster")?.let { if (it.startsWith("http")) it else "$mainUrl$it" }
+                    this.plot = d.str("description")
+                }
+            }
+            kind == "serie" || kind == "anime" || kind == "tv" || kind == "TvSeries" || kind == "Anime" -> {
+                val isAnime = kind == "anime" || kind == "Anime"
+                val apiBase = if (isAnime) "api/anime" else "api/series"
+                var d = call("$apiBase/show.php?id=$id")?.data()
+                if (d == null && !isAnime) {
+                    val m = call("api/movies/show.php?id=$id")?.data()
+                    if (m != null) {
+                        return newMovieLoadResponse(
+                            m.str("title_ar", "title_en") ?: return null, url, TvType.Movie, "oscar://player/movies/$id"
+                        ) {
+                            this.posterUrl = m.poster2()
+                            this.plot = m.str("story")
+                            this.year = m.int("release_year") ?: m.str("release_date")?.take(4)?.toIntOrNull()
+                            this.tags = m.arr("genres").mapNotNull { it.str("name") }
+                        }
                     }
-                )
+                }
+                if (d == null) return null
+                val title = d.str("title_ar", "title_en", "name") ?: return null
+                val seasons = d.arr("seasons")
+                val episodes = coroutineScope {
+                    seasons.chunked(6).flatMap { batch ->
+                        batch.map { s ->
+                            async {
+                                val sid = s.int("season_id") ?: s.int("id") ?: return@async emptyList<Episode>()
+                                val sn = s.int("season_number") ?: 1
+                                val epPath = if (isAnime) "api/anime/episodes/?season_id=$sid" else "api/episodes/?season_id=$sid"
+                                call(epPath)?.dataArr()?.mapIndexedNotNull { i, e ->
+                                    val epId = e.int("id") ?: return@mapIndexedNotNull null
+                                    val epNum = e.int("episode_number") ?: (i + 1)
+                                    newEpisode(
+                                        url = "oscar://ep/$isAnime/$epId",
+                                        initializer = {
+                                            this.name = "الحلقة $epNum"
+                                            this.season = sn
+                                            this.episode = epNum
+                                            this.posterUrl = e.str("thumbnail")?.let { if (it.startsWith("http")) it else "$mainUrl$it" }
+                                        },
+                                        fix = false,
+                                    )
+                                } ?: emptyList()
+                            }
+                        }.awaitAll()
+                    }.flatten()
+                }
+                if (episodes.isEmpty()) return null
+                newTvSeriesLoadResponse(title, url, if (isAnime) TvType.Anime else TvType.TvSeries, episodes) {
+                    this.posterUrl = d.poster2()
+                    this.plot = d.str("story")
+                    this.year = d.str("release_year")?.toIntOrNull() ?: d.int("release_year")
+                    this.tags = d.arr("genres").mapNotNull { it.str("name") }
+                }
             }
-        } catch (_: Exception) {}
-
-        val ratingFloat = item.get("myAnimeList_rating")?.asDouble()?.toFloat()
-
-        return newAnimeLoadResponse(
-            name = item.get("title")?.asText() ?: "",
-            url = url,
-            type = TvType.Anime
-        ) {
-            this.posterUrl = item.get("main_picture")?.asText()
-            this.plot = item.get("synopsis")?.asText()
-            this.year = item.get("release_year")?.asInt()
-            this.score = ratingFloat?.let { Score.from10(it) }
-            this.tags = item.get("genreLabels")?.mapNotNull { it.get("label")?.asText() }
-            this.showStatus = when (item.get("release_status")?.asText()) {
-                "on_going" -> ShowStatus.Ongoing
-                "finished" -> ShowStatus.Completed
-                else -> null
-            }
-            this.recommendations = allRelated
-            addEpisodes(DubStatus.Subbed, episodesList)
+            else -> null
         }
     }
 
@@ -527,181 +293,67 @@ class AnimeRift : MainAPI() {
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val parts = data.split('|')
-            if (parts.size < 2) return@withContext false
-            val animeId = parts[0]
-            val episodeId = parts[1]
-            val episodeNumber = parts.getOrNull(2)?.toIntOrNull() ?: 1
+        callback: (ExtractorLink) -> Unit,
+    ): Boolean {
+        var got = false
+        val seen = HashSet<String>()
 
-            val baseUrl = gatewayBaseUrl ?: mainUrl
-            val sourcesUrl = "$baseUrl/library/episode/sources"
-            val sourcesBody = mapOf(
-                "animeId" to animeId,
-                "episodeId" to episodeId,
-                "episode_number" to episodeNumber
-            )
-            val sourcesJson = apiCall(sourcesUrl, "ANIME.LIBRARY.EPISODES.SOURCES.ALL", method = "POST", body = sourcesBody)
-            val items = sourcesJson.get("items") ?: return@withContext false
-
-            val priorityProviders = listOf("cr2", "rift-streamer", "streamtape")
-            val filteredItems = items.filter { src ->
-                val subTitle = src.get("sub_title")?.asText() ?: ""
-                subTitle.startsWith("ar_") || subTitle.isEmpty()
-            }.ifEmpty { items.toList() }
-
-            val sortedItems = filteredItems.sortedBy { src ->
-                val provider = src.get("provider")?.asText() ?: ""
-                val index = priorityProviders.indexOf(provider)
-                if (index != -1) index else 99
-            }.take(6)
-
-            sortedItems.forEach { src ->
-                val hostId = src.get("_id")?.asText() ?: return@forEach
-                val serverName = src.get("server_name")?.asText() ?: "Server"
-                val provider = src.get("provider")?.asText() ?: ""
-                val subTitle = src.get("sub_title")?.asText() ?: ""
-
-                val qualitiesNode = src.get("qualities")
-                val qualitiesList = if (qualitiesNode != null && qualitiesNode.isArray && qualitiesNode.size() > 0) {
-                    qualitiesNode.map { it.asText() }
-                } else {
-                    listOf("720P")
+        suspend fun emit(u0: String, label: String, quality: String?, cookie: String? = null) {
+            if (!u0.startsWith("http")) return
+            var u = u0
+            if (u.contains("newcdn.seriesmp4.com")) {
+                u = try {
+                    val body = app.get(u0, headers = mapOf("User-Agent" to PLAY_UA)).text
+                    Regex("src=\"(https://downloader\\.disk\\.yandex\\.ru[^\"]+)\"")
+                        .find(body)?.groupValues?.get(1)?.replace("&" + "amp;", "&") ?: return
+                } catch (_: Exception) { return }
+            }
+            if (!seen.add(u)) return
+            callback(
+                newExtractorLink(
+                    name,
+                    listOfNotNull(label, quality?.takeIf { it.isNotBlank() && it != "متعدد" }).joinToString(" "),
+                    u,
+                    if (u.contains(".mp4")) ExtractorLinkType.VIDEO else ExtractorLinkType.M3U8,
+                ) {
+                    this.headers = if (cookie.isNullOrBlank()) mapOf("User-Agent" to PLAY_UA)
+                    else mapOf("User-Agent" to PLAY_UA, "Cookie" to cookie)
+                    this.quality = quality?.replace("p", "")?.toIntOrNull()
+                        ?.let { q -> Qualities.entries.firstOrNull { it.value == q }?.value } ?: Qualities.Unknown.value
                 }
+            )
+            got = true
+        }
 
-                for (quality in qualitiesList) {
-                    try {
-                        val canPlayUrl = "$baseUrl/library/episode/source/can_play"
-                        val canPlayBody = mapOf(
-                            "episodeId" to episodeId,
-                            "hostId" to hostId,
-                            "is_download" to false,
-                            "event_name" to "play_episode_unlocked"
-                        )
-                        val canPlayJson = apiCall(canPlayUrl, "ANIME.LIBRARY.EPISODES.SOURCES.CHECK_AVAILABILITY", method = "POST", body = canPlayBody)
-                        val sessionId = canPlayJson.get("sessionId")?.asText() ?: ""
+        when {
+            data.startsWith("oscar://direct/") -> {
+                emit(data.substringAfter("oscar://direct/"), "Oscar TV", "")
+            }
 
-                        val claimUrl = "$baseUrl/ads_manager/claim"
-                        val claimBody = mapOf(
-                            "event_name" to "play_episode_unlocked",
-                            "hostId" to hostId,
-                            "episodeId" to episodeId,
-                            "transactionRef" to "${System.currentTimeMillis()}_${Random().nextInt(99999999)}",
-                            "reward_result" to "not_filled",
-                            "streamingServerKey" to provider,
-                            "is_optional" to false,
-                            "is_reward" to true
-                        )
-                        try {
-                            apiCall(claimUrl, "USER.ADS_MANAGER.CLAIMS", method = "PUT", body = claimBody)
-                        } catch (_: Exception) {}
-
-                        val directLinkUrl = "$baseUrl/library/episode/source/direct_link"
-                        val directLinkBody = mapOf(
-                            "id" to hostId,
-                            "quality" to quality,
-                            "with_internal_player" to "1",
-                            "sessionId" to sessionId
-                        )
-                        val directLinkJson = apiCall(directLinkUrl, "ANIME.LIBRARY.EPISODES.SOURCES.DIRECT_LINK", method = "POST", body = directLinkBody)
-                        directLinkJson.get("tracks")?.forEach { track ->
-                            val trackUrl = track.get("file")?.asText() ?: track.get("url")?.asText()
-                            val trackLang = track.get("label")?.asText() ?: track.get("language")?.asText() ?: "Arabic"
-                            if (!trackUrl.isNullOrEmpty()) {
-                                subtitleCallback(SubtitleFile(trackLang, trackUrl))
-                            }
-                        }
-                        if (directLinkJson.get("url_response")?.asBoolean() == true) {
-                            val videoUrl = directLinkJson.get("videoUrl")?.asText()
-
-                            if (!videoUrl.isNullOrEmpty()) {
-                                val customHeaders = mutableMapOf(
-                                    "User-Agent" to "libmpv",
-                                    "Accept" to "*/*",
-                                    "Range" to "bytes=0-",
-                                    "Connection" to "close",
-                                    "Icy-MetaData" to "1"
-                                )
-                                val hostFromUrl = try {
-                                    java.net.URI(videoUrl).host
-                                } catch (_: Exception) {
-                                    null
-                                }
-                                customHeaders["Host"] = hostFromUrl ?: "media-1.rift-content.com"
-
-                                directLinkJson.get("http_headers")?.fields()?.forEach { (k, v) ->
-                                    customHeaders[k] = v.asText()
-                                }
-
-                                callback.invoke(
-                                    newExtractorLink(
-                                        source = name,
-                                        name = "$serverName [$subTitle] - $quality",
-                                        url = videoUrl,
-                                    ) {
-                                        this.quality = extractQuality(quality)
-                                        this.headers = customHeaders
-                                    }
-                                )
-                            }
-                        } else if (directLinkJson.get("ticket_response")?.asBoolean() == true) {
-                            val fileId = directLinkJson.get("fileId")?.asText() ?: ""
-                            val ticket = directLinkJson.get("ticket")?.asText() ?: ""
-                            val waitTimeSeconds = directLinkJson.get("wait_time")?.asLong() ?: 5L
-
-                            if (fileId.isNotEmpty() && ticket.isNotEmpty()) {
-                                delay((waitTimeSeconds * 1000) + 500)
-
-                                val tapeApiUrl = "https://api.streamtape.com/file/dl?file=$fileId&ticket=$ticket"
-                                var tapeRes = app.get(tapeApiUrl).parsed<JsonNode>()
-                                val status = tapeRes.get("status")?.asInt()
-
-                                if (status != 200) {
-                                    delay(2000)
-                                    tapeRes = app.get(tapeApiUrl).parsed<JsonNode>()
-                                }
-
-                                val tapeDirectUrl = tapeRes.get("result")?.get("url")?.asText()
-                                if (!tapeDirectUrl.isNullOrEmpty()) {
-                                    callback.invoke(
-                                        newExtractorLink(
-                                            source = name,
-                                            name = "$serverName [$subTitle] - $quality",
-                                            url = tapeDirectUrl,
-                                        ) {
-                                            this.quality = extractQuality(quality)
-                                            this.headers = mapOf(
-                                                "User-Agent" to "libmpv",
-                                                "Accept" to "*/*"
-                                            )
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                    } catch (_: Exception) {}
+            data.startsWith("oscar://ch/") -> {
+                data.substringAfter("oscar://ch/").split("||").forEach { entry ->
+                    val (u, q) = entry.split("::", limit = 2).let { it.getOrNull(0) to it.getOrNull(1) }
+                    if (u != null) emit(u, "Oscar TV", q)
                 }
             }
-            return@withContext true
-        } catch (_: Exception) {
-            return@withContext false
-        }
-    }
 
-    private fun extractQuality(resolution: String?): Int {
-        if (resolution == null) return Qualities.Unknown.value
-        val cleanRes = resolution.lowercase().trim()
-        return when {
-            cleanRes.contains("2160") || cleanRes.contains("4k") -> Qualities.P2160.value
-            cleanRes.contains("1440") -> Qualities.P1440.value
-            cleanRes.contains("1080") -> Qualities.P1080.value
-            cleanRes.contains("720") -> Qualities.P720.value
-            cleanRes.contains("480") -> Qualities.P480.value
-            cleanRes.contains("360") -> Qualities.P360.value
-            cleanRes.contains("240") -> Qualities.P240.value
-            else -> Qualities.Unknown.value
+            data.startsWith("oscar://player/movies/") -> {
+                val id = data.substringAfter("oscar://player/movies/", "")
+                val d = call("api/movies/show.php?id=$id")?.data() ?: return false
+                d.arr("watch_links").forEach { emit(it.str("url") ?: return@forEach, it.str("server_name") ?: "Oscar", it.str("quality"), it.playCookie()) }
+                d.arr("download_links").forEach { emit(it.str("url") ?: return@forEach, "${it.str("server_name") ?: "DL"}", it.str("quality"), it.playCookie()) }
+            }
+
+            data.startsWith("oscar://ep/") -> {
+                val rest = data.substringAfter("oscar://ep/", "")
+                val isAnime = rest.substringBefore("/") == "true"
+                val id = rest.substringAfter("/")
+                val apiBase = if (isAnime) "api/anime/episodes" else "api/episodes"
+                val d = call("$apiBase/show.php?id=$id")?.data() ?: return false
+                d.arr("watch_links").forEach { emit(it.str("url") ?: return@forEach, it.str("server_name") ?: "Oscar", it.str("quality"), it.playCookie()) }
+                d.arr("download_links").forEach { emit(it.str("url") ?: return@forEach, "${it.str("server_name") ?: "DL"}", it.str("quality"), it.playCookie()) }
+            }
         }
+        return got
     }
 }
