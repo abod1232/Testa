@@ -135,7 +135,7 @@ open class ArabicPackerExtractor(
 class VideolandExtractor : ArabicPackerExtractor("Videoland", "https://videoland.sbs")
 class UpDownExtractor : ArabicPackerExtractor("UpDown", "https://updown.icu")
 class OkStreamExtractor : ArabicPackerExtractor("OkStream", "https://okstream.online")
-class TukTukLuluExtractor : ExtractorApi() {
+class LuluStreamExtractor : ExtractorApi() {
     override var name = "lulustream"
     override var mainUrl = "https://lulustream.com"
     override val requiresReferer = true
