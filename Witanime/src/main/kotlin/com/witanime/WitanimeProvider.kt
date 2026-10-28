@@ -82,19 +82,19 @@ class WitAnime : MainAPI() {
         private var activeDialog: Dialog? = null
         private var isLoopStarted = false
 
+        fun startMonitoring() {
+            if (isLoopStarted) return
+            isLoopStarted = true
+            isMonitoring = true
+            handler.post(monitorRunnable)
+        }
+
         private val monitorRunnable = object : Runnable {
             override fun run() {
                 if (!isMonitoring) return
                 hookPlayerListener()
                 handler.postDelayed(this, 1000L)
             }
-        }
-
-        fun startMonitoring() {
-            if (isLoopStarted) return
-            isLoopStarted = true
-            isMonitoring = true
-            handler.post(monitorRunnable)
         }
 
         private fun findFragmentRecursive(fragment: androidx.fragment.app.Fragment, packageName: String): androidx.fragment.app.Fragment? {
@@ -346,6 +346,7 @@ class WitAnime : MainAPI() {
         res.close()
         return Jsoup.parse(body)
     }
+
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         return withContext(Dispatchers.IO) {
             val document = fetchDocument(mainUrl)
@@ -397,6 +398,7 @@ class WitAnime : MainAPI() {
             newHomePageResponse(homePageList)
         }
     }
+
     override suspend fun search(query: String): List<SearchResponse> {
         return withContext(Dispatchers.IO) {
             val url = "$mainUrl/search?q=$query"
@@ -414,6 +416,7 @@ class WitAnime : MainAPI() {
             }.distinctBy { it.url }
         }
     }
+
     override suspend fun load(url: String): LoadResponse {
         return withContext(Dispatchers.IO) {
             val document = fetchDocument(url)
@@ -501,7 +504,9 @@ class WitAnime : MainAPI() {
             }
         }
     }
+
     data class ServerItem(val quality: String, val label: String, val token: String, val isStream: Boolean)
+
     class BatchSession(val client: OkHttpClient) {
         val cookieStore = mutableMapOf<String, String>()
 
@@ -659,19 +664,20 @@ class WitAnime : MainAPI() {
                                 .build()
 
                             val sRes = directClient.newCall(sReq).execute()
-                            batchSession.saveCookies(sRes) // حفظ الكوكيز المحدثة من source
+                            batchSession.saveCookies(sRes)
                             sRes.close()
+
                             val gReq = Request.Builder()
                                 .url(gateUrl)
                                 .apply {
                                     exactGateHeaders.forEach { (k, v) -> header(k, v) }
-                                    header("Cookie", batchSession.makeCookieHeader()) // <--- تمرير السيسون للبوابة!
+                                    header("Cookie", batchSession.makeCookieHeader())
                                 }
                                 .get()
                                 .build()
 
                             val gRes = directClient.newCall(gReq).execute()
-                            batchSession.saveCookies(gRes) // حفظ الكوكيز المحدثة من gate
+                            batchSession.saveCookies(gRes)
                             var embedUrl = gRes.header("Location") ?: gRes.header("location")
 
                             if (embedUrl.isNullOrBlank()) {
@@ -681,23 +687,51 @@ class WitAnime : MainAPI() {
                                 embedUrl = match?.groupValues?.get(1)
                             }
                             gRes.close()
+
                             if (!embedUrl.isNullOrBlank() && embedUrl.startsWith("http")) {
                                 val typeLabel = if (s.isStream) "مشاهدة" else "تنزيل"
                                 val displayName = "${s.label.uppercase()} (${s.quality}) [$typeLabel]"
 
-                                if (embedUrl.contains("mega.nz")) {
-                                    val dummyUrl = "https://raw.githubusercontent.com/Anarios/Cloudstream/master/app/src/main/res/raw/blank.mp4#mega-webview://$embedUrl"
-                                    callback(
-                                        newExtractorLink(
-                                            name = "$displayName [WebView]",
-                                            source = "WitAnime",
-                                            url = dummyUrl
-                                        ) {
-                                            this.referer = embedUrl
-                                            this.quality = Qualities.Unknown.value
-                                            this.type = ExtractorLinkType.VIDEO
+                                // ── معالجة روابط MEGA ──
+                                if (embedUrl.contains("mega.nz") || embedUrl.contains("mega.co.nz")) {
+                                    var megaSuccess = false
+                                    try {
+                                        // 1. محاولة استخراج الرابط المباشر من خلال السيرفر المحلي لفك التشفير
+                                        val localStreamUrl = WitAnimeMegaServer.registerMegaStream(embedUrl)
+                                        if (!localStreamUrl.isNullOrBlank()) {
+                                            val qVal = getQualityFromName(s.quality).takeIf { it > 0 } ?: Qualities.P1080.value
+                                            callback(
+                                                newExtractorLink(
+                                                    name = "$displayName (Mega Direct)",
+                                                    source = "Mega",
+                                                    url = localStreamUrl
+                                                ) {
+                                                    this.referer = embedUrl
+                                                    this.quality = qVal
+                                                    this.type = ExtractorLinkType.VIDEO
+                                                }
+                                            )
+                                            megaSuccess = true
                                         }
-                                    )
+                                    } catch (e: Exception) {
+                                        logError(e)
+                                    }
+
+                                    // 2. إذا فشل المستخرج فقط، نستخدم الـ WebView كخيار بديل
+                                    if (!megaSuccess) {
+                                        val dummyUrl = "https://raw.githubusercontent.com/Anarios/Cloudstream/master/app/src/main/res/raw/blank.mp4#mega-webview://$embedUrl"
+                                        callback(
+                                            newExtractorLink(
+                                                name = "$displayName [WebView]",
+                                                source = "WitAnime",
+                                                url = dummyUrl
+                                            ) {
+                                                this.referer = embedUrl
+                                                this.quality = Qualities.Unknown.value
+                                                this.type = ExtractorLinkType.VIDEO
+                                            }
+                                        )
+                                    }
                                 } else {
                                     val extracted = loadExtractor(embedUrl, data, subtitleCallback, callback)
                                     if (!extracted) {
