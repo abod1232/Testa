@@ -226,6 +226,7 @@ class TukTukHd : MainAPI() {
 
         try {
             val playerUrl = String(Base64.decode(iframeCrypt, Base64.DEFAULT))
+
             val initialResponse = app.get(
                 playerUrl,
                 headers = mapOf(
@@ -263,12 +264,14 @@ class TukTukHd : MainAPI() {
                         Pair(mirror, qualityInt)
                     } ?: emptyList()
                 }
+
                 allMirrorsWithQuality.amap { (mirror, qualityInt) ->
                     val rawLink = mirror.link ?: return@amap
                     val link = if (rawLink.startsWith("//")) "https:$rawLink" else rawLink.trim()
                     if (!link.startsWith("http")) return@amap
 
                     when {
+                        // 1. سيرفر TukTukVIP المباشر
                         mirror.symbol?.equals("TukTukVIP", ignoreCase = true) == true || link.contains("lolololu.website") -> {
                             TukTukVipExtractor().getUrl(link, playerUrl, subtitleCallback) { extractorLink ->
                                 if (extractorLink.quality == Qualities.Unknown.value) {
@@ -277,10 +280,24 @@ class TukTukHd : MainAPI() {
                                 callback(extractorLink)
                             }
                         }
+
+                        // 2. سيرفر luluvdo / lulustream بأي امتداد كان (.com, .net, .to ... إلخ)
+                        link.contains("luluvdo", ignoreCase = true) ||
+                        link.contains("lulustream", ignoreCase = true) ||
+                        mirror.driver?.contains("lulu", ignoreCase = true) == true -> {
+                            LuluStreamExtractor().getUrl(link, playerUrl, subtitleCallback) { extractorLink ->
+                                if (extractorLink.quality == Qualities.Unknown.value) {
+                                    extractorLink.quality = qualityInt
+                                }
+                                callback(extractorLink)
+                            }
+                        }
+
+                        // 3. باقي السيرفرات تمر تلقائياً عبر loadExtractor
                         else -> {
                             loadExtractor(
                                 url = link,
-                                referer = playerUrl, // تمرير رابط المشغل كـ Referer ضروري جداً لمنع الحظر
+                                referer = playerUrl,
                                 subtitleCallback = subtitleCallback
                             ) { extractorLink ->
                                 if (extractorLink.quality == Qualities.Unknown.value) {
@@ -299,7 +316,6 @@ class TukTukHd : MainAPI() {
 
         return true
     }
-
     private suspend fun extractTukTukVip(url: String, qualityInt: Int, displayName: String, callback: (ExtractorLink) -> Unit) {
         try {
             val refererUrl = try {
