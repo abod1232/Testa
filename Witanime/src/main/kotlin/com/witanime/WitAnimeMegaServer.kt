@@ -1,5 +1,6 @@
 package com.witanime
 
+import android.annotation.SuppressLint
 import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -17,20 +18,25 @@ import java.net.Socket
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.security.SecureRandom
+import java.security.cert.X509Certificate
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
 
 /**
  * Local `127.0.0.1` on-the-fly AES-128-CTR decrypting HTTP Range proxy for MEGA.nz video embeds.
- *
- * Supports full HTTP 200 & 206 Partial Content byte-range seeking in ExoPlayer by aligning
- * upstream `/dl/<ticket>/<alignedStart>-<end>` requests to 16-byte AES-CTR block boundaries.
+ * Fully self-contained without external network helpers.
  */
 object WitAnimeMegaServer {
+
+    private const val USER_AGENT =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
     data class MegaKeySpec(
         val fileId: String,
@@ -49,10 +55,22 @@ object WitAnimeMegaServer {
     private val nodeCache = ConcurrentHashMap<String, MegaNodeEntry>()
     private val keyRegistry = ConcurrentHashMap<String, MegaKeySpec>()
 
+    @SuppressLint("CustomX509TrustManager")
+    private val trustAllManager = object : X509TrustManager {
+        override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+        override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+        override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
+    }
+
+    private val trustAllSslSocketFactory by lazy {
+        val sslContext = SSLContext.getInstance("TLS")
+        sslContext.init(null, arrayOf<TrustManager>(trustAllManager), SecureRandom())
+        sslContext.socketFactory
+    }
+
     private val streamHttpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
-            .dns(WitAnimeNetwork.hybridDns)
-            .sslSocketFactory(WitAnimeNetwork.trustAllSslSocketFactory, WitAnimeNetwork.trustAllManager)
+            .sslSocketFactory(trustAllSslSocketFactory, trustAllManager)
             .hostnameVerifier { _, _ -> true }
             .followRedirects(true)
             .followSslRedirects(true)
@@ -126,7 +144,7 @@ object WitAnimeMegaServer {
             val req = Request.Builder()
                 .url("https://g.api.mega.co.nz/cs?id=1")
                 .post(payload.toRequestBody("application/json; charset=utf-8".toMediaType()))
-                .header("User-Agent", WitAnimeNetwork.userAgent)
+                .header("User-Agent", USER_AGENT)
                 .header("Origin", "https://mega.nz")
                 .header("Referer", "https://mega.nz/")
                 .build()
@@ -265,8 +283,8 @@ object WitAnimeMegaServer {
                                 }
                             } else if (parsedStart != null && parsedStart >= totalSize) {
                                 val hdr = "HTTP/1.1 416 Range Not Satisfiable\r\n" +
-                                    "Content-Range: bytes */$totalSize\r\n" +
-                                    "Connection: close\r\n\r\n"
+                                        "Content-Range: bytes */$totalSize\r\n" +
+                                        "Connection: close\r\n\r\n"
                                 out.write(hdr.toByteArray(Charsets.US_ASCII))
                                 out.flush()
                                 return
@@ -300,7 +318,7 @@ object WitAnimeMegaServer {
                 fun openUpstream(targetNode: MegaNodeEntry) = streamHttpClient.newCall(
                     Request.Builder()
                         .url("${targetNode.dlBaseUrl}/$alignedStart-$endByte")
-                        .header("User-Agent", WitAnimeNetwork.userAgent)
+                        .header("User-Agent", USER_AGENT)
                         .build()
                 ).execute()
 
