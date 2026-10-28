@@ -691,12 +691,9 @@ class WitAnime : MainAPI() {
                             if (!embedUrl.isNullOrBlank() && embedUrl.startsWith("http")) {
                                 val typeLabel = if (s.isStream) "مشاهدة" else "تنزيل"
                                 val displayName = "${s.label.uppercase()} (${s.quality}) [$typeLabel]"
-
-                                // ── معالجة روابط MEGA ──
                                 if (embedUrl.contains("mega.nz") || embedUrl.contains("mega.co.nz")) {
                                     var megaSuccess = false
                                     try {
-                                        // 1. محاولة استخراج الرابط المباشر من خلال السيرفر المحلي لفك التشفير
                                         val localStreamUrl = WitAnimeMegaServer.registerMegaStream(embedUrl)
                                         if (!localStreamUrl.isNullOrBlank()) {
                                             val qVal = getQualityFromName(s.quality).takeIf { it > 0 } ?: Qualities.P1080.value
@@ -716,8 +713,6 @@ class WitAnime : MainAPI() {
                                     } catch (e: Exception) {
                                         logError(e)
                                     }
-
-                                    // 2. إذا فشل المستخرج فقط، نستخدم الـ WebView كخيار بديل
                                     if (!megaSuccess) {
                                         val dummyUrl = "https://raw.githubusercontent.com/Anarios/Cloudstream/master/app/src/main/res/raw/blank.mp4#mega-webview://$embedUrl"
                                         callback(
