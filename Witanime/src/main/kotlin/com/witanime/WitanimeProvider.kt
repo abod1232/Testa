@@ -689,9 +689,10 @@ class WitAnime : MainAPI() {
                             gRes.close()
 
                             if (!embedUrl.isNullOrBlank() && embedUrl.startsWith("http")) {
-                                val typeLabel = if (s.isStream) "مشاهدة" else "تنزيل"
-                                val displayName = "${s.label.uppercase()} (${s.quality}) [$typeLabel]"
                                 if (embedUrl.contains("mega.nz") || embedUrl.contains("mega.co.nz")) {
+                                    val typeLabel = if (s.isStream) "مشاهدة" else "تنزيل"
+                                    val displayName = "${s.label.uppercase()} (${s.quality}) [$typeLabel]"
+
                                     var megaSuccess = false
                                     try {
                                         val localStreamUrl = WitAnimeMegaServer.registerMegaStream(embedUrl)
@@ -713,6 +714,7 @@ class WitAnime : MainAPI() {
                                     } catch (e: Exception) {
                                         logError(e)
                                     }
+
                                     if (!megaSuccess) {
                                         val dummyUrl = "https://raw.githubusercontent.com/Anarios/Cloudstream/master/app/src/main/res/raw/blank.mp4#mega-webview://$embedUrl"
                                         callback(
@@ -728,20 +730,8 @@ class WitAnime : MainAPI() {
                                         )
                                     }
                                 } else {
-                                    val extracted = loadExtractor(embedUrl, data, subtitleCallback, callback)
-                                    if (!extracted) {
-                                        callback(
-                                            newExtractorLink(
-                                                name = displayName,
-                                                source = "WitAnime",
-                                                url = embedUrl
-                                            ) {
-                                                this.referer = embedUrl
-                                                this.quality = Qualities.Unknown.value
-                                                this.type = ExtractorLinkType.VIDEO
-                                            }
-                                        )
-                                    }
+                                    // كل الروابط الأخرى تُرسل مباشرة إلى loadExtractor
+                                    loadExtractor(embedUrl, data, subtitleCallback, callback)
                                 }
                             }
 
