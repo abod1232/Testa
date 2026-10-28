@@ -161,18 +161,12 @@ class LuluStreamExtractor : ExtractorApi() {
                 )
             ).text
         }.getOrNull() ?: return
-
-        // 1. فك ضغط الجافاسكربت وتنظيف الرموز المشفرة
         val unpacked = (JsUnpacker(html).unpack() ?: html)
             .replace("\\/", "/")
             .replace("\\u0026", "&")
             .replace("&amp;", "&")
-
-        // 2. البحث عن الروابط (سواء كانت كاملة https أو نسبية تبدأ بـ / ومطابقة master.txt أو m3u8 أو mp4)
         val regex = Regex("""(?i)["']((?:https?:)?//[^\s"'<>\\]+?\.(?:m3u8|mp4|txt)[^\s"'<>\\]*|/(?:[^"'<>\s\\]+?/)+master\.(?:txt|m3u8)[^"'<>\s\\]*)["']""")
         val rawLink = regex.find(unpacked)?.groupValues?.get(1) ?: return
-
-        // 3. تحويل الرابط النسبي إلى رابط كامل
         val fullUrl = when {
             rawLink.startsWith("//") -> "https:$rawLink"
             rawLink.startsWith("http") -> rawLink
@@ -185,8 +179,6 @@ class LuluStreamExtractor : ExtractorApi() {
             "Referer" to pageReferer,
             "Origin" to origin
         )
-
-        // 4. استخراج الجودات وبث الفيديو
         if (isHls) {
             ArabicExtractorUtils.emitHls(name, name, fullUrl, pageReferer, headers, Qualities.Unknown.value, callback)
         } else {
