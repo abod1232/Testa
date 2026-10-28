@@ -7,10 +7,7 @@ import com.lagradost.cloudstream3.plugins.Plugin
 @CloudstreamPlugin
 class WitAnimePlugin : Plugin() {
     override fun load(context: Context) {
-        // تسجيل الإضافة الأساسية
         registerMainAPI(WitAnime())
-
-        // تسجيل كافة المستخرجات
         registerExtractorAPI(MegaExtractor())
         registerExtractorAPI(GoFileExtractor())
         registerExtractorAPI(VideaExtractor())
