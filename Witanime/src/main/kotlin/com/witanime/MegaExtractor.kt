@@ -27,12 +27,14 @@ import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 import kotlin.random.Random
 
+// ════════════════════════════════════════════════════════════════════════════
+// 1. MEGA Extractor
+// ════════════════════════════════════════════════════════════════════════════
+
 class MegaExtractor : ExtractorApi() {
     override val name: String = "Mega"
     override val mainUrl: String = "https://mega.nz"
     override val requiresReferer: Boolean = false
-
-    private val TAG = "MEGA_EXTRACTOR"
 
     override suspend fun getUrl(
         url: String,
@@ -40,19 +42,17 @@ class MegaExtractor : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
-        Log.d(TAG, "▶️ getUrl start for: $url")
+        Log.d("MEGA_EXTRACTOR", "▶️ getUrl start for: $url")
         try {
             val megaUrl = url.trim()
             if (megaUrl.isBlank() || (!megaUrl.contains("#") && !megaUrl.contains("!"))) {
-                Log.w(TAG, "Invalid Mega URL: missing key token")
+                Log.w("MEGA_EXTRACTOR", "Invalid Mega URL: missing key token")
                 return
             }
 
-            Log.d(TAG, "Registering stream with local AES-128-CTR proxy...")
             val localStreamUrl = WitAnimeMegaServer.registerMegaStream(megaUrl)
-
             if (localStreamUrl.isNullOrBlank()) {
-                Log.e(TAG, "Failed to resolve Mega node")
+                Log.e("MEGA_EXTRACTOR", "Failed to resolve Mega node")
                 return
             }
 
@@ -69,23 +69,26 @@ class MegaExtractor : ExtractorApi() {
                 )
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Mega getUrl error", e)
+            Log.e("MEGA_EXTRACTOR", "Mega getUrl error", e)
         }
     }
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// 2. GoFile Extractor
+// ════════════════════════════════════════════════════════════════════════════
 
 class GoFileExtractor : ExtractorApi() {
     override val name: String = "GoFile"
     override val mainUrl: String = "https://gofile.io"
     override val requiresReferer: Boolean = false
 
-    private val TAG = "GOFILE_EXTRACTOR"
-    private val USER_AGENT =
+    private val userAgent =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
     private fun generateWebsiteToken(accountToken: String, lang: String = "ar"): String {
         val bucket = (System.currentTimeMillis() / 1000L) / 14_400L
-        val payload = "$USER_AGENT::$lang::$accountToken::$bucket::12af056dacea0b"
+        val payload = "$userAgent::$lang::$accountToken::$bucket::12af056dacea0b"
         val digest = MessageDigest.getInstance("SHA-256").digest(payload.toByteArray(StandardCharsets.UTF_8))
         return digest.joinToString("") { "%02x".format(it) }
     }
@@ -96,17 +99,18 @@ class GoFileExtractor : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
-        Log.d(TAG, "▶️ getUrl start for GoFile: $url")
+        Log.d("GOFILE_EXTRACTOR", "▶️ getUrl start for GoFile: $url")
         withContext(Dispatchers.IO) {
             try {
                 val contentId = Regex("""gofile\.io/(?:d/|contents/)?([a-zA-Z0-9_-]+)""").find(url)?.groupValues?.get(1)
                     ?: url.trimEnd('/').substringAfterLast('/').substringBefore('?')
 
                 if (contentId.isBlank()) return@withContext
+
                 val accReq = Request.Builder()
                     .url("https://api.gofile.io/accounts")
                     .post("{}".toRequestBody("application/json; charset=utf-8".toMediaType()))
-                    .header("User-Agent", USER_AGENT)
+                    .header("User-Agent", userAgent)
                     .header("Origin", "https://gofile.io")
                     .header("Referer", "https://gofile.io/")
                     .build()
@@ -117,11 +121,13 @@ class GoFileExtractor : ExtractorApi() {
                 }.getOrDefault("")
 
                 if (token.isBlank()) return@withContext
+
                 val wt = generateWebsiteToken(token, "ar")
+
                 val contentsUrl = "https://api.gofile.io/contents/$contentId?page=1&pageSize=100&sortField=name&sortDirection=1"
                 val contentReq = Request.Builder()
                     .url(contentsUrl)
-                    .header("User-Agent", USER_AGENT)
+                    .header("User-Agent", userAgent)
                     .header("Authorization", "Bearer $token")
                     .header("X-Website-Token", wt)
                     .header("X-BL", "ar")
@@ -184,19 +190,22 @@ class GoFileExtractor : ExtractorApi() {
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "GoFile getUrl error", e)
+                Log.e("GOFILE_EXTRACTOR", "GoFile getUrl error", e)
             }
         }
     }
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// 3. Videa Extractor
+// ════════════════════════════════════════════════════════════════════════════
 
 class VideaExtractor : ExtractorApi() {
     override val name: String = "Videa"
     override val mainUrl: String = "https://videa.hu"
     override val requiresReferer: Boolean = false
 
-    private val TAG = "VIDEA_EXTRACTOR"
-    private val STUPID_KEY = "xHb0ZvME5q8CBcoQi6AngerDu3FGO9fkUlwPmLVY_RTzj2hJIS4NasXWKy1td7p"
+    private val stupidKey = "xHb0ZvME5q8CBcoQi6AngerDu3FGO9fkUlwPmLVY_RTzj2hJIS4NasXWKy1td7p"
 
     override suspend fun getUrl(
         url: String,
@@ -204,7 +213,7 @@ class VideaExtractor : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
-        Log.d(TAG, "▶️ getUrl start for: $url")
+        Log.d("VIDEA_EXTRACTOR", "▶️ getUrl start for: $url")
         try {
             val iframeSrc = url.trim()
             if (iframeSrc.isBlank()) return
@@ -218,7 +227,7 @@ class VideaExtractor : ExtractorApi() {
             val resultBuilder = StringBuilder()
             for (i in 0 until 32) {
                 val ch = paramL.getOrNull(i) ?: 'a'
-                val idxInStupid = STUPID_KEY.indexOf(ch).takeIf { it >= 0 } ?: 0
+                val idxInStupid = stupidKey.indexOf(ch).takeIf { it >= 0 } ?: 0
                 val index = i - (idxInStupid - 31)
                 val safeIndex = when {
                     paramSPart.isEmpty() -> 0
@@ -239,10 +248,17 @@ class VideaExtractor : ExtractorApi() {
                 ?: return
 
             val xmlUrl = "https://videa.hu/player/xml?platform=desktop"
-            val params = mapOf("_s" to seed, "_t" to paramT, "v" to videoId)
-            val headers = mapOf("Referer" to iframeSrc, "Origin" to "https://videa.hu")
+            val queryParams: Map<String, String> = mapOf(
+                "_s" to seed,
+                "_t" to paramT,
+                "v" to videoId
+            )
+            val reqHeaders: Map<String, String> = mapOf(
+                "Referer" to iframeSrc,
+                "Origin" to "https://videa.hu"
+            )
 
-            val xmlResponse = app.get(xmlUrl, params = params, headers = headers)
+            val xmlResponse = app.get(xmlUrl, params = queryParams, headers = reqHeaders)
             val body = xmlResponse.text
             val xVideaXsHeader = xmlResponse.headers["x-videa-xs"] ?: ""
 
@@ -300,7 +316,7 @@ class VideaExtractor : ExtractorApi() {
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Videa getUrl error", e)
+            Log.e("VIDEA_EXTRACTOR", "Videa getUrl error", e)
         }
     }
 
@@ -317,12 +333,14 @@ class VideaExtractor : ExtractorApi() {
     }
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// 4. MailRu Extractor
+// ════════════════════════════════════════════════════════════════════════════
+
 class MailruExtractor : ExtractorApi() {
     override val name = "MailRu"
     override val mainUrl = "https://my.mail.ru"
     override val requiresReferer = false
-
-    private val TAG = "MAILRU_EXTRACTOR"
 
     override suspend fun getUrl(
         url: String,
@@ -337,7 +355,7 @@ class MailruExtractor : ExtractorApi() {
         val videoReq = try {
             app.get("${mainUrl}/+/video/meta/${vidId}", referer = extRef)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to fetch meta: ${e.message}")
+            Log.e("MAILRU_EXTRACTOR", "Failed to fetch meta: ${e.message}")
             return
         }
 
@@ -363,7 +381,7 @@ class MailruExtractor : ExtractorApi() {
                     }
                 )
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to create extractor link for $videoUrl", e)
+                Log.e("MAILRU_EXTRACTOR", "Failed to create extractor link for $videoUrl", e)
             }
         }
     }
@@ -379,12 +397,14 @@ class MailruExtractor : ExtractorApi() {
     )
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// 5. 4Shared Extractor
+// ════════════════════════════════════════════════════════════════════════════
+
 class FourSharedExtractor : ExtractorApi() {
     override val name = "4Shared"
     override val mainUrl = "https://www.4shared.com"
     override val requiresReferer = false
-
-    private val TAG = "4SHARED_EXTRACTOR"
 
     override suspend fun getUrl(
         url: String,
@@ -421,7 +441,7 @@ class FourSharedExtractor : ExtractorApi() {
                 )
             }
         } catch (e: Exception) {
-            Log.e(TAG, "4Shared getUrl error", e)
+            Log.e("4SHARED_EXTRACTOR", "4Shared getUrl error", e)
         }
     }
 }
