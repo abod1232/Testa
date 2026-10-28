@@ -3,6 +3,8 @@ package com.tuk
 import okhttp3.RequestBody.Companion.toRequestBody
 import android.util.Base64
 import com.lagradost.cloudstream3.SubtitleFile
+import android.util.Log
+import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.newSubtitleFile
 import com.lagradost.cloudstream3.utils.ExtractorApi
@@ -136,8 +138,8 @@ class VideolandExtractor : ArabicPackerExtractor("Videoland", "https://videoland
 class UpDownExtractor : ArabicPackerExtractor("UpDown", "https://updown.icu")
 class OkStreamExtractor : ArabicPackerExtractor("OkStream", "https://okstream.online")
 class LuluStreamExtractor : ExtractorApi() {
-    override var name = "lulustream"
-    override var mainUrl = "https://lulustream.com"
+    override var name = "LuluStream"
+    override var mainUrl = "https://luluvdo.com"
     override val requiresReferer = true
 
     override suspend fun getUrl(
@@ -146,71 +148,55 @@ class LuluStreamExtractor : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
-        val origin = TukTukMediaUtils.originOf(url, mainUrl)
+        val origin = ArabicExtractorUtils.originOf(url) ?: mainUrl
         val pageReferer = referer?.takeIf { it.isNotBlank() } ?: "$origin/"
-        try {
-            val response = app.get(
+
+        val html = runCatching {
+            app.get(
                 url,
                 referer = pageReferer,
                 headers = mapOf(
-                    "User-Agent" to TukTukMediaUtils.BROWSER_USER_AGENT,
+                    "User-Agent" to ArabicExtractorUtils.DEFAULT_UA,
                     "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
                 )
             ).text
-            val playerHtml = JsUnpacker(response).unpack() ?: response
-            val links = TukTukMediaUtils.mediaUrls(url, playerHtml)
-            if (links.isEmpty()) {
-                Log.w(name, "No media URLs found in unpacked player page: $url")
-                return
-            }
+        }.getOrNull() ?: return
 
-            val mediaHeaders = mapOf(
-                "User-Agent" to TukTukMediaUtils.BROWSER_USER_AGENT,
-                "Referer" to pageReferer,
-                "Origin" to origin
+        // 1. فك ضغط الجافاسكربت وتنظيف الرموز المشفرة
+        val unpacked = (JsUnpacker(html).unpack() ?: html)
+            .replace("\\/", "/")
+            .replace("\\u0026", "&")
+            .replace("&amp;", "&")
+
+        // 2. البحث عن الروابط (سواء كانت كاملة https أو نسبية تبدأ بـ / ومطابقة master.txt أو m3u8 أو mp4)
+        val regex = Regex("""(?i)["']((?:https?:)?//[^\s"'<>\\]+?\.(?:m3u8|mp4|txt)[^\s"'<>\\]*|/(?:[^"'<>\s\\]+?/)+master\.(?:txt|m3u8)[^"'<>\s\\]*)["']""")
+        val rawLink = regex.find(unpacked)?.groupValues?.get(1) ?: return
+
+        // 3. تحويل الرابط النسبي إلى رابط كامل
+        val fullUrl = when {
+            rawLink.startsWith("//") -> "https:$rawLink"
+            rawLink.startsWith("http") -> rawLink
+            else -> runCatching { java.net.URI(url).resolve(rawLink).toString() }.getOrNull() ?: "$origin$rawLink"
+        }
+
+        val isHls = fullUrl.contains(".m3u8") || fullUrl.contains(".txt")
+        val headers = mapOf(
+            "User-Agent" to ArabicExtractorUtils.DEFAULT_UA,
+            "Referer" to pageReferer,
+            "Origin" to origin
+        )
+
+        // 4. استخراج الجودات وبث الفيديو
+        if (isHls) {
+            ArabicExtractorUtils.emitHls(name, name, fullUrl, pageReferer, headers, Qualities.Unknown.value, callback)
+        } else {
+            callback(
+                newExtractorLink(name, "$name [MP4]", fullUrl, ExtractorLinkType.VIDEO) {
+                    this.referer = pageReferer
+                    this.quality = Qualities.P720.value
+                    this.headers = headers
+                }
             )
-            for (link in links) {
-                val isHls = TukTukMediaUtils.isHls(link)
-                val quality = TukTukMediaUtils.qualityHint(link)
-                if (isHls) {
-                    val generated = try {
-                        M3u8Helper.generateM3u8(
-                            name,
-                            link,
-                            pageReferer,
-                            quality = quality.takeIf { it > 0 },
-                            headers = mediaHeaders
-                        )
-                    } catch (e: Exception) {
-                        Log.w(name, "Could not expand HLS playlist: $link", e)
-                        emptyList()
-                    }
-                    if (generated.isNotEmpty()) {
-                        generated.forEach(callback)
-                        continue
-                    }
-                }
-
-                val type = when {
-                    isHls -> ExtractorLinkType.M3U8
-                    link.substringBefore('?').endsWith(".mpd", ignoreCase = true) -> ExtractorLinkType.DASH
-                    else -> ExtractorLinkType.VIDEO
-                }
-                callback(
-                    newExtractorLink(
-                        source = name,
-                        name = name,
-                        url = link
-                    ) {
-                        this.referer = pageReferer
-                        this.quality = quality.takeIf { it > 0 } ?: Qualities.Unknown.value
-                        this.type = type
-                        this.headers = mediaHeaders
-                    }
-                )
-            }
-        } catch (e: Exception) {
-            Log.e(name, "LuluStream extraction failed for $url", e)
         }
     }
 }
