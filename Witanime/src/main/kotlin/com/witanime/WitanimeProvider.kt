@@ -730,7 +730,6 @@ class WitAnime : MainAPI() {
                                         )
                                     }
                                 } else {
-                                    // كل الروابط الأخرى تُرسل مباشرة إلى loadExtractor
                                     loadExtractor(embedUrl, data, subtitleCallback, callback)
                                 }
                             }
