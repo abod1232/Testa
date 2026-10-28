@@ -271,7 +271,6 @@ class TukTukHd : MainAPI() {
                     if (!link.startsWith("http")) return@amap
 
                     when {
-                        // 1. سيرفر TukTukVIP المباشر
                         mirror.symbol?.equals("TukTukVIP", ignoreCase = true) == true || link.contains("lolololu.website") -> {
                             TukTukVipExtractor().getUrl(link, playerUrl, subtitleCallback) { extractorLink ->
                                 if (extractorLink.quality == Qualities.Unknown.value) {
@@ -280,8 +279,6 @@ class TukTukHd : MainAPI() {
                                 callback(extractorLink)
                             }
                         }
-
-                        // 2. سيرفر luluvdo / lulustream بأي امتداد كان (.com, .net, .to ... إلخ)
                         link.contains("luluvdo", ignoreCase = true) ||
                         link.contains("lulustream", ignoreCase = true) ||
                         mirror.driver?.contains("lulu", ignoreCase = true) == true -> {
@@ -292,8 +289,6 @@ class TukTukHd : MainAPI() {
                                 callback(extractorLink)
                             }
                         }
-
-                        // 3. باقي السيرفرات تمر تلقائياً عبر loadExtractor
                         else -> {
                             loadExtractor(
                                 url = link,
