@@ -247,10 +247,6 @@ class P2PStreamVipExtractor : ArabicVidstackExtractor("StreamP2P", "https://p2ps
 class RpmShareExtractor : ArabicVidstackExtractor("RPMShare", "https://rpmplay.me")
 class RpmShareMegaMaxExtractor : ArabicVidstackExtractor("RPMShare", "https://megamax.rpmplay.me")
 
-// =========================================================================
-// سيرفر TukTukVIP المخصص والشغال 100%
-// =========================================================================
-
 class TukTukVipExtractor : ExtractorApi() {
     override var name = "TukTukVIP"
     override var mainUrl = "https://lolololu.website"
@@ -262,7 +258,6 @@ class TukTukVipExtractor : ExtractorApi() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
-        // 1. إجبار الـ Referer أن يكون دومين السيرفر نفسه حصراً لتخطي حظر "Video embed restricted"
         val selfReferer = try {
             val uri = java.net.URI(url)
             "${uri.scheme}://${uri.host}/"
@@ -270,21 +265,13 @@ class TukTukVipExtractor : ExtractorApi() {
             "https://lolololu.website/"
         }
         val originUrl = selfReferer.removeSuffix("/")
-
-        // 2. طلب الصفحة باستخدام selfReferer
         val response = runCatching {
             app.get(url, referer = selfReferer).text
         }.getOrNull() ?: return
-
-        // 3. فك الضغط المباشر لكامل الصفحة
         val unpackedHtml = JsUnpacker(response).unpack() ?: response
-
-        // 4. استخراج روابط الـ master.m3u8
         val regex = Regex("""https://[^"']+?/hls\d+/[^"']+?/master\.(?:txt|m3u8)(?:\?[^"']*)?""")
         val matches = regex.findAll(unpackedHtml).toList()
         if (matches.isEmpty()) return
-
-        // 5. ترويسات مشغل الفيديو الإجبارية لمنع 403
         val playHeaders = mapOf(
             "sec-ch-ua-platform" to "\"Android\"",
             "sec-ch-ua" to "\"Chromium\";v=\"148\", \"Google Chrome\";v=\"148\", \"Not/A)Brand\";v=\"99\"",
