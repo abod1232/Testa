@@ -27,10 +27,6 @@ import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 import kotlin.random.Random
 
-// ════════════════════════════════════════════════════════════════════════════
-// 1. MEGA Extractor
-// ════════════════════════════════════════════════════════════════════════════
-
 class MegaExtractor : ExtractorApi() {
     override val name: String = "Mega"
     override val mainUrl: String = "https://mega.nz"
@@ -73,10 +69,6 @@ class MegaExtractor : ExtractorApi() {
         }
     }
 }
-
-// ════════════════════════════════════════════════════════════════════════════
-// 2. GoFile Extractor
-// ════════════════════════════════════════════════════════════════════════════
 
 class GoFileExtractor : ExtractorApi() {
     override val name: String = "GoFile"
@@ -195,10 +187,6 @@ class GoFileExtractor : ExtractorApi() {
         }
     }
 }
-
-// ════════════════════════════════════════════════════════════════════════════
-// 3. Videa Extractor
-// ════════════════════════════════════════════════════════════════════════════
 
 class VideaExtractor : ExtractorApi() {
     override val name: String = "Videa"
@@ -333,10 +321,6 @@ class VideaExtractor : ExtractorApi() {
     }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// 4. MailRu Extractor
-// ════════════════════════════════════════════════════════════════════════════
-
 class MailruExtractor : ExtractorApi() {
     override val name = "MailRu"
     override val mainUrl = "https://my.mail.ru"
@@ -396,10 +380,6 @@ class MailruExtractor : ExtractorApi() {
         @JsonProperty("key") val key: String
     )
 }
-
-// ════════════════════════════════════════════════════════════════════════════
-// 5. 4Shared Extractor
-// ════════════════════════════════════════════════════════════════════════════
 
 class FourSharedExtractor : ExtractorApi() {
     override val name = "4Shared"
