@@ -219,8 +219,6 @@ object WitAnimeMegaServer {
                     writeSimpleError(out, 405, "Method Not Allowed")
                     return
                 }
-
-                // Expected path: /mega/<authToken>/<slotId>/video.mp4
                 val segments = rawPath.trim('/').split('/')
                 if (segments.size < 4 || segments[0] != "mega" || segments[1] != authToken) {
                     writeSimpleError(out, 403, "Forbidden")
@@ -295,8 +293,6 @@ object WitAnimeMegaServer {
                     out.flush()
                     return
                 }
-
-                // Align upstream byte request to 16-byte AES-CTR block boundary
                 val alignedStart = (startByte / 16L) * 16L
                 val skipBytes = (startByte - alignedStart).toInt()
                 val blockIndex = alignedStart / 16L
@@ -370,7 +366,6 @@ object WitAnimeMegaServer {
                     out.flush()
                 }
             } catch (_: Exception) {
-                // Normal when ExoPlayer cancels/closes current range socket to seek
             }
         }
     }
