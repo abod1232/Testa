@@ -30,16 +30,12 @@ class MegaExtractor : ExtractorApi() {
                 Log.w(TAG, "Empty Mega URL provided")
                 return
             }
-
-            // التأكد من أن الرابط يحتوي على معرّف ومفتاح التشفير
             if (!megaUrl.contains("#") && !megaUrl.contains("!")) {
                 Log.w(TAG, "Invalid Mega URL: missing file key token (# or !)")
                 return
             }
 
             Log.d(TAG, "Registering stream with local AES-128-CTR proxy...")
-
-            // تسجيل الرابط في الوكيل المحلي للحصول على رابط بث مباشر لـ ExoPlayer
             val localStreamUrl = WitAnimeMegaServer.registerMegaStream(megaUrl)
 
             if (localStreamUrl.isNullOrBlank()) {
