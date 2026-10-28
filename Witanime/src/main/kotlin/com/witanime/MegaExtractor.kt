@@ -27,10 +27,6 @@ import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 import kotlin.random.Random
 
-// ════════════════════════════════════════════════════════════════════════════
-// 1. MEGA Extractor (فك التشفير اللحظي عبر الوكيل المحلي)
-// ════════════════════════════════════════════════════════════════════════════
-
 class MegaExtractor : ExtractorApi() {
     override val name: String = "Mega"
     override val mainUrl: String = "https://mega.nz"
@@ -78,10 +74,6 @@ class MegaExtractor : ExtractorApi() {
     }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// 2. GoFile Extractor (تجاوز حماية 2026 وتصفية الأرشيف)
-// ════════════════════════════════════════════════════════════════════════════
-
 class GoFileExtractor : ExtractorApi() {
     override val name: String = "GoFile"
     override val mainUrl: String = "https://gofile.io"
@@ -111,8 +103,6 @@ class GoFileExtractor : ExtractorApi() {
                     ?: url.trimEnd('/').substringAfterLast('/').substringBefore('?')
 
                 if (contentId.isBlank()) return@withContext
-
-                // 1. الحصول على حساب زائر
                 val accReq = Request.Builder()
                     .url("https://api.gofile.io/accounts")
                     .post("{}".toRequestBody("application/json; charset=utf-8".toMediaType()))
@@ -127,11 +117,7 @@ class GoFileExtractor : ExtractorApi() {
                 }.getOrDefault("")
 
                 if (token.isBlank()) return@withContext
-
-                // 2. توليد X-Website-Token
                 val wt = generateWebsiteToken(token, "ar")
-
-                // 3. جلب الروابط
                 val contentsUrl = "https://api.gofile.io/contents/$contentId?page=1&pageSize=100&sortField=name&sortDirection=1"
                 val contentReq = Request.Builder()
                     .url(contentsUrl)
@@ -174,7 +160,6 @@ class GoFileExtractor : ExtractorApi() {
                     val mime = child.optString("mimetype").lowercase()
 
                     if (directLink.isEmpty()) continue
-                    // استبعاد ملفات الضغط
                     if (fileName.endsWith(".zip") || fileName.endsWith(".rar") || fileName.endsWith(".7z") ||
                         mime.contains("zip") || mime.contains("rar")
                     ) {
@@ -204,10 +189,6 @@ class GoFileExtractor : ExtractorApi() {
         }
     }
 }
-
-// ════════════════════════════════════════════════════════════════════════════
-// 3. Videa Extractor (فك تشفير RC4 وجلب الجودات)
-// ════════════════════════════════════════════════════════════════════════════
 
 class VideaExtractor : ExtractorApi() {
     override val name: String = "Videa"
@@ -336,10 +317,6 @@ class VideaExtractor : ExtractorApi() {
     }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// 4. MailRu Extractor
-// ════════════════════════════════════════════════════════════════════════════
-
 class MailruExtractor : ExtractorApi() {
     override val name = "MailRu"
     override val mainUrl = "https://my.mail.ru"
@@ -401,10 +378,6 @@ class MailruExtractor : ExtractorApi() {
         @JsonProperty("key") val key: String
     )
 }
-
-// ════════════════════════════════════════════════════════════════════════════
-// 5. FourShared (4Shared) Extractor
-// ════════════════════════════════════════════════════════════════════════════
 
 class FourSharedExtractor : ExtractorApi() {
     override val name = "4Shared"
