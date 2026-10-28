@@ -18,10 +18,6 @@ import org.json.JSONObject
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 
-// ════════════════════════════════════════════════════════════════════════════
-// 1. مستخرج MEGA
-// ════════════════════════════════════════════════════════════════════════════
-
 class MegaExtractor : ExtractorApi() {
     override val name: String = "Mega"
     override val mainUrl: String = "https://mega.nz"
@@ -71,10 +67,6 @@ class MegaExtractor : ExtractorApi() {
     }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// 2. مستخرج GoFile
-// ════════════════════════════════════════════════════════════════════════════
-
 class GoFileExtractor : ExtractorApi() {
     override val name: String = "GoFile"
     override val mainUrl: String = "https://gofile.io"
@@ -103,7 +95,6 @@ class GoFileExtractor : ExtractorApi() {
         Log.d(TAG, "▶️ getUrl start for GoFile: $url")
         withContext(Dispatchers.IO) {
             try {
-                // استخراج معرّف المحتوى (Content ID)
                 val contentId = Regex("""gofile\.io/(?:d/|contents/)?([a-zA-Z0-9_-]+)""").find(url)?.groupValues?.get(1)
                     ?: url.trimEnd('/').substringAfterLast('/').substringBefore('?')
 
@@ -111,8 +102,6 @@ class GoFileExtractor : ExtractorApi() {
                     Log.w(TAG, "Could not extract contentId from: $url")
                     return@withContext
                 }
-
-                // 1. طلب إنشاء حساب زائر للحصول على accountToken
                 val accReq = Request.Builder()
                     .url("https://api.gofile.io/accounts")
                     .post("{}".toRequestBody("application/json; charset=utf-8".toMediaType()))
@@ -130,11 +119,7 @@ class GoFileExtractor : ExtractorApi() {
                     Log.e(TAG, "Failed to get guest account token from GoFile")
                     return@withContext
                 }
-
-                // 2. توليد رمز الحماية X-Website-Token
                 val wt = generateWebsiteToken(token, "ar")
-
-                // 3. جلب بيانات الملفات التابعة للمجلد/الرابط
                 val contentsUrl = "https://api.gofile.io/contents/$contentId?page=1&pageSize=100&sortField=name&sortDirection=1"
                 val contentReq = Request.Builder()
                     .url(contentsUrl)
@@ -151,8 +136,6 @@ class GoFileExtractor : ExtractorApi() {
                 val dataObj = runCatching {
                     JSONObject(contentRaw).optJSONObject("data")
                 }.getOrNull() ?: return@withContext
-
-                // جمع الملفات سواء كان الرابط لملف مفرد أو مجلد يحتوي على عدة ملفات
                 val fileEntries = mutableListOf<JSONObject>()
                 if (dataObj.optString("type") == "file") {
                     fileEntries.add(dataObj)
@@ -183,15 +166,11 @@ class GoFileExtractor : ExtractorApi() {
                     val mime = child.optString("mimetype").lowercase()
 
                     if (directLink.isEmpty()) continue
-
-                    // استبعاد ملفات الضغط لأنها غير قابلة للتشغيل المباشر
                     if (fileName.endsWith(".zip") || fileName.endsWith(".rar") || fileName.endsWith(".7z") ||
                         mime.contains("zip") || mime.contains("rar")
                     ) {
                         continue
                     }
-
-                    // التعرف على جودة الفيديو من الاسم (مثلاً 1080p, 720p)
                     val qVal = getQualityFromName(fileName).takeIf { it > 0 } ?: Qualities.P1080.value
 
                     withContext(Dispatchers.Main) {
