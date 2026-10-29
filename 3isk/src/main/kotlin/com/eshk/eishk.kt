@@ -24,16 +24,14 @@ class OscarTvProvider : MainAPI() {
     companion object {
         private const val STEP1 = "https://flech.tn/scrapefinal/dramabox/step1_prepare_oscar.php"
         private const val PLAY_UA = "Mozilla/5.0 (Linux; Android 16; RMX5061 Build/BP2A.250605.015; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/156.0.8078.47 Mobile Safari/537.36"
+
+        // ===== الثوابت الثلاثة (تُدمج مع ترويسات flech.tn فقط لمسار movies/show.php) =====
         private const val FIXED_AUTH = "Bearer 5a33c7a64c73f07bd66439781d42103ffcc881ba626be87689bbeb9d78106078"
         private const val FIXED_DEVICE_ID = "fc9f97ed-761b-3e77-8137-0ee6450d980e"
         private const val FIXED_KEY_ID = "cfd293b3863ce773eaae9976ad51a263e3b63e6bb2f27dd623e85f855c3267e4"
-
-        private val FIXED_HEADERS = mapOf(
-            "authorization" to FIXED_AUTH,
-            "x-device-id" to FIXED_DEVICE_ID,
-            "x-key-id" to FIXED_KEY_ID,
-        )
     }
+
+    // ===== دوال مساعدة =====
     private fun JSONObject.str(vararg keys: String): String? {
         for (k in keys) {
             if (this.has(k) && !this.isNull(k)) {
@@ -63,8 +61,19 @@ class OscarTvProvider : MainAPI() {
             ?.substringBefore("&")?.let { URLDecoder.decode(it, "UTF-8") }
     } catch (_: Exception) { null }
 
-    /** الطلب العادي عبر flech.tn (لبقية المسارات) */
-    private suspend fun call(path: String): JSONObject? = try {
+    /** يدمج الثوابت الثلاثة فوق الترويسات القادمة من flech.tn */
+    private fun mergeWithFixed(base: Map<String, String>): Map<String, String> =
+        base.toMutableMap().apply {
+            put("authorization", FIXED_AUTH)
+            put("x-device-id", FIXED_DEVICE_ID)
+            put("x-key-id", FIXED_KEY_ID)
+        }
+
+    /**
+     * طلب الترويسات من flech.tn
+     * @param forceFixed إذا true → يدمج الثوابت الثلاثة مع الترويسات القادمة
+     */
+    private suspend fun call(path: String, forceFixed: Boolean = false): JSONObject? = try {
         val url = "$mainUrl/$path"
         val prepRes = app.post(
             STEP1,
@@ -87,14 +96,9 @@ class OscarTvProvider : MainAPI() {
             }
         }
 
-        val apiRes = app.get(url, headers = headers).text
-        JSONObject(apiRes)
-    } catch (_: Exception) { null }
+        val finalHeaders = if (forceFixed) mergeWithFixed(headers) else headers
 
-    /** ✅ الطلب الخاص بروابط الأفلام — يرسل الترويسات الثابتة فقط */
-    private suspend fun callMovieLinks(id: String): JSONObject? = try {
-        val url = "$mainUrl/api/movies/show.php?id=$id"
-        val apiRes = app.get(url, headers = FIXED_HEADERS).text
+        val apiRes = app.get(url, headers = finalHeaders).text
         JSONObject(apiRes)
     } catch (_: Exception) { null }
 
@@ -224,7 +228,8 @@ class OscarTvProvider : MainAPI() {
                 }
             }
             kind == "movie" -> {
-                val d = callMovieLinks(id)?.data() ?: return null
+                // ✅ دمج الثوابت مع ترويسات flech.tn
+                val d = call("api/movies/show.php?id=$id", forceFixed = true)?.data() ?: return null
                 val title = d.str("title_ar", "title_en") ?: return null
                 val tags = d.arr("genres").mapNotNull { it.str("name") }
                 newMovieLoadResponse(title, url, TvType.Movie, "oscar://player/movies/$id") {
@@ -258,7 +263,8 @@ class OscarTvProvider : MainAPI() {
                 val apiBase = if (isAnime) "api/anime" else "api/series"
                 var d = call("$apiBase/show.php?id=$id")?.data()
                 if (d == null && !isAnime) {
-                    val m = callMovieLinks(id)?.data()
+                    // ✅ السقوط إلى فيلم مع دمج الثوابت
+                    val m = call("api/movies/show.php?id=$id", forceFixed = true)?.data()
                     if (m != null) {
                         return newMovieLoadResponse(
                             m.str("title_ar", "title_en") ?: return null, url, TvType.Movie, "oscar://player/movies/$id"
@@ -364,8 +370,9 @@ class OscarTvProvider : MainAPI() {
                 }
             }
             data.startsWith("oscar://player/movies/") -> {
+                // ✅ دمج الثوابت مع ترويسات flech.tn
                 val id = data.substringAfter("oscar://player/movies/", "")
-                val d = callMovieLinks(id)?.data() ?: return false
+                val d = call("api/movies/show.php?id=$id", forceFixed = true)?.data() ?: return false
                 d.arr("watch_links").forEach { emit(it.str("url") ?: return@forEach, it.str("server_name") ?: "Oscar", it.str("quality"), it.playCookie()) }
                 d.arr("download_links").forEach { emit(it.str("url") ?: return@forEach, "${it.str("server_name") ?: "DL"}", it.str("quality"), it.playCookie()) }
             }
