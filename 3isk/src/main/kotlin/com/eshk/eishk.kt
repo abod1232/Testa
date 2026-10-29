@@ -315,10 +315,7 @@ class OscarTvProvider : MainAPI() {
                 } catch (_: Exception) { return }
             }
             if (!seen.add(u)) return
-
-            // تجهيز الترويسات مع استبدال الترويسة الافتراضية
             val reqHeaders = mutableMapOf<String, String>()
-            // كتابة user-agent بحروف صغيرة تمنع ExoPlayer من تكرار الـ Header
             reqHeaders["user-agent"] = PLAY_UA
             reqHeaders["User-Agent"] = PLAY_UA
             
