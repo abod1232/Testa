@@ -26,8 +26,6 @@ class OscarTvProvider : MainAPI() {
         private const val STEP1 = "https://flech.tn/scrapefinal/dramabox/step1_prepare_oscar.php"
         private const val PLAY_UA = "TDMuaHLS99"
     }
-
-    // دوال مساعدة للتعامل مع org.json بأمان
     private fun JSONObject.str(vararg keys: String): String? {
         for (k in keys) {
             if (this.has(k) && !this.isNull(k)) {
