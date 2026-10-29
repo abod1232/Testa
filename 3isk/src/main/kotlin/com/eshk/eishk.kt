@@ -318,7 +318,7 @@ class OscarTvProvider : MainAPI() {
 
             val reqHeaders = mutableMapOf<String, String>()
             reqHeaders["user-agent"] = PLAY_UA
-            reqHeaders["User-Agent"] = PLAY_UA
+            
 
             if (!cookie.isNullOrBlank()) {
                 reqHeaders["cookie"] = cookie
