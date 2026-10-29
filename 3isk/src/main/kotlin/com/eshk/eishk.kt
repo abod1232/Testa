@@ -23,8 +23,6 @@ class OscarTvProvider : MainAPI() {
 
     companion object {
         private const val PLAY_UA = "Mozilla/5.0 (Linux; Android 16; RMX5061 Build/BP2A.250605.015; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/156.0.8078.47 Mobile Safari/537.36"
-
-        // ===== الثوابت الثلاثة فقط =====
         private const val AUTH = "Bearer 5a33c7a64c73f07bd66439781d42103ffcc881ba626be87689bbeb9d78106078"
         private const val DEVICE_ID = "fc9f97ed-761b-3e77-8137-0ee6450d980e"
         private const val KEY_ID = "cfd293b3863ce773eaae9976ad51a263e3b63e6bb2f27dd623e85f855c3267e4"
@@ -35,8 +33,6 @@ class OscarTvProvider : MainAPI() {
             "x-key-id" to KEY_ID,
         )
     }
-
-    // ===== دوال مساعدة =====
     private fun JSONObject.str(vararg keys: String): String? {
         for (k in keys) {
             if (has(k) && !isNull(k)) {
@@ -71,15 +67,11 @@ class OscarTvProvider : MainAPI() {
         val res = app.get(url, headers = BASE_HEADERS).text
         JSONObject(res)
     } catch (_: Exception) { null }
-
-    // ===== الطلب مع POST (للمسارات التي تحتاج body) =====
     private suspend fun post(path: String, body: Map<String, Any>): JSONObject? = try {
         val url = "$mainUrl/$path"
         val res = app.post(url, headers = BASE_HEADERS, json = body).text
         JSONObject(res)
     } catch (_: Exception) { null }
-
-    // ===== تحويلات =====
     private fun JSONObject.toSearch(tvType: TvType): SearchResponse? {
         val id = int("id") ?: return null
         val title = str("title_ar", "title_en", "name") ?: return null
@@ -98,8 +90,6 @@ class OscarTvProvider : MainAPI() {
     private suspend fun searchOne(pathPrefix: String, query: String, tvType: TvType): List<SearchResponse> =
         call("$pathPrefix/?page=1&limit=20&search=${URLEncoder.encode(query, "UTF-8")}")
             ?.dataArr()?.mapNotNull { it.toSearch(tvType) } ?: emptyList()
-
-    // ===== الصفحة الرئيسية =====
     override val mainPage = mainPageOf(
         "movies_top" to "رائج اليوم",
         "latest_episodes" to "أحدث الحلقات",
@@ -156,8 +146,6 @@ class OscarTvProvider : MainAPI() {
         }
         return newHomePageResponse(request.name, items)
     }
-
-    // ===== البحث =====
     override suspend fun search(query: String): List<SearchResponse> {
         if (query.isBlank()) return emptyList()
         return coroutineScope {
@@ -168,8 +156,6 @@ class OscarTvProvider : MainAPI() {
             ).awaitAll().flatten()
         }.distinctBy { it.url }
     }
-
-    // ===== تحميل التفاصيل =====
     private fun JSONObject.poster2(): String? = str("poster")?.let { if (it.startsWith("http")) it else "$mainUrl$it" }
 
     override suspend fun load(url: String): LoadResponse? {
@@ -279,8 +265,6 @@ class OscarTvProvider : MainAPI() {
             else -> null
         }
     }
-
-    // ===== الروابط =====
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
