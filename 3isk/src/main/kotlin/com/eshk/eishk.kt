@@ -8,11 +8,10 @@ import com.lagradost.cloudstream3.utils.newExtractorLink
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.intOrNull
+import org.json.JSONArray
+import org.json.JSONObject
+import java.net.URLDecoder
+import java.net.URLEncoder
 
 class OscarTvProvider : MainAPI() {
 
@@ -26,61 +25,70 @@ class OscarTvProvider : MainAPI() {
     companion object {
         private const val STEP1 = "https://flech.tn/scrapefinal/dramabox/step1_prepare_oscar.php"
         private const val PLAY_UA = "TDMuaHLS99"
-        private val json = Json { ignoreUnknownKeys = true }
     }
 
-    private fun JsonObject.str(vararg keys: String): String? {
+    // دوال مساعدة للتعامل مع org.json بأمان
+    private fun JSONObject.str(vararg keys: String): String? {
         for (k in keys) {
-            val v = this[k]?.let { try { it.jsonPrim() } catch (_: Exception) { null } }
-            if (!v.isNullOrBlank() && v != "null") return v
+            if (this.has(k) && !this.isNull(k)) {
+                val v = this.optString(k)
+                if (v.isNotBlank() && v != "null") return v
+            }
         }
         return null
     }
 
-    private fun Any?.jsonPrim(): String? = try {
-        (this as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
-    } catch (_: Exception) { null }
+    private fun JSONObject.int(key: String): Int? {
+        if (!this.has(key) || this.isNull(key)) return null
+        return this.optInt(key, -1).takeIf { it != -1 } ?: str(key)?.toDoubleOrNull()?.toInt()
+    }
 
-    private fun JsonObject.int(key: String): Int? = str(key)?.toDoubleOrNull()?.toInt()
+    private fun JSONObject.arr(key: String): List<JSONObject> {
+        val array = this.optJSONArray(key) ?: return emptyList()
+        val list = mutableListOf<JSONObject>()
+        for (i in 0 until array.length()) {
+            array.optJSONObject(i)?.let { list.add(it) }
+        }
+        return list
+    }
 
-    /** CDN guard redirects playback to a 1-min "تنوية" notice without this cookie (from deep_link) */
-    private fun JsonObject.playCookie(): String? = try {
+    private fun JSONObject.playCookie(): String? = try {
         str("deep_link")?.substringAfter("cookies=", "")?.takeIf { it.isNotBlank() }
-            ?.substringBefore("&")?.let { java.net.URLDecoder.decode(it, "UTF-8") }
+            ?.substringBefore("&")?.let { URLDecoder.decode(it, "UTF-8") }
     } catch (_: Exception) { null }
 
-    private fun JsonObject.arr(key: String): List<JsonObject> =
-        ((this[key] as? JsonArray)?.mapNotNull { it as? JsonObject }) ?: emptyList()
-
-    /** flech.tn computes fresh X-Iron-* headers per URL -> required for every API call */
-    private suspend fun call(path: String): JsonObject? = try {
+    /** طلب الترويسات من flech.tn */
+    private suspend fun call(path: String): JSONObject? = try {
         val url = "$mainUrl/$path"
-        val h = json.parseToJsonElement(
-            app.post(
-                STEP1,
-                headers = mapOf(
-                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
-                    "Content-Type" to "application/x-www-form-urlencoded",
-                ),
-                data = mapOf("url" to url),
-            ).text
-        ).let { (it as? JsonObject)?.get("headers") as? JsonObject }
-        if (h == null) return null
-        val headers = h.entries.mapNotNull { (k, v) ->
-            (v as? kotlinx.serialization.json.JsonPrimitive)?.content?.let { k to it }
-        }.filter { it.first !in setOf("Host", "Connection") }.toMap()
-        (app.get(url, headers = headers).text).jsonObjectSafe()
+        val prepRes = app.post(
+            STEP1,
+            headers = mapOf(
+                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
+                "Content-Type" to "application/x-www-form-urlencoded",
+            ),
+            data = mapOf("url" to url),
+        ).text
+
+        val prepJson = JSONObject(prepRes)
+        val h = prepJson.optJSONObject("headers") ?: return null
+
+        val headers = mutableMapOf<String, String>()
+        val keys = h.keys()
+        while (keys.hasNext()) {
+            val k = keys.next()
+            if (k !in setOf("Host", "Connection")) {
+                headers[k] = h.optString(k)
+            }
+        }
+
+        val apiRes = app.get(url, headers = headers).text
+        JSONObject(apiRes)
     } catch (_: Exception) { null }
 
-    private fun String.jsonObjectSafe(): JsonObject? = try {
-        json.parseToJsonElement(this) as? JsonObject
-    } catch (_: Exception) { null }
+    private fun JSONObject.data(): JSONObject? = this.optJSONObject("data")
+    private fun JSONObject.dataArr(): List<JSONObject> = this.arr("data")
 
-    private fun JsonObject.data(): JsonObject? = this["data"] as? JsonObject
-    private fun JsonObject.dataArr(): List<JsonObject> =
-        ((this["data"] as? JsonArray)?.mapNotNull { it as? JsonObject }) ?: emptyList()
-
-    private fun JsonObject.toSearch(tvType: TvType): SearchResponse? {
+    private fun JSONObject.toSearch(tvType: TvType): SearchResponse? {
         val id = int("id") ?: return null
         val title = str("title_ar", "title_en", "name") ?: return null
         val poster = str("poster")?.let { if (it.startsWith("http")) it else "$mainUrl$it" }
@@ -96,7 +104,7 @@ class OscarTvProvider : MainAPI() {
         call(path)?.dataArr()?.mapNotNull { it.toSearch(tvType) } ?: emptyList()
 
     private suspend fun searchOne(pathPrefix: String, query: String, tvType: TvType): List<SearchResponse> =
-        call("$pathPrefix/?page=1&limit=20&search=${java.net.URLEncoder.encode(query, "UTF-8")}")
+        call("$pathPrefix/?page=1&limit=20&search=${URLEncoder.encode(query, "UTF-8")}")
             ?.dataArr()?.mapNotNull { it.toSearch(tvType) } ?: emptyList()
 
     override val mainPage = mainPageOf(
@@ -116,11 +124,11 @@ class OscarTvProvider : MainAPI() {
             data == "movies_top" || data == "latest_episodes" || data == "armovies" || data == "arseries" -> {
                 if (page > 1) emptyList() else {
                     val home = call("api/v2/home.php?app_version=15") ?: return newHomePageResponse(request.name, emptyList())
-                    val sections = (home["data"] as? JsonObject)?.arr("sections") ?: emptyList()
+                    val sections = home.optJSONObject("data")?.arr("sections") ?: emptyList()
                     val sec = when (data) {
                         "armovies" -> sections.firstOrNull {
                             it.str("section_type") == "movies" &&
-                                ((it["content_filters"] as? JsonObject)?.int("category_id") == 3 || it.str("title_ar") == "أحدث الأفلام العربية")
+                                (it.optJSONObject("content_filters")?.int("category_id") == 3 || it.str("title_ar") == "أحدث الأفلام العربية")
                         }
                         "arseries" -> sections.firstOrNull {
                             it.str("section_type") == "latest_additions" &&
@@ -129,10 +137,10 @@ class OscarTvProvider : MainAPI() {
                         else -> sections.firstOrNull { it.str("section_type") == data }
                     } ?: return newHomePageResponse(request.name, emptyList())
                     sec.arr("items").mapNotNull { o ->
-                        if (o.containsKey("home_team")) return@mapNotNull null
+                        if (o.has("home_team")) return@mapNotNull null
                         val id = o.int("item_id") ?: o.int("id") ?: return@mapNotNull null
                         val sTitle = o.str("series_title")
-                        if (sTitle != null && o.containsKey("season_id")) {
+                        if (sTitle != null && o.has("season_id")) {
                             val sn = o.int("season_number") ?: 1
                             val ep = o.int("episode_number") ?: 0
                             val epPoster = o.str("series_poster", "series_banner")?.let { if (it.startsWith("http")) it else "$mainUrl$it" }
@@ -141,7 +149,7 @@ class OscarTvProvider : MainAPI() {
                                 "oscar://ep/$id", TvType.Movie
                             ) { this.posterUrl = epPoster }
                         }
-                        val itemType = o.str("item_type") ?: if (o.containsKey("episode_count")) "serie" else "movie"
+                        val itemType = o.str("item_type") ?: if (o.has("episode_count")) "serie" else "movie"
                         val title = o.str("title_ar", "title_en") ?: return@mapNotNull null
                         val poster = o.str("poster", "image")?.let { if (it.startsWith("http")) it else "$mainUrl$it" }
                         when (itemType) {
@@ -168,7 +176,7 @@ class OscarTvProvider : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val q = java.net.URLEncoder.encode(query.trim(), "UTF-8")
+        val q = URLEncoder.encode(query.trim(), "UTF-8")
         if (q.isBlank()) return emptyList()
         return coroutineScope {
             listOf(
@@ -179,7 +187,7 @@ class OscarTvProvider : MainAPI() {
         }.distinctBy { it.url }
     }
 
-    private fun JsonObject.poster2(): String? = str("poster")?.let { if (it.startsWith("http")) it else "$mainUrl$it" }
+    private fun JSONObject.poster2(): String? = str("poster")?.let { if (it.startsWith("http")) it else "$mainUrl$it" }
 
     override suspend fun load(url: String): LoadResponse? {
         if (!url.contains("oscar://")) return null
