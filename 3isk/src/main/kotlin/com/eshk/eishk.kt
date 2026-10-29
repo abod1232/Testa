@@ -339,3 +339,4 @@ class OscarTvProvider : MainAPI() {
             got = true
         }
 }
+}
