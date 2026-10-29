@@ -24,11 +24,8 @@ class OscarTvProvider : MainAPI() {
 
     companion object {
         private const val STEP1 = "https://flech.tn/scrapefinal/dramabox/step1_prepare_oscar.php"
-        // الـ User-Agent الجديد الخاص بتشغيل الفيديوهات النهائية
         private const val PLAY_UA = "Mozilla/5.0 (Linux; Android 16; RMX5061 Build/BP2A.250605.015; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/156.0.8078.47 Mobile Safari/537.36"
     }
-
-    // دوال مساعدة للتعامل مع org.json بأمان لتفادي كراش النسخ القديمة
     private fun JSONObject.str(vararg keys: String): String? {
         for (k in keys) {
             if (this.has(k) && !this.isNull(k)) {
