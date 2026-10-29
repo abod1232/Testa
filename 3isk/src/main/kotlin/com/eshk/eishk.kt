@@ -24,14 +24,10 @@ class OscarTvProvider : MainAPI() {
     companion object {
         private const val STEP1 = "https://flech.tn/scrapefinal/dramabox/step1_prepare_oscar.php"
         private const val PLAY_UA = "Mozilla/5.0 (Linux; Android 16; RMX5061 Build/BP2A.250605.015; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/156.0.8078.47 Mobile Safari/537.36"
-
-        // ===== الثوابت الثلاثة (تُدمج مع ترويسات flech.tn فقط لمسار movies/show.php) =====
         private const val FIXED_AUTH = "Bearer 5a33c7a64c73f07bd66439781d42103ffcc881ba626be87689bbeb9d78106078"
         private const val FIXED_DEVICE_ID = "fc9f97ed-761b-3e77-8137-0ee6450d980e"
         private const val FIXED_KEY_ID = "cfd293b3863ce773eaae9976ad51a263e3b63e6bb2f27dd623e85f855c3267e4"
     }
-
-    // ===== دوال مساعدة =====
     private fun JSONObject.str(vararg keys: String): String? {
         for (k in keys) {
             if (this.has(k) && !this.isNull(k)) {
@@ -228,7 +224,6 @@ class OscarTvProvider : MainAPI() {
                 }
             }
             kind == "movie" -> {
-                // ✅ دمج الثوابت مع ترويسات flech.tn
                 val d = call("api/movies/show.php?id=$id", forceFixed = true)?.data() ?: return null
                 val title = d.str("title_ar", "title_en") ?: return null
                 val tags = d.arr("genres").mapNotNull { it.str("name") }
@@ -263,7 +258,6 @@ class OscarTvProvider : MainAPI() {
                 val apiBase = if (isAnime) "api/anime" else "api/series"
                 var d = call("$apiBase/show.php?id=$id")?.data()
                 if (d == null && !isAnime) {
-                    // ✅ السقوط إلى فيلم مع دمج الثوابت
                     val m = call("api/movies/show.php?id=$id", forceFixed = true)?.data()
                     if (m != null) {
                         return newMovieLoadResponse(
@@ -370,7 +364,6 @@ class OscarTvProvider : MainAPI() {
                 }
             }
             data.startsWith("oscar://player/movies/") -> {
-                // ✅ دمج الثوابت مع ترويسات flech.tn
                 val id = data.substringAfter("oscar://player/movies/", "")
                 val d = call("api/movies/show.php?id=$id", forceFixed = true)?.data() ?: return false
                 d.arr("watch_links").forEach { emit(it.str("url") ?: return@forEach, it.str("server_name") ?: "Oscar", it.str("quality"), it.playCookie()) }
