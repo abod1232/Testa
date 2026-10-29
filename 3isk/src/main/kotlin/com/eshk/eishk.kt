@@ -22,21 +22,26 @@ class OscarTvProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime, TvType.Live)
 
     companion object {
+        private const val STEP1 = "https://flech.tn/scrapefinal/dramabox/step1_prepare_oscar.php"
         private const val PLAY_UA = "Mozilla/5.0 (Linux; Android 16; RMX5061 Build/BP2A.250605.015; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/156.0.8078.47 Mobile Safari/537.36"
-        private const val AUTH = "Bearer 5a33c7a64c73f07bd66439781d42103ffcc881ba626be87689bbeb9d78106078"
-        private const val DEVICE_ID = "fc9f97ed-761b-3e77-8137-0ee6450d980e"
-        private const val KEY_ID = "cfd293b3863ce773eaae9976ad51a263e3b63e6bb2f27dd623e85f855c3267e4"
 
-        private val BASE_HEADERS = mapOf(
-            "authorization" to AUTH,
-            "x-device-id" to DEVICE_ID,
-            "x-key-id" to KEY_ID,
+        // ===== الثوابت الثلاثة فقط (تُستخدم حصرياً مع movies/show.php) =====
+        private const val FIXED_AUTH = "Bearer 5a33c7a64c73f07bd66439781d42103ffcc881ba626be87689bbeb9d78106078"
+        private const val FIXED_DEVICE_ID = "fc9f97ed-761b-3e77-8137-0ee6450d980e"
+        private const val FIXED_KEY_ID = "cfd293b3863ce773eaae9976ad51a263e3b63e6bb2f27dd623e85f855c3267e4"
+
+        private val FIXED_HEADERS = mapOf(
+            "authorization" to FIXED_AUTH,
+            "x-device-id" to FIXED_DEVICE_ID,
+            "x-key-id" to FIXED_KEY_ID,
         )
     }
+
+    // ===== دوال مساعدة =====
     private fun JSONObject.str(vararg keys: String): String? {
         for (k in keys) {
-            if (has(k) && !isNull(k)) {
-                val v = optString(k)
+            if (this.has(k) && !this.isNull(k)) {
+                val v = this.optString(k)
                 if (v.isNotBlank() && v != "null") return v
             }
         }
@@ -44,34 +49,62 @@ class OscarTvProvider : MainAPI() {
     }
 
     private fun JSONObject.int(key: String): Int? {
-        if (!has(key) || isNull(key)) return null
-        return optInt(key, -1).takeIf { it != -1 } ?: str(key)?.toDoubleOrNull()?.toInt()
+        if (!this.has(key) || this.isNull(key)) return null
+        return this.optInt(key, -1).takeIf { it != -1 } ?: str(key)?.toDoubleOrNull()?.toInt()
     }
 
     private fun JSONObject.arr(key: String): List<JSONObject> {
-        val a = optJSONArray(key) ?: return emptyList()
-        return (0 until a.length()).mapNotNull { a.optJSONObject(it) }
+        val array = this.optJSONArray(key) ?: return emptyList()
+        val list = mutableListOf<JSONObject>()
+        for (i in 0 until array.length()) {
+            array.optJSONObject(i)?.let { list.add(it) }
+        }
+        return list
     }
-
-    private fun JSONObject.data(): JSONObject? = optJSONObject("data")
-    private fun JSONObject.dataArr(): List<JSONObject> = arr("data")
 
     private fun JSONObject.playCookie(): String? = try {
         str("deep_link")?.substringAfter("cookies=", "")?.takeIf { it.isNotBlank() }
             ?.substringBefore("&")?.let { URLDecoder.decode(it, "UTF-8") }
     } catch (_: Exception) { null }
 
-    /** الطلب الأساسي — بترويسات ثابتة فقط */
+    /** الطلب العادي عبر flech.tn (لبقية المسارات) */
     private suspend fun call(path: String): JSONObject? = try {
         val url = "$mainUrl/$path"
-        val res = app.get(url, headers = BASE_HEADERS).text
-        JSONObject(res)
+        val prepRes = app.post(
+            STEP1,
+            headers = mapOf(
+                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
+                "Content-Type" to "application/x-www-form-urlencoded",
+            ),
+            data = mapOf("url" to url),
+        ).text
+
+        val prepJson = JSONObject(prepRes)
+        val h = prepJson.optJSONObject("headers") ?: return null
+
+        val headers = mutableMapOf<String, String>()
+        val keys = h.keys()
+        while (keys.hasNext()) {
+            val k = keys.next()
+            if (k !in setOf("Host", "Connection")) {
+                headers[k] = h.optString(k)
+            }
+        }
+
+        val apiRes = app.get(url, headers = headers).text
+        JSONObject(apiRes)
     } catch (_: Exception) { null }
-    private suspend fun post(path: String, body: Map<String, Any>): JSONObject? = try {
-        val url = "$mainUrl/$path"
-        val res = app.post(url, headers = BASE_HEADERS, json = body).text
-        JSONObject(res)
+
+    /** ✅ الطلب الخاص بروابط الأفلام — يرسل الترويسات الثابتة فقط */
+    private suspend fun callMovieLinks(id: String): JSONObject? = try {
+        val url = "$mainUrl/api/movies/show.php?id=$id"
+        val apiRes = app.get(url, headers = FIXED_HEADERS).text
+        JSONObject(apiRes)
     } catch (_: Exception) { null }
+
+    private fun JSONObject.data(): JSONObject? = this.optJSONObject("data")
+    private fun JSONObject.dataArr(): List<JSONObject> = this.arr("data")
+
     private fun JSONObject.toSearch(tvType: TvType): SearchResponse? {
         val id = int("id") ?: return null
         val title = str("title_ar", "title_en", "name") ?: return null
@@ -90,9 +123,12 @@ class OscarTvProvider : MainAPI() {
     private suspend fun searchOne(pathPrefix: String, query: String, tvType: TvType): List<SearchResponse> =
         call("$pathPrefix/?page=1&limit=20&search=${URLEncoder.encode(query, "UTF-8")}")
             ?.dataArr()?.mapNotNull { it.toSearch(tvType) } ?: emptyList()
+
     override val mainPage = mainPageOf(
         "movies_top" to "رائج اليوم",
         "latest_episodes" to "أحدث الحلقات",
+        "armovies" to "أحدث الأفلام العربية",
+        "arseries" to "أحدث الإضافات العربية",
         "oscar://movies/" to "أفلام",
         "oscar://series/" to "مسلسلات",
         "oscar://anime/" to "أنمي",
@@ -102,12 +138,21 @@ class OscarTvProvider : MainAPI() {
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val data = request.data
         val items: List<SearchResponse> = when {
-            data == "movies_top" || data == "latest_episodes" -> {
+            data == "movies_top" || data == "latest_episodes" || data == "armovies" || data == "arseries" -> {
                 if (page > 1) emptyList() else {
                     val home = call("api/v2/home.php?app_version=15") ?: return newHomePageResponse(request.name, emptyList())
                     val sections = home.optJSONObject("data")?.arr("sections") ?: emptyList()
-                    val sec = sections.firstOrNull { it.str("section_type") == data }
-                        ?: return newHomePageResponse(request.name, emptyList())
+                    val sec = when (data) {
+                        "armovies" -> sections.firstOrNull {
+                            it.str("section_type") == "movies" &&
+                                (it.optJSONObject("content_filters")?.int("category_id") == 3 || it.str("title_ar") == "أحدث الأفلام العربية")
+                        }
+                        "arseries" -> sections.firstOrNull {
+                            it.str("section_type") == "latest_additions" &&
+                                (it.int("content_category_filter") == 1 || it.str("title_ar") == "أحدث الإضافات العربية")
+                        }
+                        else -> sections.firstOrNull { it.str("section_type") == data }
+                    } ?: return newHomePageResponse(request.name, emptyList())
                     sec.arr("items").mapNotNull { o ->
                         if (o.has("home_team")) return@mapNotNull null
                         val id = o.int("item_id") ?: o.int("id") ?: return@mapNotNull null
@@ -146,8 +191,10 @@ class OscarTvProvider : MainAPI() {
         }
         return newHomePageResponse(request.name, items)
     }
+
     override suspend fun search(query: String): List<SearchResponse> {
-        if (query.isBlank()) return emptyList()
+        val q = URLEncoder.encode(query.trim(), "UTF-8")
+        if (q.isBlank()) return emptyList()
         return coroutineScope {
             listOf(
                 async { searchOne("api/movies", query, TvType.Movie) },
@@ -156,6 +203,7 @@ class OscarTvProvider : MainAPI() {
             ).awaitAll().flatten()
         }.distinctBy { it.url }
     }
+
     private fun JSONObject.poster2(): String? = str("poster")?.let { if (it.startsWith("http")) it else "$mainUrl$it" }
 
     override suspend fun load(url: String): LoadResponse? {
@@ -164,10 +212,10 @@ class OscarTvProvider : MainAPI() {
         val kind = parts.firstOrNull() ?: return null
         val id = parts.getOrNull(1) ?: return null
 
-        return when (kind) {
-            "channel" -> {
+        return when {
+            kind == "channel" -> {
                 val ch = call("api/channels/show.php?id=$id")?.data() ?: return null
-                val chName = ch.str("name") ?: "Channel $id"
+                val name = ch.str("name") ?: "Channel $id"
                 val streams = ch.arr("streams")
                 if (streams.isEmpty()) return null
                 val packed = streams.mapNotNull { st ->
@@ -175,12 +223,13 @@ class OscarTvProvider : MainAPI() {
                     val q = st.str("quality") ?: ""
                     "$u::$q"
                 }.joinToString("||")
-                newMovieLoadResponse(chName, url, TvType.Live, "oscar://ch/$packed") {
+                newMovieLoadResponse(name, url, TvType.Live, "oscar://ch/$packed") {
                     this.posterUrl = ch.str("logo")?.let { if (it.startsWith("http")) it else "$mainUrl$it" }
                 }
             }
-            "movie" -> {
-                val d = call("api/movies/show.php?id=$id")?.data() ?: return null
+            kind == "movie" -> {
+                // ✅ هنا التغيير: استخدام callMovieLinks بالترويسات الثابتة
+                val d = callMovieLinks(id)?.data() ?: return null
                 val title = d.str("title_ar", "title_en") ?: return null
                 val tags = d.arr("genres").mapNotNull { it.str("name") }
                 newMovieLoadResponse(title, url, TvType.Movie, "oscar://player/movies/$id") {
@@ -190,7 +239,7 @@ class OscarTvProvider : MainAPI() {
                     this.tags = tags
                 }
             }
-            "ep" -> {
+            kind == "ep" -> {
                 var d = call("api/episodes/show.php?id=$id")?.data()
                 var anime = false
                 if (d == null) {
@@ -209,12 +258,13 @@ class OscarTvProvider : MainAPI() {
                     this.plot = d.str("description")
                 }
             }
-            "serie", "anime", "tv", "TvSeries", "Anime" -> {
+            kind == "serie" || kind == "anime" || kind == "tv" || kind == "TvSeries" || kind == "Anime" -> {
                 val isAnime = kind == "anime" || kind == "Anime"
                 val apiBase = if (isAnime) "api/anime" else "api/series"
                 var d = call("$apiBase/show.php?id=$id")?.data()
                 if (d == null && !isAnime) {
-                    val m = call("api/movies/show.php?id=$id")?.data()
+                    // ✅ هنا أيضاً: استخدام الترويسات الثابتة عند السقوط إلى فيلم
+                    val m = callMovieLinks(id)?.data()
                     if (m != null) {
                         return newMovieLoadResponse(
                             m.str("title_ar", "title_en") ?: return null, url, TvType.Movie, "oscar://player/movies/$id"
@@ -265,6 +315,7 @@ class OscarTvProvider : MainAPI() {
             else -> null
         }
     }
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -309,18 +360,19 @@ class OscarTvProvider : MainAPI() {
         }
 
         when {
-            data.startsWith("oscar://direct/") -> emit(data.substringAfter("oscar://direct/"), "Oscar TV", "")
+            data.startsWith("oscar://direct/") -> {
+                emit(data.substringAfter("oscar://direct/"), "Oscar TV", "")
+            }
             data.startsWith("oscar://ch/") -> {
                 data.substringAfter("oscar://ch/").split("||").forEach { entry ->
-                    val parts = entry.split("::", limit = 2)
-                    val u = parts.getOrNull(0)
-                    val q = parts.getOrNull(1)
+                    val (u, q) = entry.split("::", limit = 2).let { it.getOrNull(0) to it.getOrNull(1) }
                     if (u != null) emit(u, "Oscar TV", q)
                 }
             }
             data.startsWith("oscar://player/movies/") -> {
+                // ✅ هنا التغيير الأهم: جلب روابط الفلم بالترويسات الثابتة
                 val id = data.substringAfter("oscar://player/movies/", "")
-                val d = call("api/movies/show.php?id=$id")?.data() ?: return false
+                val d = callMovieLinks(id)?.data() ?: return false
                 d.arr("watch_links").forEach { emit(it.str("url") ?: return@forEach, it.str("server_name") ?: "Oscar", it.str("quality"), it.playCookie()) }
                 d.arr("download_links").forEach { emit(it.str("url") ?: return@forEach, "${it.str("server_name") ?: "DL"}", it.str("quality"), it.playCookie()) }
             }
