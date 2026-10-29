@@ -16,7 +16,7 @@ import java.net.URLEncoder
 class OscarTvProvider : MainAPI() {
 
     override var name = "Oscar TV"
-    override var mainUrl = "https://ostv-11-11.xyz"
+    override var mainUrl = "https://api.ossccaarr111.online"
     override var lang = "ar"
     override val hasMainPage = true
     override val hasDownloadSupport = true
