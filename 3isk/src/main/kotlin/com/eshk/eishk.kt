@@ -315,6 +315,18 @@ class OscarTvProvider : MainAPI() {
                 } catch (_: Exception) { return }
             }
             if (!seen.add(u)) return
+
+            // تجهيز الترويسات مع استبدال الترويسة الافتراضية
+            val reqHeaders = mutableMapOf<String, String>()
+            // كتابة user-agent بحروف صغيرة تمنع ExoPlayer من تكرار الـ Header
+            reqHeaders["user-agent"] = PLAY_UA
+            reqHeaders["User-Agent"] = PLAY_UA
+            
+            if (!cookie.isNullOrBlank()) {
+                reqHeaders["cookie"] = cookie
+                reqHeaders["Cookie"] = cookie
+            }
+
             callback(
                 newExtractorLink(
                     name,
@@ -322,44 +334,11 @@ class OscarTvProvider : MainAPI() {
                     u,
                     if (u.contains(".mp4")) ExtractorLinkType.VIDEO else ExtractorLinkType.M3U8,
                 ) {
-                    this.headers = if (cookie.isNullOrBlank()) mapOf("User-Agent" to PLAY_UA)
-                    else mapOf("User-Agent" to PLAY_UA, "Cookie" to cookie)
+                    this.headers = reqHeaders
                     this.quality = quality?.replace("p", "")?.toIntOrNull()
                         ?.let { q -> Qualities.entries.firstOrNull { it.value == q }?.value } ?: Qualities.Unknown.value
                 }
             )
             got = true
         }
-
-        when {
-            data.startsWith("oscar://direct/") -> {
-                emit(data.substringAfter("oscar://direct/"), "Oscar TV", "")
-            }
-
-            data.startsWith("oscar://ch/") -> {
-                data.substringAfter("oscar://ch/").split("||").forEach { entry ->
-                    val (u, q) = entry.split("::", limit = 2).let { it.getOrNull(0) to it.getOrNull(1) }
-                    if (u != null) emit(u, "Oscar TV", q)
-                }
-            }
-
-            data.startsWith("oscar://player/movies/") -> {
-                val id = data.substringAfter("oscar://player/movies/", "")
-                val d = call("api/movies/show.php?id=$id")?.data() ?: return false
-                d.arr("watch_links").forEach { emit(it.str("url") ?: return@forEach, it.str("server_name") ?: "Oscar", it.str("quality"), it.playCookie()) }
-                d.arr("download_links").forEach { emit(it.str("url") ?: return@forEach, "${it.str("server_name") ?: "DL"}", it.str("quality"), it.playCookie()) }
-            }
-
-            data.startsWith("oscar://ep/") -> {
-                val rest = data.substringAfter("oscar://ep/", "")
-                val isAnime = rest.substringBefore("/") == "true"
-                val id = rest.substringAfter("/")
-                val apiBase = if (isAnime) "api/anime/episodes" else "api/episodes"
-                val d = call("$apiBase/show.php?id=$id")?.data() ?: return false
-                d.arr("watch_links").forEach { emit(it.str("url") ?: return@forEach, it.str("server_name") ?: "Oscar", it.str("quality"), it.playCookie()) }
-                d.arr("download_links").forEach { emit(it.str("url") ?: return@forEach, "${it.str("server_name") ?: "DL"}", it.str("quality"), it.playCookie()) }
-            }
-        }
-        return got
-    }
 }
