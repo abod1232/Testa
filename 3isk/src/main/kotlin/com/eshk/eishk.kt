@@ -315,10 +315,11 @@ class OscarTvProvider : MainAPI() {
                 } catch (_: Exception) { return }
             }
             if (!seen.add(u)) return
+
             val reqHeaders = mutableMapOf<String, String>()
             reqHeaders["user-agent"] = PLAY_UA
             reqHeaders["User-Agent"] = PLAY_UA
-            
+
             if (!cookie.isNullOrBlank()) {
                 reqHeaders["cookie"] = cookie
                 reqHeaders["Cookie"] = cookie
@@ -338,5 +339,36 @@ class OscarTvProvider : MainAPI() {
             )
             got = true
         }
-}
+
+        when {
+            data.startsWith("oscar://direct/") -> {
+                emit(data.substringAfter("oscar://direct/"), "Oscar TV", "")
+            }
+
+            data.startsWith("oscar://ch/") -> {
+                data.substringAfter("oscar://ch/").split("||").forEach { entry ->
+                    val (u, q) = entry.split("::", limit = 2).let { it.getOrNull(0) to it.getOrNull(1) }
+                    if (u != null) emit(u, "Oscar TV", q)
+                }
+            }
+
+            data.startsWith("oscar://player/movies/") -> {
+                val id = data.substringAfter("oscar://player/movies/", "")
+                val d = call("api/movies/show.php?id=$id")?.data() ?: return false
+                d.arr("watch_links").forEach { emit(it.str("url") ?: return@forEach, it.str("server_name") ?: "Oscar", it.str("quality"), it.playCookie()) }
+                d.arr("download_links").forEach { emit(it.str("url") ?: return@forEach, "${it.str("server_name") ?: "DL"}", it.str("quality"), it.playCookie()) }
+            }
+
+            data.startsWith("oscar://ep/") -> {
+                val rest = data.substringAfter("oscar://ep/", "")
+                val isAnime = rest.substringBefore("/") == "true"
+                val id = rest.substringAfter("/")
+                val apiBase = if (isAnime) "api/anime/episodes" else "api/episodes"
+                val d = call("$apiBase/show.php?id=$id")?.data() ?: return false
+                d.arr("watch_links").forEach { emit(it.str("url") ?: return@forEach, it.str("server_name") ?: "Oscar", it.str("quality"), it.playCookie()) }
+                d.arr("download_links").forEach { emit(it.str("url") ?: return@forEach, "${it.str("server_name") ?: "DL"}", it.str("quality"), it.playCookie()) }
+            }
+        }
+        return got
+    }
 }
