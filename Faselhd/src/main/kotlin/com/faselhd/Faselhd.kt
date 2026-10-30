@@ -69,43 +69,53 @@ class FASELHD(private val context: Context) : MainAPI() {
         var redirectUrl: String? = null
     }
     private suspend fun baseUrl(): String {
+        // إذا كان الرابط النهائي مسجلاً مسبقاً وليس الدومين الوسيط، نستخدمه فوراً
         redirectUrl?.let { 
-            if (!it.contains("fasel-hd.co")) return it 
+            if (!it.contains("fasel-hd.co") && it.contains("faselhdx")) return it 
         }
 
         return cfLock.withLock {
             redirectUrl?.let { 
-                if (!it.contains("fasel-hd.co")) return@withLock it 
+                if (!it.contains("fasel-hd.co") && it.contains("faselhdx")) return@withLock it 
             }
 
-            val gatewayUrl = "https://www.fasel-hd.co"
+            val targetStartUrl = "https://web31312x.faselhdx.bid"
             val cm = CookieManager.getInstance()
-            var cookies = cm.getCookie(gatewayUrl) ?: ""
-            if (!cookies.contains("cf_clearance")) {
-                val activity = context as? Activity
-                CloudflareSolver.solve(activity, "$gatewayUrl/", lastValidUserAgent)
-                cookies = cm.getCookie(gatewayUrl) ?: ""
-            }
-            return@withLock try {
-                val headers = getModernHeaders("$gatewayUrl/").apply {
-                    if (cookies.isNotBlank()) this["Cookie"] = cookies
-                }
+            val activity = context as? Activity
 
-                val response = app.get("$gatewayUrl/", headers = headers, allowRedirects = true)
-                val finalUrl = response.url
+            // 1. تشغيل السولفر لفتح الرابط الأساسي وتخطي الكلاودفلير
+            val doc = CloudflareSolver.solve(activity, targetStartUrl, lastValidUserAgent)
+            var currentDetectedUrl = doc?.baseUri() ?: targetStartUrl
 
-                val parsedUri = Uri.parse(finalUrl)
-                val host = parsedUri.host ?: ""
-                if (host.isNotBlank() && !host.contains("fasel-hd.co")) {
-                    val base = "${parsedUri.scheme ?: "https"}://$host"
-                    redirectUrl = base
-                    base
-                } else {
-                    mainUrl
-                }
-            } catch (e: Exception) {
-                mainUrl
+            // 2. إذا توقف المتصفح عند الدومين الوسيط (fasel-hd.co)، نرسل طلباً حاملاً الكوكيز لإجباره على التحويل للدومين النهائي
+            if (currentDetectedUrl.contains("fasel-hd.co") || currentDetectedUrl.isBlank()) {
+                try {
+                    val cookies = cm.getCookie("https://www.fasel-hd.co") ?: ""
+                    val headers = getModernHeaders("https://www.fasel-hd.co/").apply {
+                        if (cookies.isNotBlank()) this["Cookie"] = cookies
+                    }
+
+                    // طلب مباشر يتبع التحويل من الوسيط إلى الدومين النهائي
+                    val response = app.get("https://www.fasel-hd.co/", headers = headers, allowRedirects = true)
+                    if (response.url.contains("faselhdx")) {
+                        currentDetectedUrl = response.url
+                    }
+                } catch (_: Exception) {}
             }
+
+            // 3. استخراج الدومين النهائي وتثبيته
+            val parsed = Uri.parse(currentDetectedUrl)
+            val host = parsed.host ?: ""
+
+            val finalBase = if (host.contains("faselhdx") && !host.contains("fasel-hd.co")) {
+                "${parsed.scheme ?: "https"}://$host"
+            } else {
+                // دومين احتياطي في حال فشل كل محاولات التحويل
+                "https://web103012x.faselhdx.life"
+            }
+
+            redirectUrl = finalBase
+            finalBase
         }
     }
 
