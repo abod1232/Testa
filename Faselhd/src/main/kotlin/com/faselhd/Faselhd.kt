@@ -870,8 +870,6 @@ class FASELHD(private val context: Context) : MainAPI() {
         for ((index, iframeUrl) in iframeUrls.distinct().withIndex()) {
             Log.d("FASELHD_LOAD", "--------------------------------------------------")
             Log.d("FASELHD_LOAD", "▶ تجربة الـ Iframe رقم (${index + 1}/${iframeUrls.size}): $iframeUrl")
-
-            // تُرجع الآن List<String>
             val caughtM3u8List = resolveWithWebView(iframeUrl, data)
 
             if (caughtM3u8List.isEmpty()) {
@@ -912,8 +910,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 } catch (e: Exception) {
                     Log.w("FASELHD_LOAD", "M3u8Helper failed: ${e.message}")
                 }
-
-                // إذا فشل M3u8Helper نضيف الرابط مباشرة للمشغل
                 if (!successWithHelper) {
                     val label = if (m3u8Url.contains("master")) "Auto / Multi" else "Direct Stream"
                     callback(
