@@ -4,28 +4,33 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.Dialog
 import android.content.Context
+import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import android.util.TypedValue
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowManager
+import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
+import android.webkit.SslErrorHandler
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.FrameLayout
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import okhttp3.CookieJar
 import okhttp3.FormBody
 import okhttp3.Request as OkRequest
@@ -34,28 +39,6 @@ import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
 import kotlin.coroutines.resume
-import kotlin.coroutines.suspendCoroutine
-import android.widget.FrameLayout
-import android.widget.TextView
-import android.graphics.Color
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
-import android.net.Uri
-import android.widget.LinearLayout
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.suspendCancellableCoroutine
-import java.net.HttpURLConnection
-import java.net.URL
-import android.webkit.JavascriptInterface
-import android.widget.ScrollView
-import android.webkit.WebChromeClient
-import android.view.View
-import android.webkit.ConsoleMessage
-import android.graphics.Bitmap
-import java.io.InputStream
-import android.webkit.SslErrorHandler
-import android.widget.Toast
-import com.lagradost.cloudstream3.newMovieSearchResponse
 
 class FASELHD(private val context: Context) : MainAPI() {
     override var name = "FASELHD"
@@ -64,37 +47,51 @@ class FASELHD(private val context: Context) : MainAPI() {
     override var lang = "ar"
     override val hasMainPage = true
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
+
     companion object {
-
         var redirectUrl: String? = null
-
-    }
-    private suspend fun baseUrl(): String {
-        redirectUrl?.let { return it }
-
-        return try {
-            val response = app.get(mainUrl, allowRedirects = true)
-            val finalUrl = response.url
-
-            val base = try {
-                val uri = java.net.URI(finalUrl)
-                "${uri.scheme}://${uri.host}"
-            } catch (e: Exception) {
-                mainUrl
-            }
-
-            redirectUrl = base
-
-            base
-        } catch (e: Exception) {
-            mainUrl
-        }
     }
 
     private val cfLock = Mutex()
     private var lastValidUserAgent =
         "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
 
+    private suspend fun baseUrl(): String {
+        redirectUrl?.let { return it }
+
+        return cfLock.withLock {
+            redirectUrl?.let { return@withLock it }
+
+            var currentUrl = mainUrl
+            try {
+                val response = app.get(currentUrl, headers = getModernHeaders(currentUrl), allowRedirects = true)
+                val finalUrl = response.url
+
+                if (response.code in listOf(403, 503) || !finalUrl.contains("faselhdx")) {
+                    throw IllegalStateException("Needs Cloudflare & JS Redirect resolution")
+                }
+
+                val uri = java.net.URI(finalUrl)
+                val base = "${uri.scheme}://${uri.host}"
+                redirectUrl = base
+                base
+            } catch (e: Exception) {
+                val activity = context as? Activity
+                val resolvedDoc = CloudflareSolver.solve(activity, mainUrl, lastValidUserAgent)
+                val finalDetectedUrl = resolvedDoc?.baseUri() ?: mainUrl
+
+                val base = try {
+                    val uri = java.net.URI(finalDetectedUrl)
+                    "${uri.scheme}://${uri.host}"
+                } catch (_: Exception) {
+                    mainUrl
+                }
+
+                redirectUrl = base
+                base
+            }
+        }
+    }
 
     private fun getModernHeaders(url: String): MutableMap<String, String> {
         val cm = CookieManager.getInstance()
@@ -114,9 +111,11 @@ class FASELHD(private val context: Context) : MainAPI() {
             "priority" to "u=0, i"
         )
     }
+
     private fun getProtectedHeaders(): Map<String, String> {
-        return getModernHeaders(mainUrl)
+        return getModernHeaders(redirectUrl ?: mainUrl)
     }
+
     private suspend fun smartGet(
         url: String,
         referer: String? = null,
@@ -140,36 +139,25 @@ class FASELHD(private val context: Context) : MainAPI() {
                 }
 
                 if (response.code == 429) {
-                    Log.w("FASELHD", "Got 429 on attempt $attempt for $cleanUrl. Retrying in $attempt second(s)...")
                     kotlinx.coroutines.delay(1000L * attempt)
                     continue
                 }
-
-                Log.d("FASELHD", "smartGet returned code ${response.code}. Checking for CF...")
                 break
 
             } catch (e: Exception) {
                 if (e.message?.contains("429") == true) {
-                    Log.w("FASELHD", "Got 429 Exception on attempt $attempt for $cleanUrl. Retrying in $attempt second(s)...")
                     kotlinx.coroutines.delay(1000L * attempt)
                     continue
                 }
-                Log.d("FASELHD", "smartGet Normal request failed: ${e.message}")
                 break
             }
         }
 
         return cfLock.withLock {
             val activity = context as? Activity
-            Log.d("FASELHD", "Invoking CloudflareSolver for: $cleanUrl")
             CloudflareSolver.solve(activity, cleanUrl, lastValidUserAgent) ?: Jsoup.parse("", cleanUrl)
         }
     }
-
-
-
-
-
 
     private suspend fun executeRequestWithCloudflareRetry(requestBlock: suspend (String) -> String): String? {
         val base = baseUrl()
@@ -180,7 +168,6 @@ class FASELHD(private val context: Context) : MainAPI() {
         } catch (e: Exception) {
             if (e.message != "403_FORBIDDEN") return null
         }
-        Log.d("FASELHD_RETRY", "403 Detected. Refreshing CF clearance...")
         try {
             cfLock.withLock {
                 val activity = context as? Activity
@@ -189,16 +176,11 @@ class FASELHD(private val context: Context) : MainAPI() {
             currentCookies = CookieManager.getInstance().getCookie(base) ?: ""
             if (!currentCookies.contains("cf_clearance")) return null
         } catch (e: Exception) { return null }
-        Log.d("FASELHD_RETRY", "Retrying with fresh cookies...")
+
         return try {
             requestBlock(currentCookies)
         } catch (e: Exception) { null }
     }
-
-
-
-
-
 
     private fun Element.toSearchResult(): SearchResponse? {
         val href = this.selectFirst("a")?.attr("href")?.trim() ?: return null
@@ -215,23 +197,27 @@ class FASELHD(private val context: Context) : MainAPI() {
             this.posterHeaders = headers
         }
     }
+
     override val mainPage = mainPageOf(
-        "$mainUrl/main" to "الرئيسية" // تحديث الرابط ليكون /main
+        "" to "الرئيسية"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val url = if (page > 1 && !request.data.endsWith("/main")) {
-            if (request.data.contains("all_movies"))
-                "${request.data.removeSuffix("/")}/page/$page"
+        val base = baseUrl()
+        val targetPath = if (request.data.isBlank()) "$base/main" else request.data
+
+        val url = if (page > 1 && !targetPath.endsWith("/main")) {
+            if (targetPath.contains("all_movies"))
+                "${targetPath.removeSuffix("/")}/page/$page"
             else
-                "${request.data}/page/$page"
+                "${targetPath}/page/$page"
         } else {
-            request.data
+            targetPath
         }
 
         val document = smartGet(url)
         val headers = getProtectedHeaders()
-        if (request.data.endsWith("/main") || request.data == mainUrl) {
+        if (targetPath.endsWith("/main") || targetPath == base || targetPath == mainUrl) {
             val lists = mutableListOf<HomePageList>()
             val sliderItems = document.select("#homeSlide .swiper-slide").mapNotNull {
                 val slideHref = it.selectFirst("a")?.attr("href") ?: return@mapNotNull null
@@ -270,7 +256,8 @@ class FASELHD(private val context: Context) : MainAPI() {
         }
     }
 
-    override suspend fun quickSearch(query: String): List<SearchResponse>? = search(query,1)?.items
+    override suspend fun quickSearch(query: String): List<SearchResponse>? = search(query, 1).items
+
     override suspend fun search(query: String, page: Int): SearchResponseList {
         val base = baseUrl()
         val encoded = URLEncoder.encode(query, "UTF-8")
@@ -292,7 +279,6 @@ class FASELHD(private val context: Context) : MainAPI() {
         val document = try {
             smartGet(finalSearchUrl, referer = base)
         } catch (e: Exception) {
-            Log.d("FASELHD", "search: smartGet failed: ${e.message}")
             Jsoup.parse("", finalSearchUrl)
         }
 
@@ -300,81 +286,72 @@ class FASELHD(private val context: Context) : MainAPI() {
             .mapNotNull { it.toSearchResult() }
         var hasNext = document.select("ul.pagination a[href*='/page/${page + 1}']").isNotEmpty()
 
-            if (items.isEmpty() && page == 1) {
-                try {
-                    val ajaxUrl = "${baseUrl()}/wp-admin/admin-ajax.php"
-                    val formBody = FormBody.Builder()
-                        .add("action", "dtc_live")
-                        .add("trsearch", query)
-                        .build()
-                    val bodyStr = executeRequestWithCloudflareRetry { cookies ->
-                        makeAjaxRequest(ajaxUrl, finalSearchUrl, formBody, cookies)
-                    }
-                    if (!bodyStr.isNullOrBlank()) {
-                        val ajaxDoc = Jsoup.parse(bodyStr, baseUrl()) // يعمل الآن بأمان!
-
-                        items = ajaxDoc.select("div.postDiv, article, .result, .search-item").mapNotNull { it.toSearchResult() }
-                        hasNext = ajaxDoc.select("a.dtc_more").isNotEmpty() ||
-                                ajaxDoc.select("a").any { it.text().contains("المزيد", ignoreCase = true) }
-                        Log.d("FASELHD", "Search fallback: found ${items.size} items from AJAX")
-                    }
-                } catch (e: Exception) {
-                    Log.d("FASELHD", "Search fallback error: ${e.message}")
+        if (items.isEmpty() && page == 1) {
+            try {
+                val ajaxUrl = "${baseUrl()}/wp-admin/admin-ajax.php"
+                val formBody = FormBody.Builder()
+                    .add("action", "dtc_live")
+                    .add("trsearch", query)
+                    .build()
+                val bodyStr = executeRequestWithCloudflareRetry { cookies ->
+                    makeAjaxRequest(ajaxUrl, finalSearchUrl, formBody, cookies)
                 }
-            }
-
-            return newSearchResponseList(items, hasNext)
+                if (!bodyStr.isNullOrBlank()) {
+                    val ajaxDoc = Jsoup.parse(bodyStr, baseUrl())
+                    items = ajaxDoc.select("div.postDiv, article, .result, .search-item").mapNotNull { it.toSearchResult() }
+                    hasNext = ajaxDoc.select("a.dtc_more").isNotEmpty() ||
+                            ajaxDoc.select("a").any { it.text().contains("المزيد", ignoreCase = true) }
+                }
+            } catch (_: Exception) {}
         }
 
-        /**
-         * دالة مساعدة لتنفيذ أي طلب مع إعادة محاولة تلقائية عند فشل Cloudflare.
-         * @param requestBlock دالة تستقبل الكوكيز وتُرجع استجابة الطلب كـ String.
-         * @return String نتيجة الاستجابة الناجحة، أو null إذا فشلت المحاولتان.
-         */
+        return newSearchResponseList(items, hasNext)
+    }
 
-        private suspend fun makeAjaxRequest(
-            ajaxUrl: String,
-            referer: String,
-            formBody: FormBody,
-            cookies: String
-        ): String {
-            val client = app.baseClient.newBuilder()
-                .cookieJar(CookieJar.NO_COOKIES)
-                .followRedirects(false) // معالجة التحويلات يدوياً للحفاظ على POST
-                .build()
+    private suspend fun makeAjaxRequest(
+        ajaxUrl: String,
+        referer: String,
+        formBody: FormBody,
+        cookies: String
+    ): String {
+        val client = app.baseClient.newBuilder()
+            .cookieJar(CookieJar.NO_COOKIES)
+            .followRedirects(false)
+            .build()
 
-            var currentUrl = ajaxUrl
-            var redirectCount = 0
+        var currentUrl = ajaxUrl
+        var redirectCount = 0
 
-            while (redirectCount < 5) {
-                val requestBuilder = OkRequest.Builder()
-                    .url(currentUrl)
-                    .post(formBody)
-                    .header("User-Agent", lastValidUserAgent)
-                    .header("Referer", referer)
-                if (cookies.isNotBlank()) requestBuilder.header("Cookie", cookies)
+        while (redirectCount < 5) {
+            val requestBuilder = OkRequest.Builder()
+                .url(currentUrl)
+                .post(formBody)
+                .header("User-Agent", lastValidUserAgent)
+                .header("Referer", referer)
+            if (cookies.isNotBlank()) requestBuilder.header("Cookie", cookies)
 
-                val response = withContext(Dispatchers.IO) { client.newCall(requestBuilder.build()).execute() }
+            val response = withContext(Dispatchers.IO) { client.newCall(requestBuilder.build()).execute() }
 
-                response.use { res ->
-                    when (res.code) {
-                        403 -> throw IllegalStateException("403_FORBIDDEN")
-                        301, 302, 307, 308 -> {
-                            val location = res.header("Location")
-                            if (location != null) {
-                                currentUrl = if (location.startsWith("http")) location else "${baseUrl()}$location"
-                                redirectCount++
-                            } else {
-                                return ""
-                            }
+            response.use { res ->
+                when (res.code) {
+                    403 -> throw IllegalStateException("403_FORBIDDEN")
+                    301, 302, 307, 308 -> {
+                        val location = res.header("Location")
+                        if (location != null) {
+                            currentUrl = if (location.startsWith("http")) location else "${baseUrl()}$location"
+                            redirectCount++
+                        } else {
+                            return ""
                         }
-                        200 -> return res.body?.string() ?: ""
-                        else -> return ""
                     }
+                    200 -> return res.body?.string() ?: ""
+                    else -> return ""
                 }
             }
-            return "" // تم الوصول للحد الأقصى للتحويلات
         }
+        return ""
+    }
+
     override suspend fun load(url: String): LoadResponse? {
         val base = baseUrl()
         val absoluteUrl = if (url.startsWith("/")) "$base$url" else url
@@ -432,7 +409,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 }
             }
             if (currentSeasonIndex == -1) currentSeasonIndex = 0
-
 
             var fakeSeasonCounter = 2
             for (i in 0 until seasonCards.size) {
@@ -501,6 +477,7 @@ class FASELHD(private val context: Context) : MainAPI() {
             }
         }
     }
+
     private fun extractIframeSources(doc: Document): List<String> {
         val results = mutableSetOf<String>()
         val blockedKeywords = listOf(
@@ -508,7 +485,7 @@ class FASELHD(private val context: Context) : MainAPI() {
             "google.com/ads",
             "googlesyndication.com",
             "googletagmanager.com",
-            "?p=" // استبعاد الروابط المختصرة للصفحة نفسها
+            "?p="
         )
 
         fun addResult(url: String) {
@@ -519,10 +496,12 @@ class FASELHD(private val context: Context) : MainAPI() {
                 }
             }
         }
+
         doc.select("iframe[src]").forEach { el ->
             val src = el.attr("src")
             if (src.isNotBlank()) addResult(src)
         }
+
         val onClickRegex = Regex("""player_iframe\.location\.href\s*=\s*['"]([^'"]+)['"]""")
         doc.select("[onclick]").forEach { el ->
             val onclick = el.attr("onclick")
@@ -530,6 +509,7 @@ class FASELHD(private val context: Context) : MainAPI() {
                 addResult(match.groupValues[1])
             }
         }
+
         val scriptRegex = Regex("""https?://[^\s"'<>]+""")
         doc.select("script").forEach { s ->
             val data = s.data()
@@ -545,7 +525,6 @@ class FASELHD(private val context: Context) : MainAPI() {
 
         return results.toList()
     }
-
 
     @SuppressLint("SetJavaScriptEnabled")
     private suspend fun resolveWithWebView(
@@ -620,6 +599,7 @@ class FASELHD(private val context: Context) : MainAPI() {
             val handler = Handler(Looper.getMainLooper())
             var timeoutRunnable: Runnable? = null
             var autoStepRunnable: Runnable? = null
+            var hasQualityButtons = false
 
             fun cleanup() {
                 try { timeoutRunnable?.let { handler.removeCallbacks(it) } } catch (_: Exception) {}
@@ -640,11 +620,25 @@ class FASELHD(private val context: Context) : MainAPI() {
                 cleanup()
             }
 
+            fun startDirectPlayback() {
+                val js = """
+                (function() {
+                    try {
+                        let p = typeof window.jwplayer === 'function' ? window.jwplayer("player") : null;
+                        if (p && typeof p.play === 'function') { p.setMute(true); p.play(); }
+                        let playBtns = document.querySelectorAll('.jw-display-icon-display, .vjs-big-play-button, button, video, [onclick*="play"]');
+                        playBtns.forEach(b => { try { b.click(); } catch(e){} });
+                    } catch(e){}
+                })();
+                """.trimIndent()
+                activity.runOnUiThread { webView.evaluateJavascript(js, null) }
+            }
+
             fun clickQuality(qualityLabel: String) {
                 val js = """
                 (function() {
                     let clicked = false;
-                    let els = document.querySelectorAll('ul.quality_ch li, .quality_ch > *, [class*="quality"] li, .jw-settings-content-item, button');
+                    let els = document.querySelectorAll('ul.quality_ch li, .quality_ch > *, [class*="quality"] li, .jw-settings-content-item');
                     for (let el of els) {
                         let txt = (el.innerText || el.textContent || '').trim().toLowerCase();
                         if (txt.includes('$qualityLabel'.toLowerCase())) {
@@ -655,10 +649,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                             clicked = true;
                             break;
                         }
-                    }
-                    if (!clicked) {
-                        let p = typeof window.jwplayer === 'function' ? window.jwplayer("player") : null;
-                        if (p && typeof p.play === 'function') { p.setMute(true); p.play(); }
                     }
                 })();
                 """.trimIndent()
@@ -682,7 +672,7 @@ class FASELHD(private val context: Context) : MainAPI() {
                     currentQualityIndex++
                     scheduleNextQuality()
                 }
-                handler.postDelayed(autoStepRunnable!!, 2500)
+                handler.postDelayed(autoStepRunnable!!, 2000)
             }
 
             fun handleFoundLink(url: String) {
@@ -694,9 +684,13 @@ class FASELHD(private val context: Context) : MainAPI() {
                     foundM3u8.add(url)
                 }
 
-                handler.post {
-                    currentQualityIndex++
-                    scheduleNextQuality()
+                if (!hasQualityButtons) {
+                    handler.postDelayed({ safeFinish() }, 600)
+                } else {
+                    handler.post {
+                        currentQualityIndex++
+                        scheduleNextQuality()
+                    }
                 }
             }
 
@@ -732,6 +726,15 @@ class FASELHD(private val context: Context) : MainAPI() {
             })();
             """.trimIndent()
 
+            val checkQualityButtonsJs = """
+            (function() {
+                let els = document.querySelectorAll('ul.quality_ch li, .quality_ch > *, [class*="quality"] li');
+                if (els && els.length > 0) {
+                    console.log('HAS_QUALITY_BUTTONS');
+                }
+            })();
+            """.trimIndent()
+
             webView.webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                     val url = request?.url.toString().lowercase()
@@ -744,7 +747,13 @@ class FASELHD(private val context: Context) : MainAPI() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     view?.evaluateJavascript(fastSnifferJs, null)
-                    handler.postDelayed({ scheduleNextQuality() }, 1200)
+                    view?.evaluateJavascript(checkQualityButtonsJs, null)
+
+                    startDirectPlayback()
+
+                    handler.postDelayed({
+                        scheduleNextQuality()
+                    }, 1000)
                 }
 
                 override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
@@ -768,13 +777,15 @@ class FASELHD(private val context: Context) : MainAPI() {
                     val msg = cm?.message() ?: ""
                     if (msg.startsWith("NET_M3U8::")) {
                         handleFoundLink(msg.substringAfter("::").trim())
+                    } else if (msg == "HAS_QUALITY_BUTTONS") {
+                        hasQualityButtons = true
                     }
                     return true
                 }
             }
 
             timeoutRunnable = Runnable { safeFinish() }
-            handler.postDelayed(timeoutRunnable!!, 8500L)
+            handler.postDelayed(timeoutRunnable!!, 8000L)
 
             webView.loadUrl(finalUrl, mapOf("Referer" to referer))
 
