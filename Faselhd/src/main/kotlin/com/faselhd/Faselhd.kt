@@ -4,33 +4,28 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.Dialog
 import android.content.Context
-import android.graphics.Bitmap
-import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.util.TypedValue
 import android.view.Gravity
-import android.view.View
 import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowManager
-import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
-import android.webkit.SslErrorHandler
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.FrameLayout
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 import okhttp3.CookieJar
 import okhttp3.FormBody
 import okhttp3.Request as OkRequest
@@ -39,6 +34,28 @@ import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
 import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
+import android.widget.FrameLayout
+import android.widget.TextView
+import android.graphics.Color
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.net.Uri
+import android.widget.LinearLayout
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.suspendCancellableCoroutine
+import java.net.HttpURLConnection
+import java.net.URL
+import android.webkit.JavascriptInterface
+import android.widget.ScrollView
+import android.webkit.WebChromeClient
+import android.view.View
+import android.webkit.ConsoleMessage
+import android.graphics.Bitmap
+import java.io.InputStream
+import android.webkit.SslErrorHandler
+import android.widget.Toast
+import com.lagradost.cloudstream3.newMovieSearchResponse
 
 class FASELHD(private val context: Context) : MainAPI() {
     override var name = "FASELHD"
@@ -52,46 +69,44 @@ class FASELHD(private val context: Context) : MainAPI() {
         var redirectUrl: String? = null
     }
 
-    private val cfLock = Mutex()
-    private var lastValidUserAgent =
-        "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
-
+    // التعديل البسيط والآمن لتحديث الرابط وتتبع سلسلة التحويلات
     private suspend fun baseUrl(): String {
         redirectUrl?.let { return it }
 
-        return cfLock.withLock {
-            redirectUrl?.let { return@withLock it }
+        return try {
+            val response = app.get(mainUrl, allowRedirects = true)
+            val finalUrl = response.url
 
-            var currentUrl = mainUrl
-            try {
-                val response = app.get(currentUrl, headers = getModernHeaders(currentUrl), allowRedirects = true)
-                val finalUrl = response.url
-
-                if (response.code in listOf(403, 503) || !finalUrl.contains("faselhdx")) {
-                    throw IllegalStateException("Needs Cloudflare & JS Redirect resolution")
-                }
-
-                val uri = java.net.URI(finalUrl)
-                val base = "${uri.scheme}://${uri.host}"
-                redirectUrl = base
-                base
-            } catch (e: Exception) {
+            // إذا توقف عند صفحة Cloudflare الوسيطة، نطلب من السولفر الدومين النهائي
+            if (response.code in listOf(403, 503) || finalUrl.contains("fasel-hd.co")) {
                 val activity = context as? Activity
                 val resolvedDoc = CloudflareSolver.solve(activity, mainUrl, lastValidUserAgent)
-                val finalDetectedUrl = resolvedDoc?.baseUri() ?: mainUrl
-
                 val base = try {
-                    val uri = java.net.URI(finalDetectedUrl)
+                    val uri = java.net.URI(resolvedDoc?.baseUri() ?: finalUrl)
                     "${uri.scheme}://${uri.host}"
-                } catch (_: Exception) {
+                } catch (e: Exception) {
                     mainUrl
                 }
-
+                redirectUrl = base
+                base
+            } else {
+                val base = try {
+                    val uri = java.net.URI(finalUrl)
+                    "${uri.scheme}://${uri.host}"
+                } catch (e: Exception) {
+                    mainUrl
+                }
                 redirectUrl = base
                 base
             }
+        } catch (e: Exception) {
+            mainUrl
         }
     }
+
+    private val cfLock = Mutex()
+    private var lastValidUserAgent =
+        "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
 
     private fun getModernHeaders(url: String): MutableMap<String, String> {
         val cm = CookieManager.getInstance()
@@ -113,7 +128,7 @@ class FASELHD(private val context: Context) : MainAPI() {
     }
 
     private fun getProtectedHeaders(): Map<String, String> {
-        return getModernHeaders(redirectUrl ?: mainUrl)
+        return getModernHeaders(mainUrl)
     }
 
     private suspend fun smartGet(
@@ -199,25 +214,25 @@ class FASELHD(private val context: Context) : MainAPI() {
     }
 
     override val mainPage = mainPageOf(
-        "" to "الرئيسية"
+        "$mainUrl/main" to "الرئيسية"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val base = baseUrl()
-        val targetPath = if (request.data.isBlank()) "$base/main" else request.data
+        val fixedData = request.data.replace(mainUrl, base)
 
-        val url = if (page > 1 && !targetPath.endsWith("/main")) {
-            if (targetPath.contains("all_movies"))
-                "${targetPath.removeSuffix("/")}/page/$page"
+        val url = if (page > 1 && !fixedData.endsWith("/main")) {
+            if (fixedData.contains("all_movies"))
+                "${fixedData.removeSuffix("/")}/page/$page"
             else
-                "${targetPath}/page/$page"
+                "${fixedData}/page/$page"
         } else {
-            targetPath
+            fixedData
         }
 
         val document = smartGet(url)
         val headers = getProtectedHeaders()
-        if (targetPath.endsWith("/main") || targetPath == base || targetPath == mainUrl) {
+        if (fixedData.endsWith("/main") || fixedData == base || fixedData == mainUrl) {
             val lists = mutableListOf<HomePageList>()
             val sliderItems = document.select("#homeSlide .swiper-slide").mapNotNull {
                 val slideHref = it.selectFirst("a")?.attr("href") ?: return@mapNotNull null
@@ -599,7 +614,6 @@ class FASELHD(private val context: Context) : MainAPI() {
             val handler = Handler(Looper.getMainLooper())
             var timeoutRunnable: Runnable? = null
             var autoStepRunnable: Runnable? = null
-            var hasQualityButtons = false
 
             fun cleanup() {
                 try { timeoutRunnable?.let { handler.removeCallbacks(it) } } catch (_: Exception) {}
@@ -620,25 +634,11 @@ class FASELHD(private val context: Context) : MainAPI() {
                 cleanup()
             }
 
-            fun startDirectPlayback() {
-                val js = """
-                (function() {
-                    try {
-                        let p = typeof window.jwplayer === 'function' ? window.jwplayer("player") : null;
-                        if (p && typeof p.play === 'function') { p.setMute(true); p.play(); }
-                        let playBtns = document.querySelectorAll('.jw-display-icon-display, .vjs-big-play-button, button, video, [onclick*="play"]');
-                        playBtns.forEach(b => { try { b.click(); } catch(e){} });
-                    } catch(e){}
-                })();
-                """.trimIndent()
-                activity.runOnUiThread { webView.evaluateJavascript(js, null) }
-            }
-
             fun clickQuality(qualityLabel: String) {
                 val js = """
                 (function() {
                     let clicked = false;
-                    let els = document.querySelectorAll('ul.quality_ch li, .quality_ch > *, [class*="quality"] li, .jw-settings-content-item');
+                    let els = document.querySelectorAll('ul.quality_ch li, .quality_ch > *, [class*="quality"] li, .jw-settings-content-item, button');
                     for (let el of els) {
                         let txt = (el.innerText || el.textContent || '').trim().toLowerCase();
                         if (txt.includes('$qualityLabel'.toLowerCase())) {
@@ -649,6 +649,10 @@ class FASELHD(private val context: Context) : MainAPI() {
                             clicked = true;
                             break;
                         }
+                    }
+                    if (!clicked) {
+                        let p = typeof window.jwplayer === 'function' ? window.jwplayer("player") : null;
+                        if (p && typeof p.play === 'function') { p.setMute(true); p.play(); }
                     }
                 })();
                 """.trimIndent()
@@ -672,7 +676,7 @@ class FASELHD(private val context: Context) : MainAPI() {
                     currentQualityIndex++
                     scheduleNextQuality()
                 }
-                handler.postDelayed(autoStepRunnable!!, 2000)
+                handler.postDelayed(autoStepRunnable!!, 2500)
             }
 
             fun handleFoundLink(url: String) {
@@ -684,13 +688,9 @@ class FASELHD(private val context: Context) : MainAPI() {
                     foundM3u8.add(url)
                 }
 
-                if (!hasQualityButtons) {
-                    handler.postDelayed({ safeFinish() }, 600)
-                } else {
-                    handler.post {
-                        currentQualityIndex++
-                        scheduleNextQuality()
-                    }
+                handler.post {
+                    currentQualityIndex++
+                    scheduleNextQuality()
                 }
             }
 
@@ -726,15 +726,6 @@ class FASELHD(private val context: Context) : MainAPI() {
             })();
             """.trimIndent()
 
-            val checkQualityButtonsJs = """
-            (function() {
-                let els = document.querySelectorAll('ul.quality_ch li, .quality_ch > *, [class*="quality"] li');
-                if (els && els.length > 0) {
-                    console.log('HAS_QUALITY_BUTTONS');
-                }
-            })();
-            """.trimIndent()
-
             webView.webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                     val url = request?.url.toString().lowercase()
@@ -747,13 +738,7 @@ class FASELHD(private val context: Context) : MainAPI() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     view?.evaluateJavascript(fastSnifferJs, null)
-                    view?.evaluateJavascript(checkQualityButtonsJs, null)
-
-                    startDirectPlayback()
-
-                    handler.postDelayed({
-                        scheduleNextQuality()
-                    }, 1000)
+                    handler.postDelayed({ scheduleNextQuality() }, 1200)
                 }
 
                 override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
@@ -777,15 +762,13 @@ class FASELHD(private val context: Context) : MainAPI() {
                     val msg = cm?.message() ?: ""
                     if (msg.startsWith("NET_M3U8::")) {
                         handleFoundLink(msg.substringAfter("::").trim())
-                    } else if (msg == "HAS_QUALITY_BUTTONS") {
-                        hasQualityButtons = true
                     }
                     return true
                 }
             }
 
             timeoutRunnable = Runnable { safeFinish() }
-            handler.postDelayed(timeoutRunnable!!, 8000L)
+            handler.postDelayed(timeoutRunnable!!, 8500L)
 
             webView.loadUrl(finalUrl, mapOf("Referer" to referer))
 
