@@ -575,16 +575,12 @@ class FASELHD(private val context: Context) : MainAPI() {
             val dialog = Dialog(activity, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
             dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
             dialog.setCancelable(true) // يمكنك إغلاقها بالرجوع
-
-            // إنشاء الحاوية الرئيسية (شاشة كاملة)
             val rootLayout = FrameLayout(activity).apply {
                 layoutParams = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
             }
-
-            // إعداد الـ WebView ليكون ظاهراً بملء الشاشة
             val webView = WebView(activity).apply {
                 layoutParams = FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
@@ -593,8 +589,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 visibility = View.VISIBLE
             }
             rootLayout.addView(webView)
-
-            // إنشاء قائمة جانبية عائمة (Floating Sidebar)
             val sidePanelScroll = ScrollView(activity).apply {
                 layoutParams = FrameLayout.LayoutParams(
                     TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 150f, resources.displayMetrics).toInt(),
@@ -625,8 +619,6 @@ class FASELHD(private val context: Context) : MainAPI() {
 
             dialog.setContentView(rootLayout)
             dialog.show()
-
-            // إعدادات الـ WebView
             webView.settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
@@ -674,13 +666,10 @@ class FASELHD(private val context: Context) : MainAPI() {
                     if (!foundM3u8.contains(url)) {
                         foundM3u8.add(url)
                         Log.d("FASEL_INSPECT", "🎯 تم التقاط رابط (.m3u8): $url")
-                        // إشعار مرئي
                         Toast.makeText(activity, "تم التقاط m3u8!", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
-
-            // كود JavaScript لاستخراج الأزرار وعناصر الجودة وإرسالها للـ Android
             class InspectBridge {
                 @JavascriptInterface
                 fun onButtonsFound(buttonsJson: String) {
@@ -689,8 +678,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                             val array = org.json.JSONArray(buttonsJson)
                             buttonContainer.removeAllViews()
                             buttonContainer.addView(panelTitle)
-
-                            // إضافة زر لإعادة المسح
                             val refreshBtn = android.widget.Button(activity).apply {
                                 text = "🔄 إعادة مسح"
                                 textSize = 10f
@@ -750,7 +737,6 @@ class FASELHD(private val context: Context) : MainAPI() {
             (function() {
                 window.__scanQualityButtons = function() {
                     let results = [];
-                    // البحث عن عناصر الجودة في faselhd ومشغل jwplayer ومحددات quality_ch
                     let targets = document.querySelectorAll('.quality_ch, ul.quality_ch li, [class*="quality"], [id*="quality"], button, .jw-settings-content-item, .jw-reset-text');
                     targets.forEach((el, idx) => {
                         let txt = (el.innerText || el.textContent || '').trim();
@@ -766,8 +752,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                         window.InspectBridge.onButtonsFound(JSON.stringify(results));
                     }
                 };
-
-                // تشغيل تلقائي أولي بعد استقرار المشغل
                 setTimeout(window.__scanQualityButtons, 2000);
                 setTimeout(window.__scanQualityButtons, 4000);
             })();
@@ -838,8 +822,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                     return true
                 }
             }
-
-            // زر إنهاء واختيار في الزاوية اليسرى السفلية لإغلاق الفحص
             val finishManualBtn = android.widget.Button(activity).apply {
                 text = "حفظ وإنهاء ✔"
                 setTextColor(Color.WHITE)
