@@ -68,16 +68,12 @@ class FASELHD(private val context: Context) : MainAPI() {
     companion object {
         var redirectUrl: String? = null
     }
-
-    // التعديل البسيط والآمن لتحديث الرابط وتتبع سلسلة التحويلات
     private suspend fun baseUrl(): String {
         redirectUrl?.let { return it }
 
         return try {
             val response = app.get(mainUrl, allowRedirects = true)
             val finalUrl = response.url
-
-            // إذا توقف عند صفحة Cloudflare الوسيطة، نطلب من السولفر الدومين النهائي
             if (response.code in listOf(403, 503) || finalUrl.contains("fasel-hd.co")) {
                 val activity = context as? Activity
                 val resolvedDoc = CloudflareSolver.solve(activity, mainUrl, lastValidUserAgent)
