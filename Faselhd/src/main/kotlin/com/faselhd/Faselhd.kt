@@ -4,7 +4,6 @@ override val mainPage = mainPageOf(
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val base = baseUrl()
-        // استبدال آمن فقط إذا كان الرابط يبدأ بـ mainUrl
         val fixedUrl = if (request.data.startsWith(mainUrl)) {
             request.data.replace(mainUrl, base)
         } else {
