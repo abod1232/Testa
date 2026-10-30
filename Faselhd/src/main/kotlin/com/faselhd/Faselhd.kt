@@ -507,31 +507,36 @@ class FASELHD(private val context: Context) : MainAPI() {
             "google.com/recaptcha",
             "google.com/ads",
             "googlesyndication.com",
-            "googletagmanager.com"
+            "googletagmanager.com",
+            "?p=" // استبعاد الروابط المختصرة للصفحة نفسها
         )
-        fun addResult(url: String, sourceTag: String) {
+
+        fun addResult(url: String) {
             val fixedUrl = fixUrl(url)
             if (blockedKeywords.none { fixedUrl.contains(it) }) {
-                Log.d("FASELHD_IFRAME", " [مقبول] تم العثور على رابط من ($sourceTag): $fixedUrl")
-                results.add(fixedUrl)
-            } else {
-                Log.d("FASELHD_IFRAME", " [مستبعد] رابط إعلاني أو تحقق من ($sourceTag): $fixedUrl")
+                // التأكد أنه رابط مشغل فيديو فعلي
+                if (fixedUrl.contains("player") || fixedUrl.contains("embed") || fixedUrl.contains("video")) {
+                    results.add(fixedUrl)
+                }
             }
         }
 
-        Log.d("FASELHD_IFRAME", "========== بدء استخراج الإطارات (iframes) ==========")
-        Log.d("FASELHD_IFRAME", "رابط الصفحة الأساسي: ${doc.baseUri()}")
+        // 1. وسوم iframe الأساسية
         doc.select("iframe[src]").forEach { el ->
             val src = el.attr("src")
-            if (src.isNotBlank()) addResult(src, "iframe[src]")
+            if (src.isNotBlank()) addResult(src)
         }
+
+        // 2. أحداث النقر الخاصة بتبديل السيرفرات (player_iframe)
         val onClickRegex = Regex("""player_iframe\.location\.href\s*=\s*['"]([^'"]+)['"]""")
         doc.select("[onclick]").forEach { el ->
             val onclick = el.attr("onclick")
             onClickRegex.find(onclick)?.let { match ->
-                addResult(match.groupValues[1], "onclick (player_iframe)")
+                addResult(match.groupValues[1])
             }
         }
+
+        // 3. نصوص الجافاسكريبت المضمنة
         val scriptRegex = Regex("""https?://[^\s"'<>]+""")
         doc.select("script").forEach { s ->
             val data = s.data()
@@ -539,17 +544,12 @@ class FASELHD(private val context: Context) : MainAPI() {
                 scriptRegex.findAll(data).forEach { m ->
                     val url = m.value
                     if (url.contains("player") || url.contains("embed")) {
-                        addResult(url, "inline script")
+                        addResult(url)
                     }
                 }
             }
         }
-        doc.select("div.shortLink, span#liskSh, a[data-src]").forEach { el ->
-            val text = el.text().trim()
-            if (text.startsWith("http")) addResult(text, "server link element")
-        }
 
-        Log.d("FASELHD_IFRAME", "========== إجمالي الروابط الصالحة المكتشفة: ${results.size} ==========")
         return results.toList()
     }
 
@@ -574,6 +574,7 @@ class FASELHD(private val context: Context) : MainAPI() {
             dialog.setCancelable(false)
             dialog.setCanceledOnTouchOutside(false)
             dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+
             dialog.window?.apply {
                 setBackgroundDrawableResource(android.R.color.transparent)
                 setDimAmount(0f)
@@ -645,6 +646,7 @@ class FASELHD(private val context: Context) : MainAPI() {
                 try { if (cont.isActive) cont.resume(list) } catch (_: Exception) {}
                 cleanup()
             }
+
             fun clickQuality(qualityLabel: String) {
                 val js = """
                 (function() {
@@ -657,7 +659,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                                 el.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
                             });
                             if (typeof el.onclick === 'function') { el.onclick(); }
-                            console.log('AUTO_CLICKED::' + txt);
                             clicked = true;
                             break;
                         }
@@ -670,20 +671,20 @@ class FASELHD(private val context: Context) : MainAPI() {
                 """.trimIndent()
                 activity.runOnUiThread { webView.evaluateJavascript(js, null) }
             }
+
             val qualitiesToTest = listOf("1080", "720", "360")
             var currentQualityIndex = 0
 
             fun scheduleNextQuality() {
                 autoStepRunnable?.let { handler.removeCallbacks(it) }
                 if (currentQualityIndex >= qualitiesToTest.size) {
-                    Log.d("FASEL_AUTO", " اكتملت تجربة جميع الجودات لهذا الـ Iframe.")
                     safeFinish()
                     return
                 }
 
                 val currentTarget = qualitiesToTest[currentQualityIndex]
-                Log.d("FASEL_AUTO", " جاري محاكاة الضغط على جودة: ${currentTarget}p...")
                 clickQuality(currentTarget)
+
                 autoStepRunnable = Runnable {
                     currentQualityIndex++
                     scheduleNextQuality()
@@ -694,17 +695,18 @@ class FASELHD(private val context: Context) : MainAPI() {
             fun handleFoundLink(url: String) {
                 val clean = url.substringBefore("?")
                 if (!clean.endsWith(".m3u8")) return
+
                 synchronized(foundM3u8) {
                     if (foundM3u8.contains(url)) return
                     foundM3u8.add(url)
                 }
 
-                Log.d("FASEL_AUTO", "🎯 تم صيد رابط بنجاح: $url")
                 handler.post {
                     currentQualityIndex++
                     scheduleNextQuality()
                 }
             }
+
             val fastSnifferJs = """
             (function() {
                 try {
@@ -749,9 +751,7 @@ class FASELHD(private val context: Context) : MainAPI() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     view?.evaluateJavascript(fastSnifferJs, null)
-                    handler.postDelayed({
-                        scheduleNextQuality()
-                    }, 1200)
+                    handler.postDelayed({ scheduleNextQuality() }, 1200)
                 }
 
                 override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
@@ -779,6 +779,7 @@ class FASELHD(private val context: Context) : MainAPI() {
                     return true
                 }
             }
+
             timeoutRunnable = Runnable { safeFinish() }
             handler.postDelayed(timeoutRunnable!!, 8500L)
 
@@ -794,26 +795,17 @@ class FASELHD(private val context: Context) : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        Log.d("FASELHD_LOAD", "========== بدء استخراج السيرفرات: $data ==========")
         val doc = smartGet(data)
         val iframeUrls = extractIframeSources(doc)
 
-        if (iframeUrls.isEmpty()) {
-            Log.e("FASELHD_LOAD", "❌ لم يتم العثور على أي Iframe")
-            return false
-        }
+        if (iframeUrls.isEmpty()) return false
 
         var totalExtractedLinks = 0
         val cm = CookieManager.getInstance()
+
         for ((index, iframeUrl) in iframeUrls.distinct().withIndex()) {
-            Log.d("FASELHD_LOAD", "▶ جلب الروابط من الـ Iframe (${index + 1}/${iframeUrls.size}): $iframeUrl")
-
             val caughtM3u8List = resolveWithWebView(iframeUrl, data)
-
-            if (caughtM3u8List.isEmpty()) {
-                Log.w("FASELHD_LOAD", "⚠️ لم يتم التقاط روابط من هذا الـ Iframe.")
-                continue
-            }
+            if (caughtM3u8List.isEmpty()) continue
 
             val iframeUri = try { Uri.parse(iframeUrl) } catch (e: Exception) { null }
             val iframeOrigin = if (iframeUri != null && iframeUri.host != null) "${iframeUri.scheme}://${iframeUri.host}" else iframeUrl
@@ -828,6 +820,7 @@ class FASELHD(private val context: Context) : MainAPI() {
                 if (streamCookies.isNotBlank()) {
                     streamHeaders["Cookie"] = streamCookies
                 }
+
                 val (qName, qValue) = when {
                     m3u8Url.contains("1080") -> "1080p" to Qualities.P1080.value
                     m3u8Url.contains("720") -> "720p" to Qualities.P720.value
@@ -836,6 +829,7 @@ class FASELHD(private val context: Context) : MainAPI() {
                     m3u8Url.contains("master") -> "Auto" to Qualities.Unknown.value
                     else -> "Server ${index + 1}" to Qualities.Unknown.value
                 }
+
                 callback(
                     newExtractorLink(
                         source = name,
@@ -852,8 +846,6 @@ class FASELHD(private val context: Context) : MainAPI() {
             }
         }
 
-        Log.d("FASELHD_LOAD", "🏁 إجمالي الروابط المرسلة للمشغل: $totalExtractedLinks")
         return totalExtractedLinks > 0
     }
-    
 }
