@@ -64,54 +64,37 @@ class FASELHD(private val context: Context) : MainAPI() {
     override var lang = "ar"
     override val hasMainPage = true
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
-
     companion object {
+
         var redirectUrl: String? = null
+
     }
     private suspend fun baseUrl(): String {
-        redirectUrl?.let { 
-            if (!it.contains("fasel-hd.co") && it.contains("faselhdx")) return it 
-        }
+        redirectUrl?.let { return it }
 
-        return cfLock.withLock {
-            redirectUrl?.let { 
-                if (!it.contains("fasel-hd.co") && it.contains("faselhdx")) return@withLock it 
+        return try {
+            val response = app.get(mainUrl, allowRedirects = true)
+            val finalUrl = response.url
+
+            val base = try {
+                val uri = java.net.URI(finalUrl)
+                "${uri.scheme}://${uri.host}"
+            } catch (e: Exception) {
+                mainUrl
             }
 
-            val targetStartUrl = "https://web31312x.faselhdx.bid"
-            val cm = CookieManager.getInstance()
-            val activity = context as? Activity
-            val doc = CloudflareSolver.solve(activity, targetStartUrl, lastValidUserAgent)
-            var currentDetectedUrl = doc?.baseUri() ?: targetStartUrl
-            if (currentDetectedUrl.contains("fasel-hd.co") || currentDetectedUrl.isBlank()) {
-                try {
-                    val cookies = cm.getCookie("https://www.fasel-hd.co") ?: ""
-                    val headers = getModernHeaders("https://www.fasel-hd.co/").apply {
-                        if (cookies.isNotBlank()) this["Cookie"] = cookies
-                    }
-                    val response = app.get("https://www.fasel-hd.co/", headers = headers, allowRedirects = true)
-                    if (response.url.contains("faselhdx")) {
-                        currentDetectedUrl = response.url
-                    }
-                } catch (_: Exception) {}
-            }
-            val parsed = Uri.parse(currentDetectedUrl)
-            val host = parsed.host ?: ""
+            redirectUrl = base
 
-            val finalBase = if (host.contains("faselhdx") && !host.contains("fasel-hd.co")) {
-                "${parsed.scheme ?: "https"}://$host"
-            } else {
-                "https://web103012x.faselhdx.life"
-            }
-
-            redirectUrl = finalBase
-            finalBase
+            base
+        } catch (e: Exception) {
+            mainUrl
         }
     }
 
     private val cfLock = Mutex()
     private var lastValidUserAgent =
         "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+
 
     private fun getModernHeaders(url: String): MutableMap<String, String> {
         val cm = CookieManager.getInstance()
@@ -131,11 +114,9 @@ class FASELHD(private val context: Context) : MainAPI() {
             "priority" to "u=0, i"
         )
     }
-
     private fun getProtectedHeaders(): Map<String, String> {
         return getModernHeaders(mainUrl)
     }
-
     private suspend fun smartGet(
         url: String,
         referer: String? = null,
@@ -159,25 +140,36 @@ class FASELHD(private val context: Context) : MainAPI() {
                 }
 
                 if (response.code == 429) {
+                    Log.w("FASELHD", "Got 429 on attempt $attempt for $cleanUrl. Retrying in $attempt second(s)...")
                     kotlinx.coroutines.delay(1000L * attempt)
                     continue
                 }
+
+                Log.d("FASELHD", "smartGet returned code ${response.code}. Checking for CF...")
                 break
 
             } catch (e: Exception) {
                 if (e.message?.contains("429") == true) {
+                    Log.w("FASELHD", "Got 429 Exception on attempt $attempt for $cleanUrl. Retrying in $attempt second(s)...")
                     kotlinx.coroutines.delay(1000L * attempt)
                     continue
                 }
+                Log.d("FASELHD", "smartGet Normal request failed: ${e.message}")
                 break
             }
         }
 
         return cfLock.withLock {
             val activity = context as? Activity
+            Log.d("FASELHD", "Invoking CloudflareSolver for: $cleanUrl")
             CloudflareSolver.solve(activity, cleanUrl, lastValidUserAgent) ?: Jsoup.parse("", cleanUrl)
         }
     }
+
+
+
+
+
 
     private suspend fun executeRequestWithCloudflareRetry(requestBlock: suspend (String) -> String): String? {
         val base = baseUrl()
@@ -188,6 +180,7 @@ class FASELHD(private val context: Context) : MainAPI() {
         } catch (e: Exception) {
             if (e.message != "403_FORBIDDEN") return null
         }
+        Log.d("FASELHD_RETRY", "403 Detected. Refreshing CF clearance...")
         try {
             cfLock.withLock {
                 val activity = context as? Activity
@@ -196,11 +189,16 @@ class FASELHD(private val context: Context) : MainAPI() {
             currentCookies = CookieManager.getInstance().getCookie(base) ?: ""
             if (!currentCookies.contains("cf_clearance")) return null
         } catch (e: Exception) { return null }
-
+        Log.d("FASELHD_RETRY", "Retrying with fresh cookies...")
         return try {
             requestBlock(currentCookies)
         } catch (e: Exception) { null }
     }
+
+
+
+
+
 
     private fun Element.toSearchResult(): SearchResponse? {
         val href = this.selectFirst("a")?.attr("href")?.trim() ?: return null
@@ -217,33 +215,23 @@ class FASELHD(private val context: Context) : MainAPI() {
             this.posterHeaders = headers
         }
     }
-
-
-
     override val mainPage = mainPageOf(
-        "$mainUrl/main" to "الرئيسية"
+        "$mainUrl/main" to "الرئيسية" // تحديث الرابط ليكون /main
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val base = baseUrl()
-        val fixedUrl = if (request.data.startsWith(mainUrl)) {
-            request.data.replace(mainUrl, base)
+        val url = if (page > 1 && !request.data.endsWith("/main")) {
+            if (request.data.contains("all_movies"))
+                "${request.data.removeSuffix("/")}/page/$page"
+            else
+                "${request.data}/page/$page"
         } else {
             request.data
         }
 
-        val url = if (page > 1 && !fixedUrl.endsWith("/main")) {
-            if (fixedUrl.contains("all_movies"))
-                "${fixedUrl.removeSuffix("/")}/page/$page"
-            else
-                "${fixedUrl}/page/$page"
-        } else {
-            fixedUrl
-        }
-
         val document = smartGet(url)
         val headers = getProtectedHeaders()
-        if (fixedUrl.endsWith("/main") || fixedUrl == base || fixedUrl == mainUrl) {
+        if (request.data.endsWith("/main") || request.data == mainUrl) {
             val lists = mutableListOf<HomePageList>()
             val sliderItems = document.select("#homeSlide .swiper-slide").mapNotNull {
                 val slideHref = it.selectFirst("a")?.attr("href") ?: return@mapNotNull null
@@ -282,8 +270,7 @@ class FASELHD(private val context: Context) : MainAPI() {
         }
     }
 
-    override suspend fun quickSearch(query: String): List<SearchResponse>? = search(query, 1).items
-
+    override suspend fun quickSearch(query: String): List<SearchResponse>? = search(query,1)?.items
     override suspend fun search(query: String, page: Int): SearchResponseList {
         val base = baseUrl()
         val encoded = URLEncoder.encode(query, "UTF-8")
@@ -305,6 +292,7 @@ class FASELHD(private val context: Context) : MainAPI() {
         val document = try {
             smartGet(finalSearchUrl, referer = base)
         } catch (e: Exception) {
+            Log.d("FASELHD", "search: smartGet failed: ${e.message}")
             Jsoup.parse("", finalSearchUrl)
         }
 
@@ -312,72 +300,81 @@ class FASELHD(private val context: Context) : MainAPI() {
             .mapNotNull { it.toSearchResult() }
         var hasNext = document.select("ul.pagination a[href*='/page/${page + 1}']").isNotEmpty()
 
-        if (items.isEmpty() && page == 1) {
-            try {
-                val ajaxUrl = "${baseUrl()}/wp-admin/admin-ajax.php"
-                val formBody = FormBody.Builder()
-                    .add("action", "dtc_live")
-                    .add("trsearch", query)
-                    .build()
-                val bodyStr = executeRequestWithCloudflareRetry { cookies ->
-                    makeAjaxRequest(ajaxUrl, finalSearchUrl, formBody, cookies)
-                }
-                if (!bodyStr.isNullOrBlank()) {
-                    val ajaxDoc = Jsoup.parse(bodyStr, baseUrl())
-                    items = ajaxDoc.select("div.postDiv, article, .result, .search-item").mapNotNull { it.toSearchResult() }
-                    hasNext = ajaxDoc.select("a.dtc_more").isNotEmpty() ||
-                            ajaxDoc.select("a").any { it.text().contains("المزيد", ignoreCase = true) }
-                }
-            } catch (_: Exception) {}
-        }
-
-        return newSearchResponseList(items, hasNext)
-    }
-
-    private suspend fun makeAjaxRequest(
-        ajaxUrl: String,
-        referer: String,
-        formBody: FormBody,
-        cookies: String
-    ): String {
-        val client = app.baseClient.newBuilder()
-            .cookieJar(CookieJar.NO_COOKIES)
-            .followRedirects(false)
-            .build()
-
-        var currentUrl = ajaxUrl
-        var redirectCount = 0
-
-        while (redirectCount < 5) {
-            val requestBuilder = OkRequest.Builder()
-                .url(currentUrl)
-                .post(formBody)
-                .header("User-Agent", lastValidUserAgent)
-                .header("Referer", referer)
-            if (cookies.isNotBlank()) requestBuilder.header("Cookie", cookies)
-
-            val response = withContext(Dispatchers.IO) { client.newCall(requestBuilder.build()).execute() }
-
-            response.use { res ->
-                when (res.code) {
-                    403 -> throw IllegalStateException("403_FORBIDDEN")
-                    301, 302, 307, 308 -> {
-                        val location = res.header("Location")
-                        if (location != null) {
-                            currentUrl = if (location.startsWith("http")) location else "${baseUrl()}$location"
-                            redirectCount++
-                        } else {
-                            return ""
-                        }
+            if (items.isEmpty() && page == 1) {
+                try {
+                    val ajaxUrl = "${baseUrl()}/wp-admin/admin-ajax.php"
+                    val formBody = FormBody.Builder()
+                        .add("action", "dtc_live")
+                        .add("trsearch", query)
+                        .build()
+                    val bodyStr = executeRequestWithCloudflareRetry { cookies ->
+                        makeAjaxRequest(ajaxUrl, finalSearchUrl, formBody, cookies)
                     }
-                    200 -> return res.body?.string() ?: ""
-                    else -> return ""
+                    if (!bodyStr.isNullOrBlank()) {
+                        val ajaxDoc = Jsoup.parse(bodyStr, baseUrl()) // يعمل الآن بأمان!
+
+                        items = ajaxDoc.select("div.postDiv, article, .result, .search-item").mapNotNull { it.toSearchResult() }
+                        hasNext = ajaxDoc.select("a.dtc_more").isNotEmpty() ||
+                                ajaxDoc.select("a").any { it.text().contains("المزيد", ignoreCase = true) }
+                        Log.d("FASELHD", "Search fallback: found ${items.size} items from AJAX")
+                    }
+                } catch (e: Exception) {
+                    Log.d("FASELHD", "Search fallback error: ${e.message}")
                 }
             }
-        }
-        return ""
-    }
 
+            return newSearchResponseList(items, hasNext)
+        }
+
+        /**
+         * دالة مساعدة لتنفيذ أي طلب مع إعادة محاولة تلقائية عند فشل Cloudflare.
+         * @param requestBlock دالة تستقبل الكوكيز وتُرجع استجابة الطلب كـ String.
+         * @return String نتيجة الاستجابة الناجحة، أو null إذا فشلت المحاولتان.
+         */
+
+        private suspend fun makeAjaxRequest(
+            ajaxUrl: String,
+            referer: String,
+            formBody: FormBody,
+            cookies: String
+        ): String {
+            val client = app.baseClient.newBuilder()
+                .cookieJar(CookieJar.NO_COOKIES)
+                .followRedirects(false) // معالجة التحويلات يدوياً للحفاظ على POST
+                .build()
+
+            var currentUrl = ajaxUrl
+            var redirectCount = 0
+
+            while (redirectCount < 5) {
+                val requestBuilder = OkRequest.Builder()
+                    .url(currentUrl)
+                    .post(formBody)
+                    .header("User-Agent", lastValidUserAgent)
+                    .header("Referer", referer)
+                if (cookies.isNotBlank()) requestBuilder.header("Cookie", cookies)
+
+                val response = withContext(Dispatchers.IO) { client.newCall(requestBuilder.build()).execute() }
+
+                response.use { res ->
+                    when (res.code) {
+                        403 -> throw IllegalStateException("403_FORBIDDEN")
+                        301, 302, 307, 308 -> {
+                            val location = res.header("Location")
+                            if (location != null) {
+                                currentUrl = if (location.startsWith("http")) location else "${baseUrl()}$location"
+                                redirectCount++
+                            } else {
+                                return ""
+                            }
+                        }
+                        200 -> return res.body?.string() ?: ""
+                        else -> return ""
+                    }
+                }
+            }
+            return "" // تم الوصول للحد الأقصى للتحويلات
+        }
     override suspend fun load(url: String): LoadResponse? {
         val base = baseUrl()
         val absoluteUrl = if (url.startsWith("/")) "$base$url" else url
@@ -435,6 +432,7 @@ class FASELHD(private val context: Context) : MainAPI() {
                 }
             }
             if (currentSeasonIndex == -1) currentSeasonIndex = 0
+
 
             var fakeSeasonCounter = 2
             for (i in 0 until seasonCards.size) {
@@ -503,7 +501,6 @@ class FASELHD(private val context: Context) : MainAPI() {
             }
         }
     }
-
     private fun extractIframeSources(doc: Document): List<String> {
         val results = mutableSetOf<String>()
         val blockedKeywords = listOf(
@@ -511,23 +508,26 @@ class FASELHD(private val context: Context) : MainAPI() {
             "google.com/ads",
             "googlesyndication.com",
             "googletagmanager.com",
-            "?p="
+            "?p=" // استبعاد الروابط المختصرة للصفحة نفسها
         )
 
         fun addResult(url: String) {
             val fixedUrl = fixUrl(url)
             if (blockedKeywords.none { fixedUrl.contains(it) }) {
+                // التأكد أنه رابط مشغل فيديو فعلي
                 if (fixedUrl.contains("player") || fixedUrl.contains("embed") || fixedUrl.contains("video")) {
                     results.add(fixedUrl)
                 }
             }
         }
 
+        // 1. وسوم iframe الأساسية
         doc.select("iframe[src]").forEach { el ->
             val src = el.attr("src")
             if (src.isNotBlank()) addResult(src)
         }
 
+        // 2. أحداث النقر الخاصة بتبديل السيرفرات (player_iframe)
         val onClickRegex = Regex("""player_iframe\.location\.href\s*=\s*['"]([^'"]+)['"]""")
         doc.select("[onclick]").forEach { el ->
             val onclick = el.attr("onclick")
@@ -536,6 +536,7 @@ class FASELHD(private val context: Context) : MainAPI() {
             }
         }
 
+        // 3. نصوص الجافاسكريبت المضمنة
         val scriptRegex = Regex("""https?://[^\s"'<>]+""")
         doc.select("script").forEach { s ->
             val data = s.data()
@@ -551,6 +552,7 @@ class FASELHD(private val context: Context) : MainAPI() {
 
         return results.toList()
     }
+
 
     @SuppressLint("SetJavaScriptEnabled")
     private suspend fun resolveWithWebView(
