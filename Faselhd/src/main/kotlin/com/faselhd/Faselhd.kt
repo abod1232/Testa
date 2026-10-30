@@ -856,61 +856,86 @@ class FASELHD(private val context: Context) : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        Log.d("FASELHD_LOAD", "========== بدء معالجة الرابط الأساسي: $data ==========")
+        Log.d("FASELHD_LOAD", "========== بدء معالجة الرابط: $data ==========")
         val doc = smartGet(data)
         val iframeUrls = extractIframeSources(doc)
 
         if (iframeUrls.isEmpty()) {
-            Log.e("FASELHD_LOAD", "❌ فشل: لم يتم العثور على أي رابط iframe في الصفحة.")
+            Log.e("FASELHD_LOAD", "❌ لم يتم العثور على أي Iframe")
             return false
         }
 
-        var foundLink = false
+        var totalExtractedLinks = 0
 
-        iframeUrls.distinct().forEachIndexed { index, iframeUrl ->
+        for ((index, iframeUrl) in iframeUrls.distinct().withIndex()) {
             Log.d("FASELHD_LOAD", "--------------------------------------------------")
-            Log.d("FASELHD_LOAD", "▶ فحص الـ Iframe رقم (${index + 1}/${iframeUrls.size}): $iframeUrl")
-            try {
-                val iframeDoc = smartGet(iframeUrl, referer = data)
-                val iframeHtml = iframeDoc.outerHtml()
-                Log.d("FASELHD_LOAD", " تم جلب محتوى HTML الخاص بالـ Iframe بنجاح (الطول: ${iframeHtml.length} حرف)")
-                val internalPlayers = iframeDoc.select("iframe, video, source, [id*='player'], [class*='player']")
-                Log.d("FASELHD_LOAD", " العناصر المشتبه بها داخل الـ Iframe: ${internalPlayers.size} عنصر")
-                internalPlayers.forEach { el ->
-                    Log.d("FASELHD_LOAD", "   <- عنصر: <${el.tagName()}> | المعرف: ${el.id()} | المصدر: ${el.attr("src")}")
+            Log.d("FASELHD_LOAD", "▶ تجربة الـ Iframe رقم (${index + 1}/${iframeUrls.size}): $iframeUrl")
+
+            // تُرجع الآن List<String>
+            val caughtM3u8List = resolveWithWebView(iframeUrl, data)
+
+            if (caughtM3u8List.isEmpty()) {
+                Log.w("FASELHD_LOAD", "⚠️ لم يتم التقاط أي روابط m3u8 من هذا الـ Iframe.")
+                continue
+            }
+
+            val iframeUri = try { Uri.parse(iframeUrl) } catch (e: Exception) { null }
+            val iframeOrigin = if (iframeUri != null && iframeUri.host != null) "${iframeUri.scheme}://${iframeUri.host}" else iframeUrl
+            val cm = CookieManager.getInstance()
+
+            caughtM3u8List.forEach { m3u8Url ->
+                val streamCookies = cm.getCookie(m3u8Url) ?: cm.getCookie(iframeUrl) ?: ""
+                val streamHeaders = mutableMapOf(
+                    "User-Agent" to lastValidUserAgent,
+                    "Referer" to iframeUrl,
+                    "Origin" to iframeOrigin
+                )
+                if (streamCookies.isNotBlank()) {
+                    streamHeaders["Cookie"] = streamCookies
                 }
-                val previewLength = if (iframeHtml.length > 800) 800 else iframeHtml.length
-                Log.d("FASELHD_LOAD", "📄 مقتطف من محتوى HTML:\n" + iframeHtml.substring(0, previewLength) + "\n...")
 
-            } catch (e: Exception) {
-                Log.w("FASELHD_LOAD", "⚠️ تعذر جلب محتوى HTML الخاص بالـ Iframe كـ Document: ${e.message}")
-            }
-            Log.d("FASELHD_LOAD", " تشغيل WebView لمحاولة استخراج رابط البث (.m3u8)...")
-            val m3u8 = resolveWithWebView(iframeUrl, data)
-
-            if (!m3u8.isNullOrBlank()) {
-                Log.d("FASELHD_LOAD", " نجاح: تم التقاط رابط البث: $m3u8")
-                foundLink = true
-
-                M3u8Helper.generateM3u8(
-                    source = name,
-                    streamUrl = m3u8,
-                    referer = iframeUrl,
-                    headers = mapOf(
-                        "Referer" to iframeUrl,
-                        "User-Agent" to lastValidUserAgent
+                var successWithHelper = false
+                try {
+                    val generated = M3u8Helper.generateM3u8(
+                        source = name,
+                        streamUrl = m3u8Url,
+                        referer = iframeUrl,
+                        headers = streamHeaders
                     )
-                ).forEach(callback)
+                    if (generated.isNotEmpty()) {
+                        generated.forEach { link ->
+                            callback(link)
+                            totalExtractedLinks++
+                            successWithHelper = true
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w("FASELHD_LOAD", "M3u8Helper failed: ${e.message}")
+                }
+
+                // إذا فشل M3u8Helper نضيف الرابط مباشرة للمشغل
+                if (!successWithHelper) {
+                    val label = if (m3u8Url.contains("master")) "Auto / Multi" else "Direct Stream"
+                    callback(
+                        ExtractorLink(
+                            source = name,
+                            name = "$name - $label",
+                            url = m3u8Url,
+                            referer = iframeUrl,
+                            quality = Qualities.Unknown.value,
+                            type = ExtractorLinkType.M3U8,
+                            headers = streamHeaders
+                        )
+                    )
+                    totalExtractedLinks++
+                }
+            }
+
+            if (totalExtractedLinks > 0) {
                 return true
-            } else {
-                Log.e("FASELHD_LOAD", "❌ فشل: لم يتم التقاط رابط .m3u8 من هذا الـ Iframe.")
             }
         }
 
-        if (!foundLink) {
-            Log.e("FASELHD_LOAD", "❌ فشلت جميع المحاولات لاستخراج روابط البث من الـ iframes المتوفرة.")
-        }
-
-        return foundLink
+        return totalExtractedLinks > 0
     }
 }
