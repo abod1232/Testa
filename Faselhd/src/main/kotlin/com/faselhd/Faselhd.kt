@@ -574,8 +574,6 @@ class FASELHD(private val context: Context) : MainAPI() {
             dialog.setCancelable(false)
             dialog.setCanceledOnTouchOutside(false)
             dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
-
-            // إخفاء تام للـ WebView ليعمل في الخلفية بسرعة
             dialog.window?.apply {
                 setBackgroundDrawableResource(android.R.color.transparent)
                 setDimAmount(0f)
@@ -647,8 +645,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 try { if (cont.isActive) cont.resume(list) } catch (_: Exception) {}
                 cleanup()
             }
-
-            // سكريبت متقدم للضغط على الجودة المحددة
             fun clickQuality(qualityLabel: String) {
                 val js = """
                 (function() {
@@ -667,7 +663,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                         }
                     }
                     if (!clicked) {
-                        // تشغيل المشغل إذا لم يبدأ
                         let p = typeof window.jwplayer === 'function' ? window.jwplayer("player") : null;
                         if (p && typeof p.play === 'function') { p.setMute(true); p.play(); }
                     }
@@ -675,8 +670,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 """.trimIndent()
                 activity.runOnUiThread { webView.evaluateJavascript(js, null) }
             }
-
-            // آلة الحالات (State Machine) للتنقل بين الجودات تلقائياً
             val qualitiesToTest = listOf("1080", "720", "360")
             var currentQualityIndex = 0
 
@@ -691,8 +684,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 val currentTarget = qualitiesToTest[currentQualityIndex]
                 Log.d("FASEL_AUTO", " جاري محاكاة الضغط على جودة: ${currentTarget}p...")
                 clickQuality(currentTarget)
-
-                // إذا تأخر السيرفر في جلب الجودة الحالية، ننتقل للتي تليها بعد 2.5 ثانية
                 autoStepRunnable = Runnable {
                     currentQualityIndex++
                     scheduleNextQuality()
@@ -703,23 +694,17 @@ class FASELHD(private val context: Context) : MainAPI() {
             fun handleFoundLink(url: String) {
                 val clean = url.substringBefore("?")
                 if (!clean.endsWith(".m3u8")) return
-
-                // نتجاهل الماستر المعطوب ونركز على روابط الجودات الفعلية، إلا إذا لم يكن هناك غيره
                 synchronized(foundM3u8) {
                     if (foundM3u8.contains(url)) return
                     foundM3u8.add(url)
                 }
 
                 Log.d("FASEL_AUTO", "🎯 تم صيد رابط بنجاح: $url")
-
-                // بمجرد صيد الرابط، ننتقل فوراً للضغط على الجودة التالية دون انتظار التايمر!
                 handler.post {
                     currentQualityIndex++
                     scheduleNextQuality()
                 }
             }
-
-            // شبكة صيد روابط الـ m3u8 من الـ JS مباشرة
             val fastSnifferJs = """
             (function() {
                 try {
@@ -764,8 +749,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     view?.evaluateJavascript(fastSnifferJs, null)
-
-                    // تشغيل أول نقرة بعد تحميل الصفحة بثانية
                     handler.postDelayed({
                         scheduleNextQuality()
                     }, 1200)
@@ -796,8 +779,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                     return true
                 }
             }
-
-            // مهلة زمنية قصوى للـ Iframe كاملاً (8 ثوانٍ)
             timeoutRunnable = Runnable { safeFinish() }
             handler.postDelayed(timeoutRunnable!!, 8500L)
 
@@ -824,8 +805,6 @@ class FASELHD(private val context: Context) : MainAPI() {
 
         var totalExtractedLinks = 0
         val cm = CookieManager.getInstance()
-
-        // المرور على جميع الـ Iframes (الأول الذي به الجودات المتعددة، والثاني الذي به رابط مباشر)
         for ((index, iframeUrl) in iframeUrls.distinct().withIndex()) {
             Log.d("FASELHD_LOAD", "▶ جلب الروابط من الـ Iframe (${index + 1}/${iframeUrls.size}): $iframeUrl")
 
@@ -849,8 +828,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 if (streamCookies.isNotBlank()) {
                     streamHeaders["Cookie"] = streamCookies
                 }
-
-                // تحديد اسم وجودة الرابط المكتشف تلقائياً
                 val (qName, qValue) = when {
                     m3u8Url.contains("1080") -> "1080p" to Qualities.P1080.value
                     m3u8Url.contains("720") -> "720p" to Qualities.P720.value
@@ -859,8 +836,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                     m3u8Url.contains("master") -> "Auto" to Qualities.Unknown.value
                     else -> "Server ${index + 1}" to Qualities.Unknown.value
                 }
-
-                // تمرير الرابط المباشر إلى المشغل
                 callback(
                     newExtractorLink(
                         source = name,
@@ -942,8 +917,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 } catch (e: Exception) {
                     Log.w("FASELHD_LOAD", "M3u8Helper failed: ${e.message}")
                 }
-
-                // استخدام newExtractorLink كخيار احتياطي عند فشل المساعد
                 if (!successWithHelper) {
                     val label = if (m3u8Url.contains("master")) "Auto / Multi" else "Direct Stream"
                     callback(
