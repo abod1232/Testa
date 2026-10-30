@@ -69,7 +69,6 @@ class FASELHD(private val context: Context) : MainAPI() {
         var redirectUrl: String? = null
     }
     private suspend fun baseUrl(): String {
-        // إذا كان الرابط الحالي صالحاً ولا يساوي الدومين الوسيط، نستخدمه فوراً
         redirectUrl?.let { 
             if (!it.contains("fasel-hd.co")) return it 
         }
@@ -82,22 +81,16 @@ class FASELHD(private val context: Context) : MainAPI() {
             val gatewayUrl = "https://www.fasel-hd.co"
             val cm = CookieManager.getInstance()
             var cookies = cm.getCookie(gatewayUrl) ?: ""
-
-            // 1. إذا لم تكن هناك كوكيز كلاودفلير، نشغل السولفر لجلبها أولاً
             if (!cookies.contains("cf_clearance")) {
                 val activity = context as? Activity
                 CloudflareSolver.solve(activity, gatewayUrl, lastValidUserAgent)
                 cookies = cm.getCookie(gatewayUrl) ?: ""
             }
-
-            // 2. الآن ومع وجود الكوكيز، نطلب رابط التحويل لنلتقط الـ 302
             try {
                 val checkUrl = "$gatewayUrl/wp-admin/admin-ajax.php"
                 val headers = getModernHeaders(gatewayUrl).apply {
                     if (cookies.isNotBlank()) this["Cookie"] = cookies
                 }
-
-                // نطلب بدون Follow Redirects حتى نقرأ هيدر الـ Location مباشرة
                 val resp = app.get(checkUrl, headers = headers, allowRedirects = false)
 
                 val location = resp.headers["location"] ?: resp.headers["Location"]
@@ -107,8 +100,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                     redirectUrl = base
                     return@withLock base
                 }
-
-                // إذا لم نجد Location، نطلب مع السماح بالتحويل
                 val followResp = app.get(checkUrl, headers = headers, allowRedirects = true)
                 val finalUri = Uri.parse(followResp.url)
                 val host = finalUri.host ?: ""
@@ -118,7 +109,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                     return@withLock base
                 }
             } catch (e: Exception) {
-                // في حال حدوث أي خطأ نلجأ إلى mainUrl الافتراضي
             }
 
             mainUrl
