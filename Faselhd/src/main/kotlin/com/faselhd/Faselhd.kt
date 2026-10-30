@@ -521,14 +521,10 @@ class FASELHD(private val context: Context) : MainAPI() {
 
         Log.d("FASELHD_IFRAME", "========== بدء استخراج الإطارات (iframes) ==========")
         Log.d("FASELHD_IFRAME", "رابط الصفحة الأساسي: ${doc.baseUri()}")
-
-        // 1. استخراج من وسوم iframe المباشرة
         doc.select("iframe[src]").forEach { el ->
             val src = el.attr("src")
             if (src.isNotBlank()) addResult(src, "iframe[src]")
         }
-
-        // 2. استخراج من عناصر onclick
         val onClickRegex = Regex("""player_iframe\.location\.href\s*=\s*['"]([^'"]+)['"]""")
         doc.select("[onclick]").forEach { el ->
             val onclick = el.attr("onclick")
@@ -536,8 +532,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 addResult(match.groupValues[1], "onclick (player_iframe)")
             }
         }
-
-        // 3. استخراج من نصوص الـ Scripts
         val scriptRegex = Regex("""https?://[^\s"'<>]+""")
         doc.select("script").forEach { s ->
             val data = s.data()
@@ -550,8 +544,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 }
             }
         }
-
-        // 4. استخراج من السيرفرات الإضافية / الروابط البديلة
         doc.select("div.shortLink, span#liskSh, a[data-src]").forEach { el ->
             val text = el.text().trim()
             if (text.startsWith("http")) addResult(text, "server link element")
@@ -1005,31 +997,21 @@ class FASELHD(private val context: Context) : MainAPI() {
         iframeUrls.distinct().forEachIndexed { index, iframeUrl ->
             Log.d("FASELHD_LOAD", "--------------------------------------------------")
             Log.d("FASELHD_LOAD", "▶ فحص الـ Iframe رقم (${index + 1}/${iframeUrls.size}): $iframeUrl")
-
-            // 1. جلب وطباعة محتوى الـ iframe (HTML) لمعرفة السيرفرات المشغلة داخله
             try {
                 val iframeDoc = smartGet(iframeUrl, referer = data)
                 val iframeHtml = iframeDoc.outerHtml()
-
-                // طباعة ملخص عن المحتوى أو العناصر المهمة
                 Log.d("FASELHD_LOAD", " تم جلب محتوى HTML الخاص بالـ Iframe بنجاح (الطول: ${iframeHtml.length} حرف)")
-
-                // استعراض السيرفرات أو المشغلات إن وُجدت بداخل الـ iframe
                 val internalPlayers = iframeDoc.select("iframe, video, source, [id*='player'], [class*='player']")
                 Log.d("FASELHD_LOAD", " العناصر المشتبه بها داخل الـ Iframe: ${internalPlayers.size} عنصر")
                 internalPlayers.forEach { el ->
                     Log.d("FASELHD_LOAD", "   <- عنصر: <${el.tagName()}> | المعرف: ${el.id()} | المصدر: ${el.attr("src")}")
                 }
-
-                // طباعة أول 800 حرف من كود الصفحة للمعاينة السريعة
                 val previewLength = if (iframeHtml.length > 800) 800 else iframeHtml.length
                 Log.d("FASELHD_LOAD", "📄 مقتطف من محتوى HTML:\n" + iframeHtml.substring(0, previewLength) + "\n...")
 
             } catch (e: Exception) {
                 Log.w("FASELHD_LOAD", "⚠️ تعذر جلب محتوى HTML الخاص بالـ Iframe كـ Document: ${e.message}")
             }
-
-            // 2. محاولة حل الرابط عبر WebView
             Log.d("FASELHD_LOAD", " تشغيل WebView لمحاولة استخراج رابط البث (.m3u8)...")
             val m3u8 = resolveWithWebView(iframeUrl, data)
 
@@ -1046,8 +1028,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                         "User-Agent" to lastValidUserAgent
                     )
                 ).forEach(callback)
-
-                // إذا أردت التوقف بعد أول سيرفر ناجح:
                 return true
             } else {
                 Log.e("FASELHD_LOAD", "❌ فشل: لم يتم التقاط رابط .m3u8 من هذا الـ Iframe.")
