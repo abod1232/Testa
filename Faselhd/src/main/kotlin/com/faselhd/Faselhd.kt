@@ -514,15 +514,20 @@ class FASELHD(private val context: Context) : MainAPI() {
         fun addResult(url: String) {
             val fixedUrl = fixUrl(url)
             if (blockedKeywords.none { fixedUrl.contains(it) }) {
+                // التأكد أنه رابط مشغل فيديو فعلي
                 if (fixedUrl.contains("player") || fixedUrl.contains("embed") || fixedUrl.contains("video")) {
                     results.add(fixedUrl)
                 }
             }
         }
+
+        // 1. وسوم iframe الأساسية
         doc.select("iframe[src]").forEach { el ->
             val src = el.attr("src")
             if (src.isNotBlank()) addResult(src)
         }
+
+        // 2. أحداث النقر الخاصة بتبديل السيرفرات (player_iframe)
         val onClickRegex = Regex("""player_iframe\.location\.href\s*=\s*['"]([^'"]+)['"]""")
         doc.select("[onclick]").forEach { el ->
             val onclick = el.attr("onclick")
@@ -530,6 +535,8 @@ class FASELHD(private val context: Context) : MainAPI() {
                 addResult(match.groupValues[1])
             }
         }
+
+        // 3. نصوص الجافاسكريبت المضمنة
         val scriptRegex = Regex("""https?://[^\s"'<>]+""")
         doc.select("script").forEach { s ->
             val data = s.data()
@@ -620,6 +627,7 @@ class FASELHD(private val context: Context) : MainAPI() {
             val handler = Handler(Looper.getMainLooper())
             var timeoutRunnable: Runnable? = null
             var autoStepRunnable: Runnable? = null
+            var hasQualityButtons = false
 
             fun cleanup() {
                 try { timeoutRunnable?.let { handler.removeCallbacks(it) } } catch (_: Exception) {}
@@ -640,11 +648,26 @@ class FASELHD(private val context: Context) : MainAPI() {
                 cleanup()
             }
 
+            // تشغيل المشغل تلقائياً في السيرفرات المباشرة التي لا تحتوي على أزرار
+            fun startDirectPlayback() {
+                val js = """
+                (function() {
+                    try {
+                        let p = typeof window.jwplayer === 'function' ? window.jwplayer("player") : null;
+                        if (p && typeof p.play === 'function') { p.setMute(true); p.play(); }
+                        let playBtns = document.querySelectorAll('.jw-display-icon-display, .vjs-big-play-button, button, video, [onclick*="play"]');
+                        playBtns.forEach(b => { try { b.click(); } catch(e){} });
+                    } catch(e){}
+                })();
+                """.trimIndent()
+                activity.runOnUiThread { webView.evaluateJavascript(js, null) }
+            }
+
             fun clickQuality(qualityLabel: String) {
                 val js = """
                 (function() {
                     let clicked = false;
-                    let els = document.querySelectorAll('ul.quality_ch li, .quality_ch > *, [class*="quality"] li, .jw-settings-content-item, button');
+                    let els = document.querySelectorAll('ul.quality_ch li, .quality_ch > *, [class*="quality"] li, .jw-settings-content-item');
                     for (let el of els) {
                         let txt = (el.innerText || el.textContent || '').trim().toLowerCase();
                         if (txt.includes('$qualityLabel'.toLowerCase())) {
@@ -656,9 +679,8 @@ class FASELHD(private val context: Context) : MainAPI() {
                             break;
                         }
                     }
-                    if (!clicked) {
-                        let p = typeof window.jwplayer === 'function' ? window.jwplayer("player") : null;
-                        if (p && typeof p.play === 'function') { p.setMute(true); p.play(); }
+                    if (clicked) {
+                        console.log('BTN_CLICKED::' + '$qualityLabel');
                     }
                 })();
                 """.trimIndent()
@@ -682,7 +704,7 @@ class FASELHD(private val context: Context) : MainAPI() {
                     currentQualityIndex++
                     scheduleNextQuality()
                 }
-                handler.postDelayed(autoStepRunnable!!, 2500)
+                handler.postDelayed(autoStepRunnable!!, 2000)
             }
 
             fun handleFoundLink(url: String) {
@@ -694,9 +716,15 @@ class FASELHD(private val context: Context) : MainAPI() {
                     foundM3u8.add(url)
                 }
 
-                handler.post {
-                    currentQualityIndex++
-                    scheduleNextQuality()
+                // إذا كان الـ Iframe الثاني (لا يحتوي على أزرار جودة)، نكتفي بأول رابط يتم صيده فوراً
+                if (!hasQualityButtons) {
+                    handler.postDelayed({ safeFinish() }, 600)
+                } else {
+                    // إذا كان الأول وله أزرار، ننتقل فوراً لطلب الجودة التالية
+                    handler.post {
+                        currentQualityIndex++
+                        scheduleNextQuality()
+                    }
                 }
             }
 
@@ -732,6 +760,16 @@ class FASELHD(private val context: Context) : MainAPI() {
             })();
             """.trimIndent()
 
+            // فحص هل يحتوي الـ Iframe الحالي على شريط أزرار جودة أم أنه مباشر
+            val checkQualityButtonsJs = """
+            (function() {
+                let els = document.querySelectorAll('ul.quality_ch li, .quality_ch > *, [class*="quality"] li');
+                if (els && els.length > 0) {
+                    console.log('HAS_QUALITY_BUTTONS');
+                }
+            })();
+            """.trimIndent()
+
             webView.webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                     val url = request?.url.toString().lowercase()
@@ -744,7 +782,15 @@ class FASELHD(private val context: Context) : MainAPI() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     view?.evaluateJavascript(fastSnifferJs, null)
-                    handler.postDelayed({ scheduleNextQuality() }, 1200)
+                    view?.evaluateJavascript(checkQualityButtonsJs, null)
+
+                    // بدء التشغيل فوراً (لصالح الـ Iframe المباشر)
+                    startDirectPlayback()
+
+                    // بعد ثانية نقوم بجدولة أزرار الجودات (في حال وجودها)
+                    handler.postDelayed({
+                        scheduleNextQuality()
+                    }, 1000)
                 }
 
                 override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
@@ -768,13 +814,15 @@ class FASELHD(private val context: Context) : MainAPI() {
                     val msg = cm?.message() ?: ""
                     if (msg.startsWith("NET_M3U8::")) {
                         handleFoundLink(msg.substringAfter("::").trim())
+                    } else if (msg == "HAS_QUALITY_BUTTONS") {
+                        hasQualityButtons = true
                     }
                     return true
                 }
             }
 
             timeoutRunnable = Runnable { safeFinish() }
-            handler.postDelayed(timeoutRunnable!!, 8500L)
+            handler.postDelayed(timeoutRunnable!!, 8000L)
 
             webView.loadUrl(finalUrl, mapOf("Referer" to referer))
 
