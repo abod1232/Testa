@@ -199,9 +199,7 @@ class FASELHD(private val context: Context) : MainAPI() {
         }
     }
 
-    override val mainPage = mainPageOf(
-        "$mainUrl/main" to "الرئيسية"
-    )
+
 
     override val mainPage = mainPageOf(
         "$mainUrl/main" to "الرئيسية"
