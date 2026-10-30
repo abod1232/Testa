@@ -514,20 +514,15 @@ class FASELHD(private val context: Context) : MainAPI() {
         fun addResult(url: String) {
             val fixedUrl = fixUrl(url)
             if (blockedKeywords.none { fixedUrl.contains(it) }) {
-                // التأكد أنه رابط مشغل فيديو فعلي
                 if (fixedUrl.contains("player") || fixedUrl.contains("embed") || fixedUrl.contains("video")) {
                     results.add(fixedUrl)
                 }
             }
         }
-
-        // 1. وسوم iframe الأساسية
         doc.select("iframe[src]").forEach { el ->
             val src = el.attr("src")
             if (src.isNotBlank()) addResult(src)
         }
-
-        // 2. أحداث النقر الخاصة بتبديل السيرفرات (player_iframe)
         val onClickRegex = Regex("""player_iframe\.location\.href\s*=\s*['"]([^'"]+)['"]""")
         doc.select("[onclick]").forEach { el ->
             val onclick = el.attr("onclick")
@@ -535,8 +530,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 addResult(match.groupValues[1])
             }
         }
-
-        // 3. نصوص الجافاسكريبت المضمنة
         val scriptRegex = Regex("""https?://[^\s"'<>]+""")
         doc.select("script").forEach { s ->
             val data = s.data()
