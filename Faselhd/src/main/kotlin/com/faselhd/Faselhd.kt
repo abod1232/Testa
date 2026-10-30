@@ -514,20 +514,15 @@ class FASELHD(private val context: Context) : MainAPI() {
         fun addResult(url: String) {
             val fixedUrl = fixUrl(url)
             if (blockedKeywords.none { fixedUrl.contains(it) }) {
-                // التأكد أنه رابط مشغل فيديو فعلي
                 if (fixedUrl.contains("player") || fixedUrl.contains("embed") || fixedUrl.contains("video")) {
                     results.add(fixedUrl)
                 }
             }
         }
-
-        // 1. وسوم iframe الأساسية
         doc.select("iframe[src]").forEach { el ->
             val src = el.attr("src")
             if (src.isNotBlank()) addResult(src)
         }
-
-        // 2. أحداث النقر الخاصة بتبديل السيرفرات (player_iframe)
         val onClickRegex = Regex("""player_iframe\.location\.href\s*=\s*['"]([^'"]+)['"]""")
         doc.select("[onclick]").forEach { el ->
             val onclick = el.attr("onclick")
@@ -535,8 +530,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 addResult(match.groupValues[1])
             }
         }
-
-        // 3. نصوص الجافاسكريبت المضمنة
         val scriptRegex = Regex("""https?://[^\s"'<>]+""")
         doc.select("script").forEach { s ->
             val data = s.data()
@@ -647,8 +640,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 try { if (cont.isActive) cont.resume(list) } catch (_: Exception) {}
                 cleanup()
             }
-
-            // تشغيل المشغل تلقائياً في السيرفرات المباشرة التي لا تحتوي على أزرار
             fun startDirectPlayback() {
                 val js = """
                 (function() {
@@ -715,12 +706,9 @@ class FASELHD(private val context: Context) : MainAPI() {
                     if (foundM3u8.contains(url)) return
                     foundM3u8.add(url)
                 }
-
-                // إذا كان الـ Iframe الثاني (لا يحتوي على أزرار جودة)، نكتفي بأول رابط يتم صيده فوراً
                 if (!hasQualityButtons) {
                     handler.postDelayed({ safeFinish() }, 600)
                 } else {
-                    // إذا كان الأول وله أزرار، ننتقل فوراً لطلب الجودة التالية
                     handler.post {
                         currentQualityIndex++
                         scheduleNextQuality()
@@ -759,8 +747,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 } catch(err){}
             })();
             """.trimIndent()
-
-            // فحص هل يحتوي الـ Iframe الحالي على شريط أزرار جودة أم أنه مباشر
             val checkQualityButtonsJs = """
             (function() {
                 let els = document.querySelectorAll('ul.quality_ch li, .quality_ch > *, [class*="quality"] li');
@@ -783,11 +769,7 @@ class FASELHD(private val context: Context) : MainAPI() {
                     super.onPageFinished(view, url)
                     view?.evaluateJavascript(fastSnifferJs, null)
                     view?.evaluateJavascript(checkQualityButtonsJs, null)
-
-                    // بدء التشغيل فوراً (لصالح الـ Iframe المباشر)
                     startDirectPlayback()
-
-                    // بعد ثانية نقوم بجدولة أزرار الجودات (في حال وجودها)
                     handler.postDelayed({
                         scheduleNextQuality()
                     }, 1000)
