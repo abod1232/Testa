@@ -509,28 +509,35 @@ class FASELHD(private val context: Context) : MainAPI() {
             "googlesyndication.com",
             "googletagmanager.com"
         )
-        fun addResult(url: String) {
+        fun addResult(url: String, sourceTag: String) {
             val fixedUrl = fixUrl(url)
             if (blockedKeywords.none { fixedUrl.contains(it) }) {
+                Log.d("FASELHD_IFRAME", " [مقبول] تم العثور على رابط من ($sourceTag): $fixedUrl")
                 results.add(fixedUrl)
             } else {
-                Log.d("FASELHD_IFRAME", "🚫 Blocked unwanted iframe: $fixedUrl")
+                Log.d("FASELHD_IFRAME", " [مستبعد] رابط إعلاني أو تحقق من ($sourceTag): $fixedUrl")
             }
         }
 
-        Log.d("FASELHD_IFRAME", "========== START iframe extraction ==========")
-        Log.d("FASELHD_IFRAME", "Document URL: ${doc.baseUri()}")
+        Log.d("FASELHD_IFRAME", "========== بدء استخراج الإطارات (iframes) ==========")
+        Log.d("FASELHD_IFRAME", "رابط الصفحة الأساسي: ${doc.baseUri()}")
+
+        // 1. استخراج من وسوم iframe المباشرة
         doc.select("iframe[src]").forEach { el ->
             val src = el.attr("src")
-            if (src.isNotBlank()) addResult(src)
+            if (src.isNotBlank()) addResult(src, "iframe[src]")
         }
+
+        // 2. استخراج من عناصر onclick
         val onClickRegex = Regex("""player_iframe\.location\.href\s*=\s*['"]([^'"]+)['"]""")
         doc.select("[onclick]").forEach { el ->
             val onclick = el.attr("onclick")
             onClickRegex.find(onclick)?.let { match ->
-                addResult(match.groupValues[1])
+                addResult(match.groupValues[1], "onclick (player_iframe)")
             }
         }
+
+        // 3. استخراج من نصوص الـ Scripts
         val scriptRegex = Regex("""https?://[^\s"'<>]+""")
         doc.select("script").forEach { s ->
             val data = s.data()
@@ -538,23 +545,19 @@ class FASELHD(private val context: Context) : MainAPI() {
                 scriptRegex.findAll(data).forEach { m ->
                     val url = m.value
                     if (url.contains("player") || url.contains("embed")) {
-                        addResult(url)
+                        addResult(url, "inline script")
                     }
                 }
             }
         }
+
+        // 4. استخراج من السيرفرات الإضافية / الروابط البديلة
         doc.select("div.shortLink, span#liskSh, a[data-src]").forEach { el ->
             val text = el.text().trim()
-            if (text.startsWith("http")) addResult(text)
+            if (text.startsWith("http")) addResult(text, "server link element")
         }
 
-        Log.d("FASELHD_IFRAME", "========== RESULT (Filtered) ==========")
-        results.forEachIndexed { i, url ->
-            Log.d("FASELHD_IFRAME", "FINAL[$i] = $url")
-        }
-        Log.d("FASELHD_IFRAME", "Total valid iframe URLs found: ${results.size}")
-        Log.d("FASELHD_IFRAME", "========== END iframe extraction ==========")
-
+        Log.d("FASELHD_IFRAME", "========== إجمالي الروابط الصالحة المكتشفة: ${results.size} ==========")
         return results.toList()
     }
 
@@ -988,34 +991,71 @@ class FASELHD(private val context: Context) : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
+        Log.d("FASELHD_LOAD", "========== بدء معالجة الرابط الأساسي: $data ==========")
         val doc = smartGet(data)
         val iframeUrls = extractIframeSources(doc)
 
         if (iframeUrls.isEmpty()) {
-            Log.e("FASELHD", "❌ No iframe found")
+            Log.e("FASELHD_LOAD", "❌ فشل: لم يتم العثور على أي رابط iframe في الصفحة.")
             return false
         }
 
         var foundLink = false
-        iframeUrls.distinct().forEach { iframeUrl ->
-            if (foundLink) return@forEach // إذا وجدنا رابط وتوقفنا
 
-            Log.d("FASELHD", "Testing iframe: $iframeUrl")
+        iframeUrls.distinct().forEachIndexed { index, iframeUrl ->
+            Log.d("FASELHD_LOAD", "--------------------------------------------------")
+            Log.d("FASELHD_LOAD", "▶ فحص الـ Iframe رقم (${index + 1}/${iframeUrls.size}): $iframeUrl")
+
+            // 1. جلب وطباعة محتوى الـ iframe (HTML) لمعرفة السيرفرات المشغلة داخله
+            try {
+                val iframeDoc = smartGet(iframeUrl, referer = data)
+                val iframeHtml = iframeDoc.outerHtml()
+
+                // طباعة ملخص عن المحتوى أو العناصر المهمة
+                Log.d("FASELHD_LOAD", " تم جلب محتوى HTML الخاص بالـ Iframe بنجاح (الطول: ${iframeHtml.length} حرف)")
+
+                // استعراض السيرفرات أو المشغلات إن وُجدت بداخل الـ iframe
+                val internalPlayers = iframeDoc.select("iframe, video, source, [id*='player'], [class*='player']")
+                Log.d("FASELHD_LOAD", " العناصر المشتبه بها داخل الـ Iframe: ${internalPlayers.size} عنصر")
+                internalPlayers.forEach { el ->
+                    Log.d("FASELHD_LOAD", "   <- عنصر: <${el.tagName()}> | المعرف: ${el.id()} | المصدر: ${el.attr("src")}")
+                }
+
+                // طباعة أول 800 حرف من كود الصفحة للمعاينة السريعة
+                val previewLength = if (iframeHtml.length > 800) 800 else iframeHtml.length
+                Log.d("FASELHD_LOAD", "📄 مقتطف من محتوى HTML:\n" + iframeHtml.substring(0, previewLength) + "\n...")
+
+            } catch (e: Exception) {
+                Log.w("FASELHD_LOAD", "⚠️ تعذر جلب محتوى HTML الخاص بالـ Iframe كـ Document: ${e.message}")
+            }
+
+            // 2. محاولة حل الرابط عبر WebView
+            Log.d("FASELHD_LOAD", " تشغيل WebView لمحاولة استخراج رابط البث (.m3u8)...")
             val m3u8 = resolveWithWebView(iframeUrl, data)
 
             if (!m3u8.isNullOrBlank()) {
+                Log.d("FASELHD_LOAD", " نجاح: تم التقاط رابط البث: $m3u8")
                 foundLink = true
 
                 M3u8Helper.generateM3u8(
                     source = name,
                     streamUrl = m3u8,
-                    referer = iframeUrl, // هنا السيرفر يتوقع أن الطلب قادم من الـ iframe
+                    referer = iframeUrl,
                     headers = mapOf(
                         "Referer" to iframeUrl,
                         "User-Agent" to lastValidUserAgent
                     )
                 ).forEach(callback)
+
+                // إذا أردت التوقف بعد أول سيرفر ناجح:
+                return true
+            } else {
+                Log.e("FASELHD_LOAD", "❌ فشل: لم يتم التقاط رابط .m3u8 من هذا الـ Iframe.")
             }
+        }
+
+        if (!foundLink) {
+            Log.e("FASELHD_LOAD", "❌ فشلت جميع المحاولات لاستخراج روابط البث من الـ iframes المتوفرة.")
         }
 
         return foundLink
