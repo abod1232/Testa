@@ -567,90 +567,43 @@ class FASELHD(private val context: Context) : MainAPI() {
         }
 
         val finalUrl = iframeUrl.replace("&amp;", "&").trim()
-        val iframeUri = try { Uri.parse(finalUrl) } catch (e: Exception) { null }
-        val iframeOrigin = if (iframeUri != null && iframeUri.host != null) "${iframeUri.scheme}://${iframeUri.host}" else referer
+        val originalHost = try { Uri.parse(finalUrl).host?.replace("www.", "") ?: "" } catch (e: Exception) { "" }
 
         activity.runOnUiThread {
-            val dialog = Dialog(activity, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+            val dialog = Dialog(activity)
+            dialog.setCancelable(false)
+            dialog.setCanceledOnTouchOutside(false)
             dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
-            dialog.setCancelable(true)
 
-            val rootLayout = FrameLayout(activity).apply {
-                layoutParams = ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT
+            // إخفاء تام للـ WebView ليعمل في الخلفية بسرعة
+            dialog.window?.apply {
+                setBackgroundDrawableResource(android.R.color.transparent)
+                setDimAmount(0f)
+                clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+                addFlags(
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 )
+                attributes = attributes?.apply {
+                    width = 1; height = 1; x = -10000; y = -10000
+                    gravity = Gravity.START or Gravity.TOP
+                }
             }
 
             val webView = WebView(activity).apply {
-                layoutParams = FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT
-                )
-                visibility = View.VISIBLE
-            }
-            rootLayout.addView(webView)
-            val sidePanelScroll = ScrollView(activity).apply {
-                val widthPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 150f, resources.displayMetrics).toInt()
-                layoutParams = FrameLayout.LayoutParams(widthPx, FrameLayout.LayoutParams.MATCH_PARENT, Gravity.START or Gravity.TOP).apply {
-                    setMargins(10, 10, 0, 160)
-                }
-                setBackgroundColor(Color.parseColor("#E61E1E1E"))
-                elevation = 30f
+                layoutParams = ViewGroup.LayoutParams(1, 1)
+                visibility = View.INVISIBLE
             }
 
-            val buttonContainer = LinearLayout(activity).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(8, 8, 8, 8)
+            try {
+                dialog.setContentView(webView, ViewGroup.LayoutParams(1, 1))
+                dialog.show()
+            } catch (e: Exception) {
+                try {
+                    val decor = activity.window?.decorView as? ViewGroup
+                    decor?.addView(webView, FrameLayout.LayoutParams(1, 1, Gravity.START or Gravity.TOP))
+                } catch (_: Exception) {}
             }
-
-            val panelTitle = TextView(activity).apply {
-                text = "⚡ أزرار الجودة"
-                setTextColor(Color.CYAN)
-                textSize = 12f
-                gravity = Gravity.CENTER
-                setPadding(0, 5, 0, 10)
-            }
-            buttonContainer.addView(panelTitle)
-            sidePanelScroll.addView(buttonContainer)
-            rootLayout.addView(sidePanelScroll)
-            val bottomLinksScroll = ScrollView(activity).apply {
-                val heightPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 140f, resources.displayMetrics).toInt()
-                layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, heightPx, Gravity.BOTTOM).apply {
-                    setMargins(10, 0, 140, 10)
-                }
-                setBackgroundColor(Color.parseColor("#EE0D1117"))
-                elevation = 35f
-            }
-
-            val linksContainer = LinearLayout(activity).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(10, 10, 10, 10)
-            }
-
-            val linksTitle = TextView(activity).apply {
-                text = "🎯 الروابط الملتقطة (اضغط على أي منها لاختياره):"
-                setTextColor(Color.GREEN)
-                textSize = 11f
-            }
-            linksContainer.addView(linksTitle)
-            bottomLinksScroll.addView(linksContainer)
-            rootLayout.addView(bottomLinksScroll)
-            val finishManualBtn = android.widget.Button(activity).apply {
-                text = "إنهاء ✔"
-                setTextColor(Color.WHITE)
-                textSize = 13f
-                setBackgroundColor(Color.parseColor("#2EA043"))
-                val btnW = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 110f, resources.displayMetrics).toInt()
-                val btnH = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 55f, resources.displayMetrics).toInt()
-                layoutParams = FrameLayout.LayoutParams(btnW, btnH, Gravity.END or Gravity.BOTTOM).apply {
-                    setMargins(0, 0, 15, 20)
-                }
-            }
-            rootLayout.addView(finishManualBtn)
-
-            dialog.setContentView(rootLayout)
-            dialog.show()
 
             webView.settings.apply {
                 javaScriptEnabled = true
@@ -660,8 +613,7 @@ class FASELHD(private val context: Context) : MainAPI() {
                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                 cacheMode = WebSettings.LOAD_DEFAULT
                 userAgentString = lastValidUserAgent
-                useWideViewPort = true
-                loadWithOverviewMode = true
+                blockNetworkImage = true
             }
 
             val cookieManager = CookieManager.getInstance()
@@ -674,162 +626,104 @@ class FASELHD(private val context: Context) : MainAPI() {
             var finished = false
             val finishLock = Any()
             val handler = Handler(Looper.getMainLooper())
+            var timeoutRunnable: Runnable? = null
+            var autoStepRunnable: Runnable? = null
 
             fun cleanup() {
+                try { timeoutRunnable?.let { handler.removeCallbacks(it) } } catch (_: Exception) {}
+                try { autoStepRunnable?.let { handler.removeCallbacks(it) } } catch (_: Exception) {}
                 try { (webView.parent as? ViewGroup)?.removeView(webView) } catch (_: Exception) {}
                 try { webView.stopLoading() } catch (_: Exception) {}
                 try { webView.destroy() } catch (_: Exception) {}
                 try { if (dialog.isShowing) dialog.dismiss() } catch (_: Exception) {}
             }
 
-            fun safeFinish(overrideList: List<String>? = null) {
+            fun safeFinish() {
                 synchronized(finishLock) {
                     if (finished) return
                     finished = true
                 }
-                val list = overrideList ?: synchronized(foundM3u8) { foundM3u8.toList() }
+                val list = synchronized(foundM3u8) { foundM3u8.toList() }
                 try { if (cont.isActive) cont.resume(list) } catch (_: Exception) {}
                 cleanup()
             }
 
-            finishManualBtn.setOnClickListener {
-                safeFinish()
+            // سكريبت متقدم للضغط على الجودة المحددة
+            fun clickQuality(qualityLabel: String) {
+                val js = """
+                (function() {
+                    let clicked = false;
+                    let els = document.querySelectorAll('ul.quality_ch li, .quality_ch > *, [class*="quality"] li, .jw-settings-content-item, button');
+                    for (let el of els) {
+                        let txt = (el.innerText || el.textContent || '').trim().toLowerCase();
+                        if (txt.includes('$qualityLabel'.toLowerCase())) {
+                            ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(evt => {
+                                el.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
+                            });
+                            if (typeof el.onclick === 'function') { el.onclick(); }
+                            console.log('AUTO_CLICKED::' + txt);
+                            clicked = true;
+                            break;
+                        }
+                    }
+                    if (!clicked) {
+                        // تشغيل المشغل إذا لم يبدأ
+                        let p = typeof window.jwplayer === 'function' ? window.jwplayer("player") : null;
+                        if (p && typeof p.play === 'function') { p.setMute(true); p.play(); }
+                    }
+                })();
+                """.trimIndent()
+                activity.runOnUiThread { webView.evaluateJavascript(js, null) }
             }
+
+            // آلة الحالات (State Machine) للتنقل بين الجودات تلقائياً
+            val qualitiesToTest = listOf("1080", "720", "360")
+            var currentQualityIndex = 0
+
+            fun scheduleNextQuality() {
+                autoStepRunnable?.let { handler.removeCallbacks(it) }
+                if (currentQualityIndex >= qualitiesToTest.size) {
+                    Log.d("FASEL_AUTO", " اكتملت تجربة جميع الجودات لهذا الـ Iframe.")
+                    safeFinish()
+                    return
+                }
+
+                val currentTarget = qualitiesToTest[currentQualityIndex]
+                Log.d("FASEL_AUTO", " جاري محاكاة الضغط على جودة: ${currentTarget}p...")
+                clickQuality(currentTarget)
+
+                // إذا تأخر السيرفر في جلب الجودة الحالية، ننتقل للتي تليها بعد 2.5 ثانية
+                autoStepRunnable = Runnable {
+                    currentQualityIndex++
+                    scheduleNextQuality()
+                }
+                handler.postDelayed(autoStepRunnable!!, 2500)
+            }
+
             fun handleFoundLink(url: String) {
                 val clean = url.substringBefore("?")
                 if (!clean.endsWith(".m3u8")) return
+
+                // نتجاهل الماستر المعطوب ونركز على روابط الجودات الفعلية، إلا إذا لم يكن هناك غيره
                 synchronized(foundM3u8) {
                     if (foundM3u8.contains(url)) return
                     foundM3u8.add(url)
                 }
 
-                Log.d("FASEL_INSPECT", "🎯 تم التقاط رابط (.m3u8): $url")
-                activity.runOnUiThread {
-                    Toast.makeText(activity, "تم التقاط جودة جديدة!", Toast.LENGTH_SHORT).show()
+                Log.d("FASEL_AUTO", "🎯 تم صيد رابط بنجاح: $url")
 
-                    val tv = TextView(activity).apply {
-                        text = "▶ ${clean.substringAfterLast("/")}"
-                        setTextColor(Color.WHITE)
-                        textSize = 10f
-                        setPadding(8, 8, 8, 8)
-                        setBackgroundColor(Color.parseColor("#21262D"))
-                        val p = LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.MATCH_PARENT,
-                            LinearLayout.LayoutParams.WRAP_CONTENT
-                        )
-                        p.setMargins(0, 4, 0, 4)
-                        layoutParams = p
-
-                        setOnClickListener {
-                            Toast.makeText(activity, "تم اختيار هذا الرابط!", Toast.LENGTH_SHORT).show()
-                            safeFinish(listOf(url))
-                        }
-                    }
-                    linksContainer.addView(tv)
-                }
-            }
-            class InspectBridge {
-                @JavascriptInterface
-                fun onButtonsFound(buttonsJson: String) {
-                    activity.runOnUiThread {
-                        try {
-                            val array = org.json.JSONArray(buttonsJson)
-                            buttonContainer.removeAllViews()
-                            buttonContainer.addView(panelTitle)
-
-                            val refreshBtn = android.widget.Button(activity).apply {
-                                text = "🔄 مسح مجدداً"
-                                textSize = 10f
-                                setBackgroundColor(Color.DKGRAY)
-                                setTextColor(Color.WHITE)
-                                setOnClickListener {
-                                    webView.evaluateJavascript("window.__scanQualityButtons && window.__scanQualityButtons();", null)
-                                }
-                            }
-                            buttonContainer.addView(refreshBtn)
-
-                            for (i in 0 until array.length()) {
-                                val item = array.getJSONObject(i)
-                                val label = item.getString("text")
-                                val uniqueId = item.getString("id")
-
-                                val btn = android.widget.Button(activity).apply {
-                                    text = label
-                                    textSize = 11f
-                                    setTextColor(Color.WHITE)
-                                    setBackgroundColor(
-                                        when {
-                                            label.contains("1080") -> Color.parseColor("#9C27B0")
-                                            label.contains("720") -> Color.parseColor("#2196F3")
-                                            label.contains("360") -> Color.parseColor("#FF9800")
-                                            else -> Color.parseColor("#455A64")
-                                        }
-                                    )
-                                    val params = LinearLayout.LayoutParams(
-                                        LinearLayout.LayoutParams.MATCH_PARENT,
-                                        LinearLayout.LayoutParams.WRAP_CONTENT
-                                    )
-                                    params.setMargins(0, 6, 0, 6)
-                                    layoutParams = params
-
-                                    setOnClickListener {
-                                        Log.d("FASEL_INSPECT", " تم النقر على: $label (id: $uniqueId)")
-                                        val clickCode = """
-                                            (function() {
-                                                const el = document.querySelector('[data-inspect-id="$uniqueId"]');
-                                                if (el) {
-                                                    ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(evt => {
-                                                        el.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
-                                                    });
-                                                    if (typeof el.onclick === 'function') { el.onclick(); }
-                                                    console.log('CLICKED_BTN::' + '$label');
-                                                }
-                                            })();
-                                        """.trimIndent()
-                                        webView.evaluateJavascript(clickCode, null)
-                                    }
-                                }
-                                buttonContainer.addView(btn)
-                            }
-                        } catch (e: Exception) {
-                            Log.e("FASEL_INSPECT", "Error parsing buttons: ${e.message}")
-                        }
-                    }
+                // بمجرد صيد الرابط، ننتقل فوراً للضغط على الجودة التالية دون انتظار التايمر!
+                handler.post {
+                    currentQualityIndex++
+                    scheduleNextQuality()
                 }
             }
 
-            webView.addJavascriptInterface(InspectBridge(), "InspectBridge")
-            val scannerJs = """
-            (function() {
-                window.__scanQualityButtons = function() {
-                    let results = [];
-                    let elements = document.querySelectorAll('ul.quality_ch li, .quality_ch > *, [class*="quality"] li, .jw-settings-content-item, button');
-                    let counter = 0;
-                    elements.forEach(el => {
-                        let txt = (el.innerText || el.textContent || '').trim();
-                        if (txt.length > 0 && txt.length < 25 && !txt.includes('\n')) {
-                            counter++;
-                            let uid = 'btn_' + counter;
-                            el.setAttribute('data-inspect-id', uid);
-                            results.push({
-                                text: txt,
-                                id: uid
-                            });
-                        }
-                    });
-                    if (window.InspectBridge) {
-                        window.InspectBridge.onButtonsFound(JSON.stringify(results));
-                    }
-                };
-
-                setTimeout(window.__scanQualityButtons, 1500);
-                setTimeout(window.__scanQualityButtons, 3500);
-            })();
-            """.trimIndent()
-
+            // شبكة صيد روابط الـ m3u8 من الـ JS مباشرة
             val fastSnifferJs = """
             (function() {
                 try {
+                    window.open = function() { return null; };
                     if (!window.__NET_HOOKED__) {
                         window.__NET_HOOKED__ = true;
                         const _fetch = window.fetch;
@@ -859,10 +753,22 @@ class FASELHD(private val context: Context) : MainAPI() {
             """.trimIndent()
 
             webView.webViewClient = object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                    val url = request?.url.toString().lowercase()
+                    if (!url.startsWith("http")) return true
+                    if (url.contains("recaptcha") || url.contains("melbet") || url.contains("policies.google")) return true
+                    val currentHost = try { Uri.parse(url).host?.replace("www.", "") ?: "" } catch (e: Exception) { "" }
+                    return originalHost.isNotBlank() && currentHost.isNotBlank() && !currentHost.contains(originalHost)
+                }
+
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     view?.evaluateJavascript(fastSnifferJs, null)
-                    view?.evaluateJavascript(scannerJs, null)
+
+                    // تشغيل أول نقرة بعد تحميل الصفحة بثانية
+                    handler.postDelayed({
+                        scheduleNextQuality()
+                    }, 1200)
                 }
 
                 override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
@@ -886,23 +792,93 @@ class FASELHD(private val context: Context) : MainAPI() {
                     val msg = cm?.message() ?: ""
                     if (msg.startsWith("NET_M3U8::")) {
                         handleFoundLink(msg.substringAfter("::").trim())
-                    } else if (msg.startsWith("CLICKED_BTN::")) {
-                        Log.d("FASEL_INSPECT", "✅ استجابة للنقر: ${msg.substringAfter("::")}")
                     }
                     return true
                 }
             }
 
+            // مهلة زمنية قصوى للـ Iframe كاملاً (8 ثوانٍ)
+            timeoutRunnable = Runnable { safeFinish() }
+            handler.postDelayed(timeoutRunnable!!, 8500L)
+
             webView.loadUrl(finalUrl, mapOf("Referer" to referer))
 
-            dialog.setOnDismissListener {
-                safeFinish()
+            cont.invokeOnCancellation { handler.post { safeFinish() } }
+        }
+    }
+
+    override suspend fun loadLinks(
+        data: String,
+        isCasting: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        Log.d("FASELHD_LOAD", "========== بدء استخراج السيرفرات: $data ==========")
+        val doc = smartGet(data)
+        val iframeUrls = extractIframeSources(doc)
+
+        if (iframeUrls.isEmpty()) {
+            Log.e("FASELHD_LOAD", "❌ لم يتم العثور على أي Iframe")
+            return false
+        }
+
+        var totalExtractedLinks = 0
+        val cm = CookieManager.getInstance()
+
+        // المرور على جميع الـ Iframes (الأول الذي به الجودات المتعددة، والثاني الذي به رابط مباشر)
+        for ((index, iframeUrl) in iframeUrls.distinct().withIndex()) {
+            Log.d("FASELHD_LOAD", "▶ جلب الروابط من الـ Iframe (${index + 1}/${iframeUrls.size}): $iframeUrl")
+
+            val caughtM3u8List = resolveWithWebView(iframeUrl, data)
+
+            if (caughtM3u8List.isEmpty()) {
+                Log.w("FASELHD_LOAD", "⚠️ لم يتم التقاط روابط من هذا الـ Iframe.")
+                continue
             }
 
-            cont.invokeOnCancellation {
-                handler.post { safeFinish() }
+            val iframeUri = try { Uri.parse(iframeUrl) } catch (e: Exception) { null }
+            val iframeOrigin = if (iframeUri != null && iframeUri.host != null) "${iframeUri.scheme}://${iframeUri.host}" else iframeUrl
+
+            caughtM3u8List.forEach { m3u8Url ->
+                val streamCookies = cm.getCookie(m3u8Url) ?: cm.getCookie(iframeUrl) ?: ""
+                val streamHeaders = mutableMapOf(
+                    "User-Agent" to lastValidUserAgent,
+                    "Referer" to iframeUrl,
+                    "Origin" to iframeOrigin
+                )
+                if (streamCookies.isNotBlank()) {
+                    streamHeaders["Cookie"] = streamCookies
+                }
+
+                // تحديد اسم وجودة الرابط المكتشف تلقائياً
+                val (qName, qValue) = when {
+                    m3u8Url.contains("1080") -> "1080p" to Qualities.P1080.value
+                    m3u8Url.contains("720") -> "720p" to Qualities.P720.value
+                    m3u8Url.contains("480") -> "480p" to Qualities.P480.value
+                    m3u8Url.contains("360") -> "360p" to Qualities.P360.value
+                    m3u8Url.contains("master") -> "Auto" to Qualities.Unknown.value
+                    else -> "Server ${index + 1}" to Qualities.Unknown.value
+                }
+
+                // تمرير الرابط المباشر إلى المشغل
+                callback(
+                    newExtractorLink(
+                        source = name,
+                        name = "$name - Server ${index + 1} ($qName)",
+                        url = m3u8Url,
+                        type = ExtractorLinkType.M3U8
+                    ) {
+                        this.referer = iframeUrl
+                        this.quality = qValue
+                        this.headers = streamHeaders
+                    }
+                )
+                totalExtractedLinks++
             }
         }
+
+        Log.d("FASELHD_LOAD", "🏁 إجمالي الروابط المرسلة للمشغل: $totalExtractedLinks")
+        return totalExtractedLinks > 0
     }
     
     override suspend fun loadLinks(
@@ -966,6 +942,8 @@ class FASELHD(private val context: Context) : MainAPI() {
                 } catch (e: Exception) {
                     Log.w("FASELHD_LOAD", "M3u8Helper failed: ${e.message}")
                 }
+
+                // استخدام newExtractorLink كخيار احتياطي عند فشل المساعد
                 if (!successWithHelper) {
                     val label = if (m3u8Url.contains("master")) "Auto / Multi" else "Direct Stream"
                     callback(
