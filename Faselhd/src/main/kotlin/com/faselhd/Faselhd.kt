@@ -70,43 +70,24 @@ class FASELHD(private val context: Context) : MainAPI() {
 
     }
     private suspend fun baseUrl(): String {
-        redirectUrl?.let { 
-            if (!it.contains("fasel-hd.co") && it.contains("faselhdx")) return it 
-        }
+        redirectUrl?.let { return it }
 
-        return cfLock.withLock {
-            redirectUrl?.let { 
-                if (!it.contains("fasel-hd.co") && it.contains("faselhdx")) return@withLock it 
+        return try {
+            val response = app.get(mainUrl, allowRedirects = true)
+            val finalUrl = response.url
+
+            val base = try {
+                val uri = java.net.URI(finalUrl)
+                "${uri.scheme}://${uri.host}"
+            } catch (e: Exception) {
+                mainUrl
             }
 
-            val targetStartUrl = "https://web31312x.faselhdx.bid"
-            val cm = CookieManager.getInstance()
-            val activity = context as? Activity
-            val doc = CloudflareSolver.solve(activity, targetStartUrl, lastValidUserAgent)
-            var currentDetectedUrl = doc?.baseUri() ?: targetStartUrl
-            if (currentDetectedUrl.contains("fasel-hd.co") || currentDetectedUrl.isBlank()) {
-                try {
-                    val cookies = cm.getCookie("https://www.fasel-hd.co") ?: ""
-                    val headers = getModernHeaders("https://www.fasel-hd.co/").apply {
-                        if (cookies.isNotBlank()) this["Cookie"] = cookies
-                    }
-                    val response = app.get("https://www.fasel-hd.co/", headers = headers, allowRedirects = true)
-                    if (response.url.contains("faselhdx")) {
-                        currentDetectedUrl = response.url
-                    }
-                } catch (_: Exception) {}
-            }
-            val parsed = Uri.parse(currentDetectedUrl)
-            val host = parsed.host ?: ""
+            redirectUrl = base
 
-            val finalBase = if (host.contains("faselhdx") && !host.contains("fasel-hd.co")) {
-                "${parsed.scheme ?: "https"}://$host"
-            } else {
-                "https://web103012x.faselhdx.life"
-            }
-
-            redirectUrl = finalBase
-            finalBase
+            base
+        } catch (e: Exception) {
+            mainUrl
         }
     }
 
@@ -533,15 +514,20 @@ class FASELHD(private val context: Context) : MainAPI() {
         fun addResult(url: String) {
             val fixedUrl = fixUrl(url)
             if (blockedKeywords.none { fixedUrl.contains(it) }) {
+                // التأكد أنه رابط مشغل فيديو فعلي
                 if (fixedUrl.contains("player") || fixedUrl.contains("embed") || fixedUrl.contains("video")) {
                     results.add(fixedUrl)
                 }
             }
         }
+
+        // 1. وسوم iframe الأساسية
         doc.select("iframe[src]").forEach { el ->
             val src = el.attr("src")
             if (src.isNotBlank()) addResult(src)
         }
+
+        // 2. أحداث النقر الخاصة بتبديل السيرفرات (player_iframe)
         val onClickRegex = Regex("""player_iframe\.location\.href\s*=\s*['"]([^'"]+)['"]""")
         doc.select("[onclick]").forEach { el ->
             val onclick = el.attr("onclick")
@@ -549,6 +535,8 @@ class FASELHD(private val context: Context) : MainAPI() {
                 addResult(match.groupValues[1])
             }
         }
+
+        // 3. نصوص الجافاسكريبت المضمنة
         val scriptRegex = Regex("""https?://[^\s"'<>]+""")
         doc.select("script").forEach { s ->
             val data = s.data()
