@@ -69,23 +69,58 @@ class FASELHD(private val context: Context) : MainAPI() {
         var redirectUrl: String? = null
     }
     private suspend fun baseUrl(): String {
-        redirectUrl?.let { return it }
+        // إذا كان الرابط الحالي صالحاً ولا يساوي الدومين الوسيط، نستخدمه فوراً
+        redirectUrl?.let { 
+            if (!it.contains("fasel-hd.co")) return it 
+        }
 
-        return try {
-            val response = app.get(mainUrl, allowRedirects = true)
-            val finalUrl = response.url
-            val parsedUri = Uri.parse(finalUrl)
-            val scheme = parsedUri.scheme ?: "https"
-            val host = parsedUri.host
-
-            if (host.isNullOrBlank() || host == "null") {
-                mainUrl
-            } else {
-                val base = "$scheme://$host"
-                redirectUrl = base
-                base
+        return cfLock.withLock {
+            redirectUrl?.let { 
+                if (!it.contains("fasel-hd.co")) return@withLock it 
             }
-        } catch (e: Exception) {
+
+            val gatewayUrl = "https://www.fasel-hd.co"
+            val cm = CookieManager.getInstance()
+            var cookies = cm.getCookie(gatewayUrl) ?: ""
+
+            // 1. إذا لم تكن هناك كوكيز كلاودفلير، نشغل السولفر لجلبها أولاً
+            if (!cookies.contains("cf_clearance")) {
+                val activity = context as? Activity
+                CloudflareSolver.solve(activity, gatewayUrl, lastValidUserAgent)
+                cookies = cm.getCookie(gatewayUrl) ?: ""
+            }
+
+            // 2. الآن ومع وجود الكوكيز، نطلب رابط التحويل لنلتقط الـ 302
+            try {
+                val checkUrl = "$gatewayUrl/wp-admin/admin-ajax.php"
+                val headers = getModernHeaders(gatewayUrl).apply {
+                    if (cookies.isNotBlank()) this["Cookie"] = cookies
+                }
+
+                // نطلب بدون Follow Redirects حتى نقرأ هيدر الـ Location مباشرة
+                val resp = app.get(checkUrl, headers = headers, allowRedirects = false)
+
+                val location = resp.headers["location"] ?: resp.headers["Location"]
+                if (!location.isNullOrBlank()) {
+                    val uri = Uri.parse(location)
+                    val base = "${uri.scheme}://${uri.host}"
+                    redirectUrl = base
+                    return@withLock base
+                }
+
+                // إذا لم نجد Location، نطلب مع السماح بالتحويل
+                val followResp = app.get(checkUrl, headers = headers, allowRedirects = true)
+                val finalUri = Uri.parse(followResp.url)
+                val host = finalUri.host ?: ""
+                if (host.contains("faselhdx")) {
+                    val base = "${finalUri.scheme}://$host"
+                    redirectUrl = base
+                    return@withLock base
+                }
+            } catch (e: Exception) {
+                // في حال حدوث أي خطأ نلجأ إلى mainUrl الافتراضي
+            }
+
             mainUrl
         }
     }
