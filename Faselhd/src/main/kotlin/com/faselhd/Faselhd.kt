@@ -74,8 +74,6 @@ class FASELHD(private val context: Context) : MainAPI() {
         return try {
             val response = app.get(mainUrl, allowRedirects = true)
             val finalUrl = response.url
-
-            // فحص الرابط والتأكد من استخراج البروتوكول والدومين بشكل سليم
             val parsedUri = Uri.parse(finalUrl)
             val scheme = parsedUri.scheme ?: "https"
             val host = parsedUri.host
@@ -211,7 +209,6 @@ class FASELHD(private val context: Context) : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val base = baseUrl()
-        // استبدال آمن فقط إذا كان الرابط يبدأ بـ mainUrl
         val fixedUrl = if (request.data.startsWith(mainUrl)) {
             request.data.replace(mainUrl, base)
         } else {
