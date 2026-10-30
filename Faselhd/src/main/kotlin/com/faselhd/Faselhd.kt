@@ -590,8 +590,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 visibility = View.VISIBLE
             }
             rootLayout.addView(webView)
-
-            // 1. القائمة الجانبية (الأزرار المكتشفة)
             val sidePanelScroll = ScrollView(activity).apply {
                 val widthPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 150f, resources.displayMetrics).toInt()
                 layoutParams = FrameLayout.LayoutParams(widthPx, FrameLayout.LayoutParams.MATCH_PARENT, Gravity.START or Gravity.TOP).apply {
@@ -616,8 +614,6 @@ class FASELHD(private val context: Context) : MainAPI() {
             buttonContainer.addView(panelTitle)
             sidePanelScroll.addView(buttonContainer)
             rootLayout.addView(sidePanelScroll)
-
-            // 2. لوحة سفلية لعرض روابط M3U8 الملتقطة مباشرة
             val bottomLinksScroll = ScrollView(activity).apply {
                 val heightPx = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 140f, resources.displayMetrics).toInt()
                 layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, heightPx, Gravity.BOTTOM).apply {
@@ -640,8 +636,6 @@ class FASELHD(private val context: Context) : MainAPI() {
             linksContainer.addView(linksTitle)
             bottomLinksScroll.addView(linksContainer)
             rootLayout.addView(bottomLinksScroll)
-
-            // 3. زر الحفظ والإنهاء
             val finishManualBtn = android.widget.Button(activity).apply {
                 text = "إنهاء ✔"
                 setTextColor(Color.WHITE)
@@ -701,8 +695,6 @@ class FASELHD(private val context: Context) : MainAPI() {
             finishManualBtn.setOnClickListener {
                 safeFinish()
             }
-
-            // معالجة الرابط الملتقط بشكل آمن وتحديث الواجهة على الـ Main Thread
             fun handleFoundLink(url: String) {
                 val clean = url.substringBefore("?")
                 if (!clean.endsWith(".m3u8")) return
@@ -712,8 +704,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 }
 
                 Log.d("FASEL_INSPECT", "🎯 تم التقاط رابط (.m3u8): $url")
-
-                // تشغيل التحديثات والـ Toast حصراً على الـ Main Looper لتجنب الانهيار
                 activity.runOnUiThread {
                     Toast.makeText(activity, "تم التقاط جودة جديدة!", Toast.LENGTH_SHORT).show()
 
@@ -738,8 +728,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                     linksContainer.addView(tv)
                 }
             }
-
-            // كود JavaScript لاكتشاف عناصر شريط الجودة الظاهرة في الصورة
             class InspectBridge {
                 @JavascriptInterface
                 fun onButtonsFound(buttonsJson: String) {
@@ -786,8 +774,6 @@ class FASELHD(private val context: Context) : MainAPI() {
 
                                     setOnClickListener {
                                         Log.d("FASEL_INSPECT", " تم النقر على: $label (id: $uniqueId)")
-
-                                        // تنفيذ محاكاة نقر كاملة تشمل كل الأحداث لضمان الاستجابة
                                         val clickCode = """
                                             (function() {
                                                 const el = document.querySelector('[data-inspect-id="$uniqueId"]');
@@ -813,8 +799,6 @@ class FASELHD(private val context: Context) : MainAPI() {
             }
 
             webView.addJavascriptInterface(InspectBridge(), "InspectBridge")
-
-            // فحص عناصر الشريط العلوي بدقة (الصورة تظهر ul.quality_ch أو عناصر jwplayer)
             val scannerJs = """
             (function() {
                 window.__scanQualityButtons = function() {
@@ -823,7 +807,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                     let counter = 0;
                     elements.forEach(el => {
                         let txt = (el.innerText || el.textContent || '').trim();
-                        // فلترة العناصر لتشمل الجودات الظاهرة
                         if (txt.length > 0 && txt.length < 25 && !txt.includes('\n')) {
                             counter++;
                             let uid = 'btn_' + counter;
@@ -983,8 +966,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 } catch (e: Exception) {
                     Log.w("FASELHD_LOAD", "M3u8Helper failed: ${e.message}")
                 }
-
-                // استخدام newExtractorLink كخيار احتياطي عند فشل المساعد
                 if (!successWithHelper) {
                     val label = if (m3u8Url.contains("master")) "Auto / Multi" else "Direct Stream"
                     callback(
