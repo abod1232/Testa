@@ -69,7 +69,6 @@ class FASELHD(private val context: Context) : MainAPI() {
         var redirectUrl: String? = null
     }
     private suspend fun baseUrl(): String {
-        // إذا كان الرابط النهائي مسجلاً مسبقاً وليس الدومين الوسيط، نستخدمه فوراً
         redirectUrl?.let { 
             if (!it.contains("fasel-hd.co") && it.contains("faselhdx")) return it 
         }
@@ -82,35 +81,26 @@ class FASELHD(private val context: Context) : MainAPI() {
             val targetStartUrl = "https://web31312x.faselhdx.bid"
             val cm = CookieManager.getInstance()
             val activity = context as? Activity
-
-            // 1. تشغيل السولفر لفتح الرابط الأساسي وتخطي الكلاودفلير
             val doc = CloudflareSolver.solve(activity, targetStartUrl, lastValidUserAgent)
             var currentDetectedUrl = doc?.baseUri() ?: targetStartUrl
-
-            // 2. إذا توقف المتصفح عند الدومين الوسيط (fasel-hd.co)، نرسل طلباً حاملاً الكوكيز لإجباره على التحويل للدومين النهائي
             if (currentDetectedUrl.contains("fasel-hd.co") || currentDetectedUrl.isBlank()) {
                 try {
                     val cookies = cm.getCookie("https://www.fasel-hd.co") ?: ""
                     val headers = getModernHeaders("https://www.fasel-hd.co/").apply {
                         if (cookies.isNotBlank()) this["Cookie"] = cookies
                     }
-
-                    // طلب مباشر يتبع التحويل من الوسيط إلى الدومين النهائي
                     val response = app.get("https://www.fasel-hd.co/", headers = headers, allowRedirects = true)
                     if (response.url.contains("faselhdx")) {
                         currentDetectedUrl = response.url
                     }
                 } catch (_: Exception) {}
             }
-
-            // 3. استخراج الدومين النهائي وتثبيته
             val parsed = Uri.parse(currentDetectedUrl)
             val host = parsed.host ?: ""
 
             val finalBase = if (host.contains("faselhdx") && !host.contains("fasel-hd.co")) {
                 "${parsed.scheme ?: "https"}://$host"
             } else {
-                // دومين احتياطي في حال فشل كل محاولات التحويل
                 "https://web103012x.faselhdx.life"
             }
 
