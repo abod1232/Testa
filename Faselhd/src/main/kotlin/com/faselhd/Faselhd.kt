@@ -69,6 +69,7 @@ class FASELHD(private val context: Context) : MainAPI() {
         var redirectUrl: String? = null
     }
     private suspend fun baseUrl(): String {
+        // إذا كان الرابط النهائي محفوظاً بالفعل وليس هو الدومين الوسيط، نستخدمه مباشرة
         redirectUrl?.let { 
             if (!it.contains("fasel-hd.co")) return it 
         }
@@ -81,37 +82,37 @@ class FASELHD(private val context: Context) : MainAPI() {
             val gatewayUrl = "https://www.fasel-hd.co"
             val cm = CookieManager.getInstance()
             var cookies = cm.getCookie(gatewayUrl) ?: ""
+
+            // 1. إذا لم تكن كوكيز الحماية موجودة، نستدعي السولفر لحلها أولاً
             if (!cookies.contains("cf_clearance")) {
                 val activity = context as? Activity
-                CloudflareSolver.solve(activity, gatewayUrl, lastValidUserAgent)
+                CloudflareSolver.solve(activity, "$gatewayUrl/", lastValidUserAgent)
                 cookies = cm.getCookie(gatewayUrl) ?: ""
             }
-            try {
-                val checkUrl = "$gatewayUrl/wp-admin/admin-ajax.php"
-                val headers = getModernHeaders(gatewayUrl).apply {
+
+            // 2. نطلب $gatewayUrl/ مع الكوكيز ونترك التحويل التلقائي يوصلنا للدومين الجديد
+            return@withLock try {
+                val headers = getModernHeaders("$gatewayUrl/").apply {
                     if (cookies.isNotBlank()) this["Cookie"] = cookies
                 }
-                val resp = app.get(checkUrl, headers = headers, allowRedirects = false)
 
-                val location = resp.headers["location"] ?: resp.headers["Location"]
-                if (!location.isNullOrBlank()) {
-                    val uri = Uri.parse(location)
-                    val base = "${uri.scheme}://${uri.host}"
+                val response = app.get("$gatewayUrl/", headers = headers, allowRedirects = true)
+                val finalUrl = response.url
+
+                val parsedUri = Uri.parse(finalUrl)
+                val host = parsedUri.host ?: ""
+
+                // إذا وصلنا بنجاح لدومين غير الوسيط (مثل .life)، نثبته
+                if (host.isNotBlank() && !host.contains("fasel-hd.co")) {
+                    val base = "${parsedUri.scheme ?: "https"}://$host"
                     redirectUrl = base
-                    return@withLock base
-                }
-                val followResp = app.get(checkUrl, headers = headers, allowRedirects = true)
-                val finalUri = Uri.parse(followResp.url)
-                val host = finalUri.host ?: ""
-                if (host.contains("faselhdx")) {
-                    val base = "${finalUri.scheme}://$host"
-                    redirectUrl = base
-                    return@withLock base
+                    base
+                } else {
+                    mainUrl
                 }
             } catch (e: Exception) {
+                mainUrl
             }
-
-            mainUrl
         }
     }
 
