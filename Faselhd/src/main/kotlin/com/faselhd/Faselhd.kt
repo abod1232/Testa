@@ -554,137 +554,117 @@ class FASELHD(private val context: Context) : MainAPI() {
     }
 
 
+    
     @SuppressLint("SetJavaScriptEnabled")
     private suspend fun resolveWithWebView(
         iframeUrl: String,
         referer: String
-    ): String? = suspendCancellableCoroutine { cont ->
+    ): List<String> = suspendCancellableCoroutine { cont ->
 
         val activity = context as? Activity
         if (activity == null || activity.isFinishing) {
-            cont.resume(null)
+            cont.resume(emptyList())
             return@suspendCancellableCoroutine
         }
 
         val finalUrl = iframeUrl.replace("&amp;", "&").trim()
-        val originalHost = try { Uri.parse(finalUrl).host?.replace("www.", "") ?: "" } catch (e: Exception) { "" }
+        val iframeUri = try { Uri.parse(finalUrl) } catch (e: Exception) { null }
+        val iframeOrigin = if (iframeUri != null && iframeUri.host != null) "${iframeUri.scheme}://${iframeUri.host}" else referer
 
         activity.runOnUiThread {
-            val dialog = Dialog(activity)
-
-            dialog.setCancelable(false)
-            dialog.setCanceledOnTouchOutside(false)
+            val dialog = Dialog(activity, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
             dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
-            dialog.setCancelable(false) // غير قابل للإلغاء لأنه مخفي
+            dialog.setCancelable(true) // يمكنك إغلاقها بالرجوع
 
-            dialog.window?.apply {
-                setBackgroundDrawableResource(android.R.color.transparent)
-                setDimAmount(0f) // بدون تعتيم
-                clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-                addFlags(
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+            // إنشاء الحاوية الرئيسية (شاشة كاملة)
+            val rootLayout = FrameLayout(activity).apply {
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
                 )
-
-                attributes = attributes?.apply {
-                    width = 1
-                    height = 1
-                    x = -10000
-                    y = -10000
-                    gravity = Gravity.START or Gravity.TOP
-                }
             }
 
+            // إعداد الـ WebView ليكون ظاهراً بملء الشاشة
             val webView = WebView(activity).apply {
-                layoutParams = ViewGroup.LayoutParams(1, 1)
-                visibility = View.INVISIBLE // إخفاء إضافي للعنصر نفسه
-                isHorizontalScrollBarEnabled = false
-                isVerticalScrollBarEnabled = false
+                layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+                visibility = View.VISIBLE
+            }
+            rootLayout.addView(webView)
+
+            // إنشاء قائمة جانبية عائمة (Floating Sidebar)
+            val sidePanelScroll = ScrollView(activity).apply {
+                layoutParams = FrameLayout.LayoutParams(
+                    TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 150f, resources.displayMetrics).toInt(),
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    Gravity.END or Gravity.TOP
+                ).apply {
+                    setMargins(0, 40, 10, 40)
+                }
+                setBackgroundColor(Color.parseColor("#CC111111"))
+                elevation = 20f
             }
 
-            try {
-                dialog.setContentView(webView, ViewGroup.LayoutParams(1, 1))
-                dialog.show()
-            } catch (e: Exception) {
-                try {
-                    val decor = activity.window?.decorView as? ViewGroup
-                    decor?.addView(webView, FrameLayout.LayoutParams(1, 1, Gravity.START or Gravity.TOP))
-                } catch (_: Exception) {}
+            val buttonContainer = LinearLayout(activity).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(10, 10, 10, 10)
             }
+
+            val panelTitle = TextView(activity).apply {
+                text = "أزرار الجودة المكتشفة"
+                setTextColor(Color.YELLOW)
+                textSize = 12f
+                gravity = Gravity.CENTER
+                setPadding(0, 10, 0, 15)
+            }
+            buttonContainer.addView(panelTitle)
+            sidePanelScroll.addView(buttonContainer)
+            rootLayout.addView(sidePanelScroll)
+
+            dialog.setContentView(rootLayout)
+            dialog.show()
+
+            // إعدادات الـ WebView
             webView.settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
                 databaseEnabled = true
-                allowContentAccess = true
-                allowFileAccess = true
-                allowFileAccessFromFileURLs = true
-                allowUniversalAccessFromFileURLs = true
-                javaScriptCanOpenWindowsAutomatically = true
-                setSupportMultipleWindows(true)
                 mediaPlaybackRequiresUserGesture = false
-                loadWithOverviewMode = true
-                useWideViewPort = true
-                builtInZoomControls = true
-                displayZoomControls = false
                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                 cacheMode = WebSettings.LOAD_DEFAULT
                 userAgentString = lastValidUserAgent
-                blockNetworkImage = true
+                useWideViewPort = true
+                loadWithOverviewMode = true
             }
-
-            webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
 
             val cookieManager = CookieManager.getInstance()
             try {
                 cookieManager.setAcceptCookie(true)
                 cookieManager.setAcceptThirdPartyCookies(webView, true)
-                cookieManager.flush()
             } catch (_: Exception) {}
-
-            val client = app.baseClient.newBuilder()
-                .followRedirects(true)
-                .followSslRedirects(true)
-                .cookieJar(okhttp3.CookieJar.NO_COOKIES)
-                .build()
 
             val foundM3u8 = linkedSetOf<String>()
             var finished = false
             val finishLock = Any()
             val handler = Handler(Looper.getMainLooper())
-            var finishRunnable: Runnable? = null
-
-            var currentAttempt = 0
-            val maxAttempts = 2
-            val attemptTimeoutMs = 12_000L
-            var attemptTimeoutRunnable: Runnable? = null
-            var autoTouchRunnable: Runnable? = null // سنستخدمه لتكرار تشغيل الـ JS داخل المحاولة
 
             fun cleanup() {
-                try { attemptTimeoutRunnable?.let { handler.removeCallbacks(it) } } catch (_: Exception) {}
-                try { autoTouchRunnable?.let { handler.removeCallbacks(it) } } catch (_: Exception) {}
                 try { (webView.parent as? ViewGroup)?.removeView(webView) } catch (_: Exception) {}
                 try { webView.stopLoading() } catch (_: Exception) {}
                 try { webView.destroy() } catch (_: Exception) {}
-                try { cookieManager.flush() } catch (_: Exception) {}
                 try { if (dialog.isShowing) dialog.dismiss() } catch (_: Exception) {}
             }
 
-            fun safeFinish(result: String?) {
+            fun safeFinish() {
                 synchronized(finishLock) {
                     if (finished) return
                     finished = true
                 }
-                try { if (cont.isActive) cont.resume(result) } catch (_: Exception) {}
+                val list = synchronized(foundM3u8) { foundM3u8.toList() }
+                try { if (cont.isActive) cont.resume(list) } catch (_: Exception) {}
                 cleanup()
-            }
-
-            fun chooseAndFinish() {
-                if (foundM3u8.isEmpty()) { safeFinish(null); return }
-                val strict = foundM3u8.firstOrNull {
-                    val clean = it.substringBefore("?")
-                    clean.endsWith(".m3u8") && (clean.contains("master") || clean.contains("playlist") || clean.contains("index"))
-                } ?: foundM3u8.firstOrNull { it.substringBefore("?").endsWith(".m3u8") }
-                safeFinish(strict ?: foundM3u8.first())
             }
 
             fun handleFoundLink(url: String) {
@@ -693,125 +673,109 @@ class FASELHD(private val context: Context) : MainAPI() {
                 synchronized(foundM3u8) {
                     if (!foundM3u8.contains(url)) {
                         foundM3u8.add(url)
-                        Log.d("FASEL_FAST", "🎯 Caught Link (Attempt $currentAttempt): $url")
-                        finishRunnable?.let { handler.removeCallbacks(it) }
-                        if (clean.contains("master") || clean.contains("playlist") || clean.contains("index")) {
-                            finishRunnable = Runnable { chooseAndFinish() }
-                            handler.postDelayed(finishRunnable!!, 300)
-                        } else {
-                            if (finishRunnable == null) {
-                                finishRunnable = Runnable { chooseAndFinish() }
-                                handler.postDelayed(finishRunnable!!, 1500)
+                        Log.d("FASEL_INSPECT", "🎯 تم التقاط رابط (.m3u8): $url")
+                        // إشعار مرئي
+                        Toast.makeText(activity, "تم التقاط m3u8!", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+
+            // كود JavaScript لاستخراج الأزرار وعناصر الجودة وإرسالها للـ Android
+            class InspectBridge {
+                @JavascriptInterface
+                fun onButtonsFound(buttonsJson: String) {
+                    activity.runOnUiThread {
+                        try {
+                            val array = org.json.JSONArray(buttonsJson)
+                            buttonContainer.removeAllViews()
+                            buttonContainer.addView(panelTitle)
+
+                            // إضافة زر لإعادة المسح
+                            val refreshBtn = android.widget.Button(activity).apply {
+                                text = "🔄 إعادة مسح"
+                                textSize = 10f
+                                setBackgroundColor(Color.DKGRAY)
+                                setTextColor(Color.WHITE)
+                                setOnClickListener {
+                                    webView.evaluateJavascript("window.__scanQualityButtons && window.__scanQualityButtons();", null)
+                                }
                             }
-                        }
-                    }
-                }
-            }
-            fun startNextAttempt() {
-                synchronized(finishLock) { if (finished) return }
+                            buttonContainer.addView(refreshBtn)
 
-                if (currentAttempt >= maxAttempts) {
-                    Log.d("FASEL_FAST", "❌ All $maxAttempts attempts failed.")
-                    chooseAndFinish()
-                    return
-                }
+                            for (i in 0 until array.length()) {
+                                val item = array.getJSONObject(i)
+                                val label = item.getString("text")
+                                val selector = item.getString("selector")
+                                val index = item.getInt("index")
 
-                Log.d("FASEL_FAST", "🔄 Loading Attempt ${currentAttempt + 1}/$maxAttempts")
-                attemptTimeoutRunnable?.let { handler.removeCallbacks(it) }
-                attemptTimeoutRunnable = Runnable {
-                    synchronized(foundM3u8) {
-                        if (foundM3u8.isEmpty()) {
-                            Log.d("FASEL_FAST", "⚠️ Attempt ${currentAttempt + 1} Timed Out.")
-                            currentAttempt++
-                            startNextAttempt() // ابدأ المحاولة التالية
-                        } else {
-                            chooseAndFinish()
-                        }
-                    }
-                }
-                handler.postDelayed(attemptTimeoutRunnable!!, attemptTimeoutMs)
-                activity.runOnUiThread {
-                    try { webView.loadUrl(finalUrl, mapOf("Referer" to referer)) } catch (_: Exception) {}
-                }
-            }
-            fun getStrategyJs(attempt: Int): String {
-                return """
-                (function() {
-                    const strategy = $attempt;
-                    Object.defineProperty(navigator, 'userActivation', { get: () => ({ hasBeenActive: true, isActive: true }) });
-                    const Decryptor = {
-                        key1: "V2@%YSU2B]G~", key2: "bv0fim4qf17",
-                        ie: function(c) {
-                            const x = c.charCodeAt(0);
-                            if(x>=97 && x<=122) return x-97; if(x>=65 && x<=90) return x-65+26;
-                            if(x>=48 && x<=57) return x-48+52; if(x===43) return 62; if(x===47) return 63; return 0;
-                        },
-                        bn: function(x) {
-                            if(x<=25) return String.fromCharCode(x+97); if(x<=51) return String.fromCharCode(x-26+65);
-                            if(x<=61) return String.fromCharCode(x-52+48); if(x===62) return '+'; if(x===63) return '/'; return ' ';
-                        },
-                        dec: function(e, k) {
-                            let r=''; for(let i=0; i<e.length; i++) {
-                                const kc=k[i%(k.length-1)]; const M=this.ie(e[i])-this.ie(kc); r+=this.bn(M<0?M+64:M);
-                            } return r;
-                        },
-                        parse: function(url) {
-                            if(!url || !url.startsWith('enc:')) return url;
-                            try { return this.dec(this.dec(url.substring(4), this.key2), this.key1); } catch(e){return url;}
-                        }
-                    };
-                    if ((strategy === 0 || strategy === 4) && !window.__isDecryptionHooked) {
-                        window.__isDecryptionHooked = true;
-                        let chk = setInterval(function() {
-                            if (typeof window.jwplayer === 'function' && !window.jwplayer.__hooked) {
-                                const orig = window.jwplayer;
-                                window.jwplayer = function() {
-                                    const p = orig.apply(this, arguments);
-                                    if (!p.__sHook) {
-                                        p.__sHook = true;
-                                        const oSetup = p.setup;
-                                        p.setup = function(cfg) {
-                                            try {
-                                                let s = cfg.sources || (cfg.playlist && cfg.playlist[0] ? cfg.playlist[0].sources : []);
-                                                if (s) s.forEach(x => { if (x.file && x.file.startsWith('enc:')) x.file = Decryptor.parse(x.file); });
-                                            } catch(e){}
-                                            cfg.autostart = true; cfg.mute = true;
-                                            return oSetup.call(this, cfg);
-                                        };
+                                val btn = android.widget.Button(activity).apply {
+                                    text = label
+                                    textSize = 11f
+                                    setTextColor(Color.WHITE)
+                                    setBackgroundColor(Color.parseColor("#2196F3"))
+                                    val params = LinearLayout.LayoutParams(
+                                        LinearLayout.LayoutParams.MATCH_PARENT,
+                                        LinearLayout.LayoutParams.WRAP_CONTENT
+                                    )
+                                    params.setMargins(0, 8, 0, 8)
+                                    layoutParams = params
+
+                                    setOnClickListener {
+                                        Log.d("FASEL_INSPECT", " تم الضغط على زر التجربة: '$label' | Selector: $selector | Index: $index")
+                                        val clickJs = """
+                                            (function() {
+                                                const els = document.querySelectorAll('$selector');
+                                                if (els && els[$index]) {
+                                                    els[$index].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                                                    els[$index].click();
+                                                    console.log('CLICKED_BTN::' + '$label');
+                                                }
+                                            })();
+                                        """.trimIndent()
+                                        webView.evaluateJavascript(clickJs, null)
                                     }
-                                    return p;
-                                };
-                                Object.assign(window.jwplayer, orig);
-                                window.jwplayer.prototype = orig.prototype;
-                                window.jwplayer.__hooked = true;
-                                clearInterval(chk);
+                                }
+                                buttonContainer.addView(btn)
                             }
-                        }, 10);
+                        } catch (e: Exception) {
+                            Log.e("FASEL_INSPECT", "خطأ في تحليل الأزرار: ${e.message}")
+                        }
                     }
-                    try {
-                        let p = typeof window.jwplayer === 'function' ? window.jwplayer("player") : null;
-                        let isPlaying = p && (p.getState() === 'playing' || p.getState() === 'buffering');
-                        if (isPlaying) return;
+                }
+            }
 
-                        if (strategy === 0 || strategy === 1 || strategy === 7) {
-                            var els = document.querySelectorAll('button, a, [onclick], video, [role="button"], .jw-icon, .vjs-control, .po-play-btn, .plyr__control');
-                            els.forEach(el => {
-                                if (el.href && (el.href.includes('google.com') || el.href.includes('recaptcha'))) return;
-                                try { el.click(); } catch(e){}
+            webView.addJavascriptInterface(InspectBridge(), "InspectBridge")
+
+            val scannerJs = """
+            (function() {
+                window.__scanQualityButtons = function() {
+                    let results = [];
+                    // البحث عن عناصر الجودة في faselhd ومشغل jwplayer ومحددات quality_ch
+                    let targets = document.querySelectorAll('.quality_ch, ul.quality_ch li, [class*="quality"], [id*="quality"], button, .jw-settings-content-item, .jw-reset-text');
+                    targets.forEach((el, idx) => {
+                        let txt = (el.innerText || el.textContent || '').trim();
+                        if (txt.length > 0 && txt.length < 35) {
+                            results.push({
+                                text: txt,
+                                selector: el.className ? '.' + el.className.trim().split(/\s+/).join('.') : el.tagName.toLowerCase(),
+                                index: idx
                             });
                         }
-                        if (strategy === 2 || strategy === 7) {
-                            if (p && typeof p.play === 'function') { p.setMute(true); p.play(); }
-                        }
-           
-                    } catch(e) {}
-                })();
+                    });
+                    if (window.InspectBridge) {
+                        window.InspectBridge.onButtonsFound(JSON.stringify(results));
+                    }
+                };
+
+                // تشغيل تلقائي أولي بعد استقرار المشغل
+                setTimeout(window.__scanQualityButtons, 2000);
+                setTimeout(window.__scanQualityButtons, 4000);
+            })();
             """.trimIndent()
-            }
+
             val fastSnifferJs = """
             (function() {
                 try {
-                    window.open = function() { return null; };
                     if (!window.__NET_HOOKED__) {
                         window.__NET_HOOKED__ = true;
                         const _fetch = window.fetch;
@@ -838,87 +802,21 @@ class FASELHD(private val context: Context) : MainAPI() {
                     }
                 } catch(err){}
             })();
-        """.trimIndent()
+            """.trimIndent()
 
-            lateinit var sharedWebViewClient: WebViewClient
-            sharedWebViewClient = object : WebViewClient() {
-
-                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                    val url = request?.url.toString()
-                    val lowerUrl = url.lowercase()
-
-                    if (!lowerUrl.startsWith("http")) return true
-
-                    if (lowerUrl.contains("policies.google.com") || lowerUrl.contains("recaptcha") || lowerUrl.contains("mcaptcha") || lowerUrl.contains("melbet")) {
-                        Handler(Looper.getMainLooper()).post { view?.loadUrl(finalUrl, mapOf("Referer" to referer)) }
-                        return true
-                    }
-
-                    val currentHost = try { Uri.parse(url).host?.replace("www.", "") ?: "" } catch(e:Exception){""}
-                    if (originalHost.isNotBlank() && currentHost.isNotBlank() && !currentHost.contains(originalHost)) {
-                        return true
-                    }
-
-                    return false
-                }
-
-                override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                    super.onPageStarted(view, url, favicon)
-                    view?.evaluateJavascript(fastSnifferJs, null)
-                }
-
+            webView.webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     view?.evaluateJavascript(fastSnifferJs, null)
-                    autoTouchRunnable?.let { handler.removeCallbacks(it) }
-                    autoTouchRunnable = object : Runnable {
-                        override fun run() {
-                            if (finished) return
-                            view?.evaluateJavascript(getStrategyJs(currentAttempt), null)
-                            handler.postDelayed(this, 1000)
-                        }
-                    }
-                    handler.postDelayed(autoTouchRunnable!!, 500)
+                    view?.evaluateJavascript(scannerJs, null)
                 }
+
                 override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                     val url = request.url.toString()
-                    val method = request.method
                     val lower = url.lowercase()
 
-                    if (lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".woff2") || lower.endsWith(".css")) {
-                        return super.shouldInterceptRequest(view, request)
-                    }
-
-                    if (method.equals("GET", ignoreCase = true) && lower.contains(".m3u8") && lower.substringBefore("?").endsWith(".m3u8")) {
+                    if (lower.contains(".m3u8")) {
                         handleFoundLink(url)
-                        try {
-                            val reqBuilder = OkRequest.Builder().url(url)
-                                .header("User-Agent", lastValidUserAgent)
-                                .header("Referer", referer)
-                                .header("Origin", mainUrl)
-                            try { cookieManager.getCookie(url)?.let { ck -> reqBuilder.header("Cookie", ck) } } catch (_: Exception) {}
-
-                            val response = client.newCall(reqBuilder.build()).execute()
-                            if (!response.isSuccessful) return null
-
-                            response.headers("Set-Cookie").forEach { try { cookieManager.setCookie(url, it) } catch (_: Exception) {} }
-                            val contentType = response.header("content-type")?.split(";")?.first() ?: "application/vnd.apple.mpegurl"
-                            return WebResourceResponse(contentType, "utf-8", response.body?.byteStream())
-                        } catch (e: Exception) { return null }
-                    }
-
-                    if (method.equals("GET", ignoreCase = true) && (lower.contains("fasel") || lower.contains("jwplayer") || lower.contains("config") || lower.contains("player"))) {
-                        try {
-                            val reqBuilder = OkRequest.Builder().url(url)
-                                .header("User-Agent", lastValidUserAgent)
-                                .header("Referer", referer)
-                            try { cookieManager.getCookie(url)?.let { ck -> reqBuilder.header("Cookie", ck) } } catch (_: Exception) {}
-
-                            val response = client.newCall(reqBuilder.build()).execute()
-                            response.headers("Set-Cookie").forEach { try { cookieManager.setCookie(url, it) } catch (_: Exception) {} }
-                            val contentType = response.header("content-type")?.split(";")?.first() ?: "text/html"
-                            return WebResourceResponse(contentType, "utf-8", response.body?.byteStream())
-                        } catch (e: Exception) { return super.shouldInterceptRequest(view, request) }
                     }
                     return super.shouldInterceptRequest(view, request)
                 }
@@ -929,54 +827,47 @@ class FASELHD(private val context: Context) : MainAPI() {
                 }
             }
 
-            webView.webViewClient = sharedWebViewClient
-
             webView.webChromeClient = object : WebChromeClient() {
                 override fun onConsoleMessage(cm: ConsoleMessage?): Boolean {
                     val msg = cm?.message() ?: ""
                     if (msg.startsWith("NET_M3U8::")) {
                         handleFoundLink(msg.substringAfter("::").trim())
+                    } else if (msg.startsWith("CLICKED_BTN::")) {
+                        Log.d("FASEL_INSPECT", "✅ تم تنفيذ النقر بنجاح على: ${msg.substringAfter("::")}")
                     }
                     return true
                 }
+            }
 
-                override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?): Boolean {
-                    try {
-                        val transport = resultMsg?.obj as? WebView.WebViewTransport
-
-                        val adWebView = WebView(activity).apply {
-                            layoutParams = FrameLayout.LayoutParams(1, 1, Gravity.START or Gravity.TOP)
-                            visibility = View.INVISIBLE
-                        }
-                        adWebView.settings.apply {
-                            javaScriptEnabled = true
-                            domStorageEnabled = true
-                            userAgentString = lastValidUserAgent
-                        }
-
-                        try { (activity.window?.decorView as? ViewGroup)?.addView(adWebView) } catch (_: Exception) {}
-
-                        adWebView.webViewClient = sharedWebViewClient
-                        transport?.webView = adWebView
-                        resultMsg?.sendToTarget()
-
-                        handler.postDelayed({
-                            try {
-                                (adWebView.parent as? ViewGroup)?.removeView(adWebView)
-                                adWebView.destroy()
-                            } catch (e: Exception) {}
-                        }, 1000)
-
-                        return true
-                    } catch (e: Exception) { return false }
+            // زر إنهاء واختيار في الزاوية اليسرى السفلية لإغلاق الفحص
+            val finishManualBtn = android.widget.Button(activity).apply {
+                text = "حفظ وإنهاء ✔"
+                setTextColor(Color.WHITE)
+                setBackgroundColor(Color.parseColor("#4CAF50"))
+                layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.START or Gravity.BOTTOM
+                ).apply {
+                    setMargins(20, 0, 0, 20)
+                }
+                setOnClickListener {
+                    safeFinish()
                 }
             }
-            startNextAttempt()
+            rootLayout.addView(finishManualBtn)
 
-            cont.invokeOnCancellation { handler.post { safeFinish(null) } }
+            webView.loadUrl(finalUrl, mapOf("Referer" to referer))
+
+            dialog.setOnDismissListener {
+                safeFinish()
+            }
+
+            cont.invokeOnCancellation {
+                handler.post { safeFinish() }
+            }
         }
     }
-
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
