@@ -72,8 +72,6 @@ class FASELHD(private val context: Context) : MainAPI() {
     companion object {
         var redirectUrl: String? = null
     }
-
-    // تُرجع الدومين المحفوظ إن وُجد، وإلا تعتمد على mainUrl مباشرة بدون أي طلبات
     private fun baseUrl(): String {
         return redirectUrl ?: mainUrl
     }
