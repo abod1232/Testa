@@ -56,6 +56,8 @@ import java.io.InputStream
 import android.webkit.SslErrorHandler
 import android.widget.Toast
 import com.lagradost.cloudstream3.newMovieSearchResponse
+import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
+import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
 
 class FASELHD(private val context: Context) : MainAPI() {
     override var name = "FASELHD"
