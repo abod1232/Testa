@@ -70,17 +70,12 @@ class FASELHD(private val context: Context) : MainAPI() {
 
     }
     private suspend fun baseUrl(): String {
-        // إذا كان السولفر قد اكتشف الرابط بالفعل، نعيده فوراً
         redirectUrl?.let { return it }
 
         return cfLock.withLock {
             redirectUrl?.let { return@withLock it }
-
-            // تشغيل السولفر لجلب الرابط وتجاوز الحماية
             val activity = context as? Activity
             CloudflareSolver.solve(activity, "$mainUrl/main", lastValidUserAgent)
-
-            // نرجع الرابط الذي تم حفظه بواسطة السولفر، أو mainUrl كخيار أخير
             redirectUrl ?: mainUrl
         }
     }
