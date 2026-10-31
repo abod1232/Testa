@@ -111,8 +111,6 @@ class Anime3rb(val context: Context) : MainAPI() {
 
     val scriptTag = mainDoc.selectFirst("script[data-csrf]") ?: return emptyList()
     val csrfToken = scriptTag.attr("data-csrf")
-    
-    // التعديل هنا: جلب رابط التحديث ديناميكياً بدلاً من كتابته يدوياً
     val updateUriAttr = scriptTag.attr("data-update-uri")
     val updateUrl = if (updateUriAttr.isNotBlank()) {
         toAbsoluteUrl(updateUriAttr)
