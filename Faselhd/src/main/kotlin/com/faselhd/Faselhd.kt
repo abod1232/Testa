@@ -65,11 +65,6 @@ class FASELHD(private val context: Context) : MainAPI() {
     override val hasMainPage = true
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
     companion object {
-
-        var redirectUrl: String? = null
-
-    }
-    companion object {
         var redirectUrl: String? = null
     }
     private fun baseUrl(): String {
