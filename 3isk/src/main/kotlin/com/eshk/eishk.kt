@@ -1,312 +1,201 @@
 package com.eshk
 
+import android.content.Context
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.utils.ExtractorLink
-import com.lagradost.cloudstream3.utils.ExtractorLinkType
-import com.lagradost.cloudstream3.utils.Qualities
-import com.lagradost.cloudstream3.utils.newExtractorLink
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
-import org.json.JSONObject
-import java.net.URLDecoder
+import com.lagradost.cloudstream3.utils.*
+import org.jsoup.Jsoup
+import org.jsoup.nodes.Document
+import org.jsoup.nodes.Element
 import java.net.URLEncoder
 
-class OscarTvProvider : MainAPI() {
 
-    override var name = "Oscar TV"
-    override var mainUrl = "https://api.ossccaarr111.online"
-    override var lang = "ar"
+
+class Anime3rb(val context: Context) : MainAPI() {
+    override var mainUrl = "https://anime3rb.com"
+    override var name = "Anime3rb"
     override val hasMainPage = true
-    override val hasDownloadSupport = true
-    override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime, TvType.Live)
+    override var lang = "ar"
+    override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie, TvType.OVA)
 
     companion object {
-        private const val STEP1 = "https://flech.tn/scrapefinal/dramabox/step1_prepare_oscar.php"
-        private const val PLAY_UA = "Mozilla/5.0 (Linux; Android 16; RMX5061 Build/BP2A.250605.015; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/156.0.8078.47 Mobile Safari/537.36"
-        private const val FIXED_AUTH = "Bearer 5a33c7a64c73f07bd66439781d42103ffcc881ba626be87689bbeb9d78106078"
-        private const val FIXED_DEVICE_ID = "fc9f97ed-761b-3e77-8137-0ee6450d980e"
-        private const val FIXED_KEY_ID = "cfd293b3863ce773eaae9976ad51a263e3b63e6bb2f27dd623e85f855c3267e4"
+        private var savedCookies: String = ""
+        private const val USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+        val NON_DIGITS = Regex("[^0-9]")
+        val TITLE_EP_REGEX = Regex("الحلقة \\d+")
     }
-    private fun JSONObject.str(vararg keys: String): String? {
-        for (k in keys) {
-            if (this.has(k) && !this.isNull(k)) {
-                val v = this.optString(k)
-                if (v.isNotBlank() && v != "null") return v
-            }
-        }
-        return null
-    }
-
-    private fun JSONObject.int(key: String): Int? {
-        if (!this.has(key) || this.isNull(key)) return null
-        return this.optInt(key, -1).takeIf { it != -1 } ?: str(key)?.toDoubleOrNull()?.toInt()
-    }
-
-    private fun JSONObject.arr(key: String): List<JSONObject> {
-        val array = this.optJSONArray(key) ?: return emptyList()
-        val list = mutableListOf<JSONObject>()
-        for (i in 0 until array.length()) {
-            array.optJSONObject(i)?.let { list.add(it) }
-        }
-        return list
-    }
-
-    private fun JSONObject.playCookie(): String? = try {
-        str("deep_link")?.substringAfter("cookies=", "")?.takeIf { it.isNotBlank() }
-            ?.substringBefore("&")?.let { URLDecoder.decode(it, "UTF-8") }
-    } catch (_: Exception) { null }
-
-    /** يدمج الثوابت الثلاثة فوق الترويسات القادمة من flech.tn */
-    private fun mergeWithFixed(base: Map<String, String>): Map<String, String> =
-        base.toMutableMap().apply {
-            put("authorization", FIXED_AUTH)
-            put("x-device-id", FIXED_DEVICE_ID)
-            put("x-key-id", FIXED_KEY_ID)
-        }
-
-    /**
-     * طلب الترويسات من flech.tn
-     * @param forceFixed إذا true → يدمج الثوابت الثلاثة مع الترويسات القادمة
-     */
-    private suspend fun call(path: String, forceFixed: Boolean = false): JSONObject? = try {
-        val url = "$mainUrl/$path"
-        val prepRes = app.post(
-            STEP1,
-            headers = mapOf(
-                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
-                "Content-Type" to "application/x-www-form-urlencoded",
-            ),
-            data = mapOf("url" to url),
-        ).text
-
-        val prepJson = JSONObject(prepRes)
-        val h = prepJson.optJSONObject("headers") ?: return null
-
-        val headers = mutableMapOf<String, String>()
-        val keys = h.keys()
-        while (keys.hasNext()) {
-            val k = keys.next()
-            if (k !in setOf("Host", "Connection")) {
-                headers[k] = h.optString(k)
-            }
-        }
-
-        val finalHeaders = if (forceFixed) mergeWithFixed(headers) else headers
-
-        val apiRes = app.get(url, headers = finalHeaders).text
-        JSONObject(apiRes)
-    } catch (_: Exception) { null }
-
-    private fun JSONObject.data(): JSONObject? = this.optJSONObject("data")
-    private fun JSONObject.dataArr(): List<JSONObject> = this.arr("data")
-
-    private fun JSONObject.toSearch(tvType: TvType): SearchResponse? {
-        val id = int("id") ?: return null
-        val title = str("title_ar", "title_en", "name") ?: return null
-        val poster = str("poster")?.let { if (it.startsWith("http")) it else "$mainUrl$it" }
-        return if (tvType == TvType.Movie) {
-            newMovieSearchResponse(title, "oscar://movie/$id", TvType.Movie) { this.posterUrl = poster }
-        } else {
-            val kind = if (tvType == TvType.Anime) "anime" else "serie"
-            newTvSeriesSearchResponse(title, "oscar://$kind/$id", tvType) { this.posterUrl = poster }
-        }
-    }
-
-    private suspend fun list(path: String, tvType: TvType): List<SearchResponse> =
-        call(path)?.dataArr()?.mapNotNull { it.toSearch(tvType) } ?: emptyList()
-
-    private suspend fun searchOne(pathPrefix: String, query: String, tvType: TvType): List<SearchResponse> =
-        call("$pathPrefix/?page=1&limit=20&search=${URLEncoder.encode(query, "UTF-8")}")
-            ?.dataArr()?.mapNotNull { it.toSearch(tvType) } ?: emptyList()
 
     override val mainPage = mainPageOf(
-        "movies_top" to "رائج اليوم",
-        "latest_episodes" to "أحدث الحلقات",
-        "armovies" to "أحدث الأفلام العربية",
-        "arseries" to "أحدث الإضافات العربية",
-        "oscar://movies/" to "أفلام",
-        "oscar://series/" to "مسلسلات",
-        "oscar://anime/" to "أنمي",
-        "oscar://channels/" to "قنوات مباشرة",
+        "$mainUrl/" to "الرئيسية"
     )
 
-    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val data = request.data
-        val items: List<SearchResponse> = when {
-            data == "movies_top" || data == "latest_episodes" || data == "armovies" || data == "arseries" -> {
-                if (page > 1) emptyList() else {
-                    val home = call("api/v2/home.php?app_version=15") ?: return newHomePageResponse(request.name, emptyList())
-                    val sections = home.optJSONObject("data")?.arr("sections") ?: emptyList()
-                    val sec = when (data) {
-                        "armovies" -> sections.firstOrNull {
-                            it.str("section_type") == "movies" &&
-                                (it.optJSONObject("content_filters")?.int("category_id") == 3 || it.str("title_ar") == "أحدث الأفلام العربية")
-                        }
-                        "arseries" -> sections.firstOrNull {
-                            it.str("section_type") == "latest_additions" &&
-                                (it.int("content_category_filter") == 1 || it.str("title_ar") == "أحدث الإضافات العربية")
-                        }
-                        else -> sections.firstOrNull { it.str("section_type") == data }
-                    } ?: return newHomePageResponse(request.name, emptyList())
-                    sec.arr("items").mapNotNull { o ->
-                        if (o.has("home_team")) return@mapNotNull null
-                        val id = o.int("item_id") ?: o.int("id") ?: return@mapNotNull null
-                        val sTitle = o.str("series_title")
-                        if (sTitle != null && o.has("season_id")) {
-                            val sn = o.int("season_number") ?: 1
-                            val ep = o.int("episode_number") ?: 0
-                            val epPoster = o.str("series_poster", "series_banner")?.let { if (it.startsWith("http")) it else "$mainUrl$it" }
-                            return@mapNotNull newMovieSearchResponse(
-                                if (sn > 1) "$sTitle — م$sn:ح$ep" else "$sTitle — حلقة $ep",
-                                "oscar://ep/$id", TvType.Movie
-                            ) { this.posterUrl = epPoster }
-                        }
-                        val itemType = o.str("item_type") ?: if (o.has("episode_count")) "serie" else "movie"
-                        val title = o.str("title_ar", "title_en") ?: return@mapNotNull null
-                        val poster = o.str("poster", "image")?.let { if (it.startsWith("http")) it else "$mainUrl$it" }
-                        when (itemType) {
-                            "movie" -> newMovieSearchResponse(title, "oscar://movie/$id", TvType.Movie) { this.posterUrl = poster }
-                            "anime" -> newTvSeriesSearchResponse(title, "oscar://anime/$id", TvType.Anime) { this.posterUrl = poster }
-                            else -> newTvSeriesSearchResponse(title, "oscar://serie/$id", TvType.TvSeries) { this.posterUrl = poster }
-                        }
-                    }
-                }
-            }
-            data.startsWith("oscar://movies/") -> list("api/movies/?page=$page&limit=20", TvType.Movie)
-            data.startsWith("oscar://series/") -> list("api/series/?page=$page&limit=20", TvType.TvSeries)
-            data.startsWith("oscar://anime/") -> list("api/anime/?page=$page&limit=20&anime_type=tv,ova,ona,special,movie", TvType.Anime)
-            data.startsWith("oscar://channels/") ->
-                call("api/channels/?page=$page&limit=20")?.dataArr()?.mapNotNull { o ->
-                    val id = o.int("id") ?: return@mapNotNull null
-                    val chName = o.str("name") ?: return@mapNotNull null
-                    val logo = o.str("logo")?.let { if (it.startsWith("http")) it else "$mainUrl$it" }
-                    newTvSeriesSearchResponse(chName, "oscar://channel/$id", TvType.Live) { this.posterUrl = logo }
-                } ?: emptyList()
-            else -> emptyList()
+    private fun toAbsoluteUrl(url: String): String {
+        return when {
+            url.startsWith("http") -> url
+            url.startsWith("//") -> "https:$url"
+            url.startsWith("/") -> "$mainUrl$url"
+            else -> "$mainUrl/$url"
         }
-        return newHomePageResponse(request.name, items)
     }
 
+    private fun cleanTitleText(text: String): String {
+        return text.replace("\\n", " ")
+            .replace("\n", " ")
+            .replace(Regex("بترجمة.*"), "")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+    }
+    private suspend fun getDocumentSmart(url: String): Document? {
+        return try {
+            val response = app.get(url, headers = mapOf("User-Agent" to USER_AGENT))
+            if (response.code in 200..399) {
+                val setCookie = response.headers["set-cookie"]
+                if (!setCookie.isNullOrBlank()) savedCookies = setCookie
+                response.document
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse? {
+        val doc = getDocumentSmart(request.data) ?: return null
+        val homeSets = mutableListOf<HomePageList>()
+
+        val pinnedHeader = doc.selectFirst("h2:contains(الأنميات المثبتة)")
+        val pinnedList = pinnedHeader?.parent()?.parent()?.parent()?.select(".glide__slide:not(.glide__slide--clone) a.video-card")?.mapNotNull {
+            toSearchResult(it)
+        }
+        if (!pinnedList.isNullOrEmpty()) {
+            homeSets.add(HomePageList("الأنميات المثبتة", pinnedList))
+        }
+
+        val latestList = doc.select("#videos a.video-card").mapNotNull {
+            toSearchResult(it)
+        }
+        if (latestList.isNotEmpty()) {
+            homeSets.add(HomePageList("أحدث الحلقات", latestList))
+        }
+
+        val addedHeader = doc.selectFirst("h3:contains(آخر الأنميات المضافة)")
+        val addedList = addedHeader?.parent()?.parent()?.parent()?.select(".glide__slide:not(.glide__slide--clone) a.video-card")?.mapNotNull {
+            toSearchResult(it)
+        }
+        if (!addedList.isNullOrEmpty()) {
+            homeSets.add(HomePageList("آخر الأنميات المضافة", addedList))
+        }
+
+        return newHomePageResponse(homeSets, false)
+    }
+
+    private fun toSearchResult(element: Element): SearchResponse? {
+        try {
+            val rawTitle = element.select("h3.title-name").text()
+            val title = cleanTitleText(rawTitle)
+            val href = toAbsoluteUrl(element.attr("href"))
+            val posterUrl = element.select("img").attr("src")
+            val episodeText = cleanTitleText(element.select("p.number").text())
+            val episodeNum = episodeText.filter { it.isDigit() }.toIntOrNull()
+
+            return newAnimeSearchResponse(title, href, TvType.Anime) {
+                this.posterUrl = posterUrl
+                addDubStatus(false, episodeNum)
+            }
+        } catch (e: Exception) {
+            return null
+        }
+    }
     override suspend fun search(query: String): List<SearchResponse> {
-        val q = URLEncoder.encode(query.trim(), "UTF-8")
-        if (q.isBlank()) return emptyList()
-        return coroutineScope {
-            listOf(
-                async { searchOne("api/movies", query, TvType.Movie) },
-                async { searchOne("api/series", query, TvType.TvSeries) },
-                async { searchOne("api/anime", query, TvType.Anime) },
-            ).awaitAll().flatten()
-        }.distinctBy { it.url }
-    }
+        val mainDoc = getDocumentSmart(mainUrl) ?: return emptyList()
 
-    private fun JSONObject.poster2(): String? = str("poster")?.let { if (it.startsWith("http")) it else "$mainUrl$it" }
+        val scriptTag = mainDoc.selectFirst("script[src*=livewire.min.js]")
+        val csrfToken = scriptTag?.attr("data-csrf") ?: return emptyList()
+
+        val form = mainDoc.selectFirst("form[wire:id]")
+        val snapshotRaw = form?.attr("wire:snapshot") ?: return emptyList()
+        val snapshotStr = org.jsoup.parser.Parser.unescapeEntities(snapshotRaw, true)
+
+        val headers = mutableMapOf(
+            "User-Agent" to USER_AGENT,
+            "Accept" to "*/*",
+            "Content-Type" to "application/json",
+            "Origin" to mainUrl,
+            "Referer" to "$mainUrl/"
+        )
+        if (savedCookies.isNotBlank()) {
+            headers["Cookie"] = savedCookies
+        }
+
+        val updateUrl = "$mainUrl/livewire/update"
+        val payload = mapOf(
+            "_token" to csrfToken,
+            "components" to listOf(
+                mapOf(
+                    "snapshot" to snapshotStr,
+                    "updates" to mapOf("query" to query),
+                    "calls" to emptyList<Any>()
+                )
+            )
+        )
+
+        val postRes = app.post(updateUrl, headers = headers, json = payload)
+        if (postRes.code != 200) return emptyList()
+
+        val responseJson = AppUtils.parseJson<Map<String, Any>>(postRes.text)
+        val components = responseJson["components"] as? List<Map<String, Any>> ?: return emptyList()
+        val effects = components.firstOrNull()?.get("effects") as? Map<String, Any> ?: return emptyList()
+        val htmlContent = effects["html"] as? String ?: return emptyList()
+
+        val soupResults = Jsoup.parse(htmlContent)
+
+        return soupResults.select("a.simple-title-card").mapNotNull { item ->
+            val rawTitle = item.selectFirst("h4")?.text()?.trim() ?: return@mapNotNull null
+            val title = cleanTitleText(rawTitle)
+            val link = item.attr("href")
+            val absoluteLink = toAbsoluteUrl(link)
+            val img = item.selectFirst("img")
+            val image = img?.attr("src")
+            val ratingTag = item.selectFirst(".badge")
+            val rating = ratingTag?.text()?.trim() ?: "N/A"
+
+            val type = if (rating.contains("Movie") || rating.contains("Film") || title.contains("فيلم")) {
+                TvType.AnimeMovie
+            } else {
+                TvType.Anime
+            }
+
+            newAnimeSearchResponse(title, absoluteLink, type) {
+                this.posterUrl = image
+            }
+        }
+    }
 
     override suspend fun load(url: String): LoadResponse? {
-        if (!url.contains("oscar://")) return null
-        val parts = url.substringAfter("oscar://").split("/")
-        val kind = parts.firstOrNull() ?: return null
-        val id = parts.getOrNull(1) ?: return null
+        val doc = getDocumentSmart(url) ?: return null
 
-        return when {
-            kind == "channel" -> {
-                val ch = call("api/channels/show.php?id=$id")?.data() ?: return null
-                val name = ch.str("name") ?: "Channel $id"
-                val streams = ch.arr("streams")
-                if (streams.isEmpty()) return null
-                val packed = streams.mapNotNull { st ->
-                    val u = st.str("stream_url")?.substringBefore("#") ?: return@mapNotNull null
-                    val q = st.str("quality") ?: ""
-                    "$u::$q"
-                }.joinToString("||")
-                newMovieLoadResponse(name, url, TvType.Live, "oscar://ch/$packed") {
-                    this.posterUrl = ch.str("logo")?.let { if (it.startsWith("http")) it else "$mainUrl$it" }
-                }
+        val title = TITLE_EP_REGEX.replace(doc.selectFirst("h1")?.text() ?: "", "").trim()
+        val poster = doc.selectFirst("img[alt*='بوستر']")?.attr("src") ?: ""
+        val desc = doc.selectFirst("p.synopsis")?.text() ?: doc.selectFirst("meta[name='description']")?.attr("content") ?: ""
+
+        val episodes = doc.select(".video-list a").reversed().mapNotNull { element ->
+            val href = toAbsoluteUrl(element.attr("href"))
+            val videoData = element.selectFirst(".video-data")
+            val epText = videoData?.child(0)?.text() ?: ""
+            val epName = videoData?.child(1)?.text() ?: ""
+            val epNum = epText.replace(NON_DIGITS, "").toIntOrNull()
+            val imgAttr = element.selectFirst("img")?.attr("src") ?: ""
+
+            newEpisode(href) {
+                this.name = epName.ifBlank { epText }
+                this.episode = epNum
+                this.posterUrl = imgAttr
             }
-            kind == "movie" -> {
-                val d = call("api/movies/show.php?id=$id", forceFixed = true)?.data() ?: return null
-                val title = d.str("title_ar", "title_en") ?: return null
-                val tags = d.arr("genres").mapNotNull { it.str("name") }
-                newMovieLoadResponse(title, url, TvType.Movie, "oscar://player/movies/$id") {
-                    this.posterUrl = d.poster2()
-                    this.plot = d.str("story")
-                    this.year = d.int("release_year") ?: d.str("release_date")?.take(4)?.toIntOrNull()
-                    this.tags = tags
-                }
-            }
-            kind == "ep" -> {
-                var d = call("api/episodes/show.php?id=$id")?.data()
-                var anime = false
-                if (d == null) {
-                    d = call("api/anime/episodes/show.php?id=$id")?.data()
-                    anime = true
-                }
-                if (d == null) return null
-                val sTitle = d.str("series_title") ?: d.str("title_ar", "title_en") ?: return null
-                val sn = d.int("season_number") ?: 1
-                val ep = d.int("episode_number") ?: 0
-                newMovieLoadResponse(
-                    if (sn > 1) "$sTitle — م$sn حلقة $ep" else "$sTitle — حلقة $ep",
-                    url, TvType.Movie, "oscar://ep/$anime/$id"
-                ) {
-                    this.posterUrl = d.str("series_poster")?.let { if (it.startsWith("http")) it else "$mainUrl$it" }
-                    this.plot = d.str("description")
-                }
-            }
-            kind == "serie" || kind == "anime" || kind == "tv" || kind == "TvSeries" || kind == "Anime" -> {
-                val isAnime = kind == "anime" || kind == "Anime"
-                val apiBase = if (isAnime) "api/anime" else "api/series"
-                var d = call("$apiBase/show.php?id=$id")?.data()
-                if (d == null && !isAnime) {
-                    val m = call("api/movies/show.php?id=$id", forceFixed = true)?.data()
-                    if (m != null) {
-                        return newMovieLoadResponse(
-                            m.str("title_ar", "title_en") ?: return null, url, TvType.Movie, "oscar://player/movies/$id"
-                        ) {
-                            this.posterUrl = m.poster2()
-                            this.plot = m.str("story")
-                            this.year = m.int("release_year") ?: m.str("release_date")?.take(4)?.toIntOrNull()
-                            this.tags = m.arr("genres").mapNotNull { it.str("name") }
-                        }
-                    }
-                }
-                if (d == null) return null
-                val title = d.str("title_ar", "title_en", "name") ?: return null
-                val seasons = d.arr("seasons")
-                val episodes = coroutineScope {
-                    seasons.chunked(6).flatMap { batch ->
-                        batch.map { s ->
-                            async {
-                                val sid = s.int("season_id") ?: s.int("id") ?: return@async emptyList<Episode>()
-                                val sn = s.int("season_number") ?: 1
-                                val epPath = if (isAnime) "api/anime/episodes/?season_id=$sid" else "api/episodes/?season_id=$sid"
-                                call(epPath)?.dataArr()?.mapIndexedNotNull { i, e ->
-                                    val epId = e.int("id") ?: return@mapIndexedNotNull null
-                                    val epNum = e.int("episode_number") ?: (i + 1)
-                                    newEpisode(
-                                        url = "oscar://ep/$isAnime/$epId",
-                                        initializer = {
-                                            this.name = "الحلقة $epNum"
-                                            this.season = sn
-                                            this.episode = epNum
-                                            this.posterUrl = e.str("thumbnail")?.let { if (it.startsWith("http")) it else "$mainUrl$it" }
-                                        },
-                                        fix = false,
-                                    )
-                                } ?: emptyList()
-                            }
-                        }.awaitAll()
-                    }.flatten()
-                }
-                if (episodes.isEmpty()) return null
-                newTvSeriesLoadResponse(title, url, if (isAnime) TvType.Anime else TvType.TvSeries, episodes) {
-                    this.posterUrl = d.poster2()
-                    this.plot = d.str("story")
-                    this.year = d.str("release_year")?.toIntOrNull() ?: d.int("release_year")
-                    this.tags = d.arr("genres").mapNotNull { it.str("name") }
-                }
-            }
-            else -> null
+        }
+
+        return newTvSeriesLoadResponse(title, url, TvType.Anime, episodes) {
+            this.posterUrl = poster
+            this.plot = desc
         }
     }
 
@@ -314,71 +203,57 @@ class OscarTvProvider : MainAPI() {
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit,
+        callback: (ExtractorLink) -> Unit
     ): Boolean {
-        var got = false
-        val seen = HashSet<String>()
+        val headersMap = mapOf("User-Agent" to USER_AGENT)
+        val resp = app.get(data, headers = headersMap)
+        val htmlText = resp.text
+        val playerPattern = Regex("https:(?:\\\\/|/){2}video\\.vid3rb\\.com(?:\\\\/|/)player(?:\\\\/|/)[^\"']+")
+        val match = playerPattern.find(htmlText) ?: return false
 
-        suspend fun emit(u0: String, label: String, quality: String?, cookie: String? = null) {
-            if (!u0.startsWith("http")) return
-            var u = u0
-            if (u.contains("newcdn.seriesmp4.com")) {
-                u = try {
-                    val body = app.get(u0, headers = mapOf("User-Agent" to PLAY_UA)).text
-                    Regex("src=\"(https://downloader\\.disk\\.yandex\\.ru[^\"]+)\"")
-                        .find(body)?.groupValues?.get(1)?.replace("&amp;", "&") ?: return
-                } catch (_: Exception) { return }
-            }
-            if (!seen.add(u)) return
+        val playerUrl = match.value.replace("\\", "").replace("&amp;", "&").replace("\\u0026", "&")
+        val videoHeaders = mapOf(
+            "Host" to "video.vid3rb.com",
+            "User-Agent" to USER_AGENT,
+            "Referer" to "$mainUrl/",
+            "Sec-Fetch-Dest" to "iframe",
+            "Sec-Fetch-Site" to "cross-site"
+        )
 
-            val reqHeaders = mutableMapOf<String, String>()
-            reqHeaders["user-agent"] = PLAY_UA
-            if (!cookie.isNullOrBlank()) {
-                reqHeaders["cookie"] = cookie
-                reqHeaders["Cookie"] = cookie
-            }
+        val playerResponse = app.get(playerUrl, headers = videoHeaders).text
+        val jsonPattern = Regex("var\\s+video_sources\\s*=\\s*(\\[.*?\\]);", RegexOption.DOT_MATCHES_ALL)
 
-            callback(
-                newExtractorLink(
-                    name,
-                    listOfNotNull(label, quality?.takeIf { it.isNotBlank() && it != "متعدد" }).joinToString(" "),
-                    u,
-                    if (u.contains(".mp4")) ExtractorLinkType.VIDEO else ExtractorLinkType.M3U8,
-                ) {
-                    this.headers = reqHeaders
-                    this.quality = quality?.replace("p", "")?.toIntOrNull()
-                        ?.let { q -> Qualities.entries.firstOrNull { it.value == q }?.value } ?: Qualities.Unknown.value
+        var success = false
+        jsonPattern.findAll(playerResponse).forEach { m ->
+            val jsonStr = m.groupValues[1]
+            val videoList = AppUtils.parseJson<List<Map<String, Any>>>(jsonStr)
+
+            videoList.forEach { item ->
+                val src = item["src"]?.toString()?.replace("\\", "")?.replace("&amp;", "&")?.replace("\\u0026", "&") ?: return@forEach
+                val label = item["label"]?.toString() ?: "Unknown"
+                val premium = item["premium"]?.toString() == "true"
+
+                if (!premium) {
+                    val quality = label.replace(NON_DIGITS, "").toIntOrNull() ?: Qualities.Unknown.value
+                    callback.invoke(
+                        newExtractorLink(
+                            "Anime3rb",
+                            "Anime3rb $label",
+                            src,
+                        ) {
+                            "https://video.vid3rb.com/"
+                            quality
+                            false
+                            mapOf(
+                                "User-Agent" to USER_AGENT,
+                                "Referer" to "https://video.vid3rb.com/"
+                            )
+                        }
+                    )
+                    success = true
                 }
-            )
-            got = true
-        }
-
-        when {
-            data.startsWith("oscar://direct/") -> {
-                emit(data.substringAfter("oscar://direct/"), "Oscar TV", "")
-            }
-            data.startsWith("oscar://ch/") -> {
-                data.substringAfter("oscar://ch/").split("||").forEach { entry ->
-                    val (u, q) = entry.split("::", limit = 2).let { it.getOrNull(0) to it.getOrNull(1) }
-                    if (u != null) emit(u, "Oscar TV", q)
-                }
-            }
-            data.startsWith("oscar://player/movies/") -> {
-                val id = data.substringAfter("oscar://player/movies/", "")
-                val d = call("api/movies/show.php?id=$id", forceFixed = true)?.data() ?: return false
-                d.arr("watch_links").forEach { emit(it.str("url") ?: return@forEach, it.str("server_name") ?: "Oscar", it.str("quality"), it.playCookie()) }
-                d.arr("download_links").forEach { emit(it.str("url") ?: return@forEach, "${it.str("server_name") ?: "DL"}", it.str("quality"), it.playCookie()) }
-            }
-            data.startsWith("oscar://ep/") -> {
-                val rest = data.substringAfter("oscar://ep/", "")
-                val isAnime = rest.substringBefore("/") == "true"
-                val id = rest.substringAfter("/")
-                val apiBase = if (isAnime) "api/anime/episodes" else "api/episodes"
-                val d = call("$apiBase/show.php?id=$id")?.data() ?: return false
-                d.arr("watch_links").forEach { emit(it.str("url") ?: return@forEach, it.str("server_name") ?: "Oscar", it.str("quality"), it.playCookie()) }
-                d.arr("download_links").forEach { emit(it.str("url") ?: return@forEach, "${it.str("server_name") ?: "DL"}", it.str("quality"), it.playCookie()) }
             }
         }
-        return got
+        return success
     }
 }
