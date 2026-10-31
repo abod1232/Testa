@@ -567,6 +567,7 @@ class FASELHD(private val context: Context) : MainAPI() {
             dialog.setCanceledOnTouchOutside(false)
             dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
 
+            // حل مشكلة التجميد في النسخ الحديثة: نجعل النافذة شفافة ولكن غير معطلة برمجياً
             dialog.window?.apply {
                 setBackgroundDrawableResource(android.R.color.transparent)
                 setDimAmount(0f)
@@ -575,24 +576,27 @@ class FASELHD(private val context: Context) : MainAPI() {
                     WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 )
+                // حجم صغير جداً ولكن مرئي للنظام لعدم إيقاف تشغيل الوسائط
                 attributes = attributes?.apply {
-                    width = 1; height = 1; x = -10000; y = -10000
-                    gravity = Gravity.START or Gravity.TOP
+                    width = 2
+                    height = 2
+                    gravity = Gravity.BOTTOM or Gravity.START
                 }
             }
 
             val webView = WebView(activity).apply {
-                layoutParams = ViewGroup.LayoutParams(1, 1)
-                visibility = View.INVISIBLE
+                layoutParams = ViewGroup.LayoutParams(2, 2)
+                alpha = 0.01f // شفاف تماماً دون تجميد من كروميوم
+                visibility = View.VISIBLE
             }
 
             try {
-                dialog.setContentView(webView, ViewGroup.LayoutParams(1, 1))
+                dialog.setContentView(webView, ViewGroup.LayoutParams(2, 2))
                 dialog.show()
             } catch (e: Exception) {
                 try {
                     val decor = activity.window?.decorView as? ViewGroup
-                    decor?.addView(webView, FrameLayout.LayoutParams(1, 1, Gravity.START or Gravity.TOP))
+                    decor?.addView(webView, FrameLayout.LayoutParams(2, 2, Gravity.BOTTOM or Gravity.START))
                 } catch (_: Exception) {}
             }
 
@@ -600,11 +604,14 @@ class FASELHD(private val context: Context) : MainAPI() {
                 javaScriptEnabled = true
                 domStorageEnabled = true
                 databaseEnabled = true
-                mediaPlaybackRequiresUserGesture = false
+                allowContentAccess = true
+                allowFileAccess = true
+                mediaPlaybackRequiresUserGesture = false // تشغيل الصوت والفيديو تلقائياً
                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                 cacheMode = WebSettings.LOAD_DEFAULT
                 userAgentString = lastValidUserAgent
-                blockNetworkImage = true
+                useWideViewPort = true
+                loadWithOverviewMode = true
             }
 
             val cookieManager = CookieManager.getInstance()
@@ -642,23 +649,27 @@ class FASELHD(private val context: Context) : MainAPI() {
             fun clickQuality(qualityLabel: String) {
                 val js = """
                 (function() {
-                    let clicked = false;
-                    let els = document.querySelectorAll('ul.quality_ch li, .quality_ch > *, [class*="quality"] li, .jw-settings-content-item, button');
-                    for (let el of els) {
-                        let txt = (el.innerText || el.textContent || '').trim().toLowerCase();
-                        if (txt.includes('$qualityLabel'.toLowerCase())) {
-                            ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(evt => {
-                                el.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
-                            });
-                            if (typeof el.onclick === 'function') { el.onclick(); }
-                            clicked = true;
-                            break;
+                    try {
+                        let clicked = false;
+                        let els = document.querySelectorAll('ul.quality_ch li, .quality_ch > *, [class*="quality"] li, .jw-settings-content-item, button');
+                        for (let el of els) {
+                            let txt = (el.innerText || el.textContent || '').trim().toLowerCase();
+                            if (txt.includes('$qualityLabel'.toLowerCase())) {
+                                ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(evt => {
+                                    el.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
+                                });
+                                if (typeof el.onclick === 'function') { el.onclick(); }
+                                clicked = true;
+                                break;
+                            }
                         }
-                    }
-                    if (!clicked) {
-                        let p = typeof window.jwplayer === 'function' ? window.jwplayer("player") : null;
-                        if (p && typeof p.play === 'function') { p.setMute(true); p.play(); }
-                    }
+                        if (!clicked) {
+                            let p = typeof window.jwplayer === 'function' ? window.jwplayer("player") : null;
+                            if (p && typeof p.play === 'function') { p.setMute(true); p.play(); }
+                            let playBtns = document.querySelectorAll('.jw-display-icon-display, .vjs-big-play-button, button, video');
+                            playBtns.forEach(b => { try { b.click(); } catch(e){} });
+                        }
+                    } catch(e) {}
                 })();
                 """.trimIndent()
                 activity.runOnUiThread { webView.evaluateJavascript(js, null) }
@@ -681,7 +692,7 @@ class FASELHD(private val context: Context) : MainAPI() {
                     currentQualityIndex++
                     scheduleNextQuality()
                 }
-                handler.postDelayed(autoStepRunnable!!, 2500)
+                handler.postDelayed(autoStepRunnable!!, 2000)
             }
 
             fun handleFoundLink(url: String) {
@@ -699,15 +710,28 @@ class FASELHD(private val context: Context) : MainAPI() {
                 }
             }
 
+            // سكريبت صيد متطور يعترض fetch و XMLHttpRequest و JWPlayer مباشرة من البداية
             val fastSnifferJs = """
             (function() {
                 try {
                     window.open = function() { return null; };
+                    
+                    // محاكاة تفاعل المستخدم لمنع حظر التشغيل التلقائي
+                    Object.defineProperty(navigator, 'userActivation', { 
+                        get: () => ({ hasBeenActive: true, isActive: true }) 
+                    });
+
                     if (!window.__NET_HOOKED__) {
                         window.__NET_HOOKED__ = true;
+                        
+                        // 1. اعتراض Fetch
                         const _fetch = window.fetch;
                         if (_fetch) {
                             window.fetch = function() {
+                                const url = (arguments && arguments[0]) ? (arguments[0].url || arguments[0]) : '';
+                                if (typeof url === 'string' && url.indexOf('.m3u8') !== -1) {
+                                    console.log('NET_M3U8::' + url);
+                                }
                                 return _fetch.apply(this, arguments).then(function(resp) {
                                     try {
                                         const u = resp && resp.url ? resp.url : '';
@@ -717,8 +741,15 @@ class FASELHD(private val context: Context) : MainAPI() {
                                 });
                             };
                         }
+
+                        // 2. اعتراض XMLHttpRequest
                         const _open = XMLHttpRequest.prototype.open;
                         XMLHttpRequest.prototype.open = function(method, u) {
+                            try {
+                                if (typeof u === 'string' && u.indexOf('.m3u8') !== -1) {
+                                    console.log('NET_M3U8::' + u);
+                                }
+                            } catch(e){}
                             this.addEventListener('load', function() {
                                 try {
                                     if (typeof u === 'string' && u.indexOf('.m3u8') !== -1) { console.log('NET_M3U8::' + u); }
@@ -726,6 +757,40 @@ class FASELHD(private val context: Context) : MainAPI() {
                             });
                             return _open.apply(this, arguments);
                         };
+
+                        // 3. اعتراض إعدادات مشغل JWPlayer مباشرة عند تعريفه
+                        let checkJw = setInterval(function() {
+                            if (typeof window.jwplayer === 'function' && !window.jwplayer.__hooked) {
+                                const orig = window.jwplayer;
+                                window.jwplayer = function() {
+                                    const p = orig.apply(this, arguments);
+                                    if (!p.__hookedSetup) {
+                                        p.__hookedSetup = true;
+                                        const origSetup = p.setup;
+                                        p.setup = function(cfg) {
+                                            try {
+                                                let s = cfg.sources || (cfg.playlist && cfg.playlist[0] ? cfg.playlist[0].sources : []);
+                                                if (s) {
+                                                    s.forEach(item => {
+                                                        if (item.file && item.file.indexOf('.m3u8') !== -1) {
+                                                            console.log('NET_M3U8::' + item.file);
+                                                        }
+                                                    });
+                                                }
+                                            } catch(e){}
+                                            cfg.autostart = true;
+                                            cfg.mute = true;
+                                            return origSetup.call(this, cfg);
+                                        };
+                                    }
+                                    return p;
+                                };
+                                Object.assign(window.jwplayer, orig);
+                                window.jwplayer.prototype = orig.prototype;
+                                window.jwplayer.__hooked = true;
+                                clearInterval(checkJw);
+                            }
+                        }, 20);
                     }
                 } catch(err){}
             })();
@@ -740,10 +805,16 @@ class FASELHD(private val context: Context) : MainAPI() {
                     return originalHost.isNotBlank() && currentHost.isNotBlank() && !currentHost.contains(originalHost)
                 }
 
+                // حقن فوري في بداية التحميل لمنع تفويت أي طلب
+                override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                    super.onPageStarted(view, url, favicon)
+                    view?.evaluateJavascript(fastSnifferJs, null)
+                }
+
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     view?.evaluateJavascript(fastSnifferJs, null)
-                    handler.postDelayed({ scheduleNextQuality() }, 1200)
+                    handler.postDelayed({ scheduleNextQuality() }, 800)
                 }
 
                 override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
@@ -773,7 +844,7 @@ class FASELHD(private val context: Context) : MainAPI() {
             }
 
             timeoutRunnable = Runnable { safeFinish() }
-            handler.postDelayed(timeoutRunnable!!, 8500L)
+            handler.postDelayed(timeoutRunnable!!, 8000L)
 
             webView.loadUrl(finalUrl, mapOf("Referer" to referer))
 
