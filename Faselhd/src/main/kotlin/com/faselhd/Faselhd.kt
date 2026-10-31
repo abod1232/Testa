@@ -362,7 +362,14 @@ class FASELHD(private val context: Context) : MainAPI() {
         }
     override suspend fun load(url: String): LoadResponse? {
         val base = baseUrl()
-        val absoluteUrl = if (url.startsWith("/")) "$base$url" else url
+        
+        // 1. توحيد الرابط ليكون كاملاً
+        val rawAbsoluteUrl = if (url.startsWith("/")) "$base$url" else url
+        
+        // 2. حذف الـ / من نهاية الرابط إذا كانت موجودة
+        val absoluteUrl = rawAbsoluteUrl.removeSuffix("/")
+
+        // 3. طلب الصفحة بالرابط النظيف بدون /
         val doc = smartGet(absoluteUrl)
         val rawTitle = doc.selectFirst(".singleInfo .title.h1")?.ownText() ?: ""
         val title = rawTitle.replace("\\n", "").replace("\n", "").trim()
@@ -389,7 +396,7 @@ class FASELHD(private val context: Context) : MainAPI() {
             val seasonUrlRel = seasonUrlRegex.find(onclickAttr)?.groupValues?.get(1) ?: return@mapNotNull null
             val seasonTitle = seasonEl.selectFirst(".title")?.text()?.replace("\\n", "")?.trim() ?: "موسم"
             val fullSeasonUrl = if (seasonUrlRel.startsWith("http")) seasonUrlRel else "$base$seasonUrlRel"
-            newTvSeriesSearchResponse(seasonTitle, fullSeasonUrl, TvType.TvSeries) {
+            newTvSeriesSearchResponse(seasonTitle, fullSeasonUrl.removeSuffix("/"), TvType.TvSeries) {
                 this.posterUrl = seasonPoster
                 this.posterHeaders = headers
             }
@@ -404,7 +411,7 @@ class FASELHD(private val context: Context) : MainAPI() {
                 val onclickAttr = seasonEl.attr("onclick")
                 val seasonUrlRel = seasonUrlRegex.find(onclickAttr)?.groupValues?.get(1) ?: ""
                 val fullSeasonUrl = if (seasonUrlRel.startsWith("http")) seasonUrlRel else "$base$seasonUrlRel"
-                if (fullSeasonUrl.removeSuffix("/") == absoluteUrl.removeSuffix("/")) {
+                if (fullSeasonUrl.removeSuffix("/") == absoluteUrl) {
                     currentSeasonIndex = idx
                 }
             }
@@ -418,7 +425,6 @@ class FASELHD(private val context: Context) : MainAPI() {
             }
             if (currentSeasonIndex == -1) currentSeasonIndex = 0
 
-
             var fakeSeasonCounter = 2
             for (i in 0 until seasonCards.size) {
                 val actualSeasonNum = i + 1
@@ -431,7 +437,8 @@ class FASELHD(private val context: Context) : MainAPI() {
                             val epTitle = el.ownText().ifBlank { el.text() }.replace("\\n", "").replace("\n", "").trim()
                             if (!epTitle.contains("باقي الحلقات") && !epTitle.contains("المزيد")) {
                                 val epNum = Regex("""\d+""").find(epTitle)?.value?.toIntOrNull()
-                                currentSeasonEpisodes.add(newEpisode(if (epUrlRaw.startsWith("http")) epUrlRaw else "$base$epUrlRaw") {
+                                val fullEpUrl = if (epUrlRaw.startsWith("http")) epUrlRaw else "$base$epUrlRaw"
+                                currentSeasonEpisodes.add(newEpisode(fullEpUrl.removeSuffix("/")) {
                                     this.name = "$seasonName - $epTitle"
                                     this.episode = epNum
                                     this.season = 1
@@ -456,7 +463,8 @@ class FASELHD(private val context: Context) : MainAPI() {
                 if (epUrlRaw.isNotBlank()) {
                     val epTitle = el.ownText().ifBlank { el.text() }.replace("\\n", "").replace("\n", "").trim()
                     val epNum = Regex("""\d+""").find(epTitle)?.value?.toIntOrNull()
-                    currentSeasonEpisodes.add(newEpisode(if (epUrlRaw.startsWith("http")) epUrlRaw else "$base$epUrlRaw") {
+                    val fullEpUrl = if (epUrlRaw.startsWith("http")) epUrlRaw else "$base$epUrlRaw"
+                    currentSeasonEpisodes.add(newEpisode(fullEpUrl.removeSuffix("/")) {
                         this.name = epTitle
                         this.episode = epNum
                         this.season = 1
