@@ -67,16 +67,24 @@ object CloudflareSolver {
                     if (!isSolved) {
                         isSolved = true
                         cookieManager.flush()
+
+                        Log.d(TAG, "==================================================")
+                        Log.d(TAG, "🎯 [نجاح] الرابط النهائي المستقر بعد التحويلات:")
+                        Log.d(TAG, "📍 Final URL: $finalResolvedUrl")
+                        Log.d(TAG, "🍪 Cookies: ${cookieManager.getCookie(finalResolvedUrl)}")
+                        Log.d(TAG, "==================================================")
+
+                        // 🎯 حفظ الرابط الجديد للأبد في ذاكرة الهاتف الدائمة
                         try {
                             val parsedUri = android.net.Uri.parse(finalResolvedUrl)
                             val host = parsedUri.host
                             if (!host.isNullOrBlank() && host.contains("faselhdx")) {
                                 val detectedBase = "${parsedUri.scheme ?: "https"}://$host"
-                                FASELHD.redirectUrl = detectedBase
-                                Log.d(TAG, "🔄 [تم تحديث الرابط بنجاح]: $detectedBase")
+                                FASELHD.savePermanentBaseUrl(detectedBase)
+                                Log.d(TAG, "💾 [تم الحفظ الدائم]: $detectedBase")
                             }
                         } catch (e: Exception) {
-                            Log.e(TAG, "خطأ في قراءة الدومين الجديد: ${e.message}")
+                            Log.e(TAG, "خطأ في حفظ الدومين الدائم: ${e.message}")
                         }
 
                         try {
@@ -86,6 +94,7 @@ object CloudflareSolver {
                         } catch (e: Exception) {}
 
                         if (html == null) {
+                            Log.w(TAG, "⚠️ فشل جلب محتوى HTML (انتهت المهلة)")
                             continuation.resume(null)
                             return
                         }
@@ -99,6 +108,12 @@ object CloudflareSolver {
                         continuation.resume(Jsoup.parse(cleanHtml, finalResolvedUrl))
                     }
                 }
+
+                pollingHandler.postDelayed({ 
+                    val currentFallbackUrl = webView.url ?: url
+                    Log.w(TAG, "⏰ انتهت مهلة 60 ثانية. الرابط عند التوقف: $currentFallbackUrl")
+                    finishSuccess(null, currentFallbackUrl) 
+                }, 60000)
 
                 fun simulateRealTouch(view: WebView, cssX: Float, cssY: Float) {
                     val density = activity.resources.displayMetrics.density
@@ -199,12 +214,14 @@ object CloudflareSolver {
 
                         val (currentUrl, ready, hasBox, stillCloudflare) = parts
                         val now = SystemClock.uptimeMillis()
+
                         if (currentUrl != lastUrl) {
                             Log.d(TAG, "🔄 [تحويل مسار / Redirect]: $lastUrl ➡️ $currentUrl")
                             lastUrl = currentUrl
                             stableSince = now
                         }
                         val stableTime = now - stableSince
+
                         if (hasBox == "false" && stillCloudflare == "false" && ready == "complete" && stableTime > 1500 && !fetched) {
                             fetched = true
                             Log.d(TAG, "✨ تم فك الحماية وتخطي التحدي بنجاح، جاري استخراج كود الصفحة...")
