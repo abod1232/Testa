@@ -73,8 +73,6 @@ object CloudflareSolver {
                         Log.d(TAG, "📍 Final URL: $finalResolvedUrl")
                         Log.d(TAG, "🍪 Cookies: ${cookieManager.getCookie(finalResolvedUrl)}")
                         Log.d(TAG, "==================================================")
-
-                        // 🎯 حفظ الرابط الجديد للأبد في ذاكرة الهاتف الدائمة
                         try {
                             val parsedUri = android.net.Uri.parse(finalResolvedUrl)
                             val host = parsedUri.host
