@@ -69,15 +69,13 @@ class FASELHD(private val context: Context) : MainAPI() {
         var redirectUrl: String? = null
 
     }
-    private suspend fun baseUrl(): String {
-        redirectUrl?.let { return it }
+    companion object {
+        var redirectUrl: String? = null
+    }
 
-        return cfLock.withLock {
-            redirectUrl?.let { return@withLock it }
-            val activity = context as? Activity
-            CloudflareSolver.solve(activity, "$mainUrl/main", lastValidUserAgent)
-            redirectUrl ?: mainUrl
-        }
+    // تُرجع الدومين المحفوظ إن وُجد، وإلا تعتمد على mainUrl مباشرة بدون أي طلبات
+    private fun baseUrl(): String {
+        return redirectUrl ?: mainUrl
     }
 
     private val cfLock = Mutex()
