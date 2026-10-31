@@ -73,8 +73,6 @@ object CloudflareSolver {
                         Log.d(TAG, "📍 Final URL: $finalResolvedUrl")
                         Log.d(TAG, "🍪 Cookies: ${cookieManager.getCookie(finalResolvedUrl)}")
                         Log.d(TAG, "==================================================")
-
-                        // 🎯 تحديث الرابط الجديد مباشرة في كلاس FASELHD
                         try {
                             val parsedUri = android.net.Uri.parse(finalResolvedUrl)
                             val host = parsedUri.host
