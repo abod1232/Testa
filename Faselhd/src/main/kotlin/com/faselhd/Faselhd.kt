@@ -65,10 +65,32 @@ class FASELHD(private val context: Context) : MainAPI() {
     override val hasMainPage = true
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
     companion object {
+        private const val SAVED_BASE_KEY = "FASELHD_PERSISTENT_BASE_URL"
         var redirectUrl: String? = null
+
+        // دالة يتم استدعاؤها من CloudflareSolver لحفظ الرابط للأبد
+        fun savePermanentBaseUrl(url: String) {
+            redirectUrl = url
+            try {
+                setKey(SAVED_BASE_KEY, url)
+                Log.d("FASELHD", "💾 تم حفظ الرابط الدائم في الجهاز: $url")
+            } catch (_: Exception) {}
+        }
     }
+
     private fun baseUrl(): String {
-        return redirectUrl ?: mainUrl
+        // 1. إذا كان موجوداً في الذاكرة السريعة (RAM)
+        redirectUrl?.let { return it }
+
+        // 2. إذا لم يكن في الذاكرة، نقرأه من تخزين الجهاز الدائم
+        val persistentUrl = try { getKey<String>(SAVED_BASE_KEY) } catch (_: Exception) { null }
+        if (!persistentUrl.isNullOrBlank()) {
+            redirectUrl = persistentUrl
+            return persistentUrl
+        }
+
+        // 3. كخيار أخير إذا لم يحفظ بعد
+        return mainUrl
     }
 
     private val cfLock = Mutex()
