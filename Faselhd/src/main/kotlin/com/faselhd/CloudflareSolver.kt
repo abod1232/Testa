@@ -67,8 +67,6 @@ object CloudflareSolver {
                     if (!isSolved) {
                         isSolved = true
                         cookieManager.flush()
-
-                        // 🎯 فحص وتحديث الدومين تلقائياً إذا تحول لرابط جديد
                         try {
                             val parsedUri = android.net.Uri.parse(finalResolvedUrl)
                             val host = parsedUri.host
