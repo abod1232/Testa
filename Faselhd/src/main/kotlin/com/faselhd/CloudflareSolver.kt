@@ -68,21 +68,17 @@ object CloudflareSolver {
                         isSolved = true
                         cookieManager.flush()
 
-                        Log.d(TAG, "==================================================")
-                        Log.d(TAG, "🎯 [نجاح] الرابط النهائي المستقر بعد التحويلات:")
-                        Log.d(TAG, "📍 Final URL: $finalResolvedUrl")
-                        Log.d(TAG, "🍪 Cookies: ${cookieManager.getCookie(finalResolvedUrl)}")
-                        Log.d(TAG, "==================================================")
+                        // 🎯 فحص وتحديث الدومين تلقائياً إذا تحول لرابط جديد
                         try {
                             val parsedUri = android.net.Uri.parse(finalResolvedUrl)
                             val host = parsedUri.host
                             if (!host.isNullOrBlank() && host.contains("faselhdx")) {
                                 val detectedBase = "${parsedUri.scheme ?: "https"}://$host"
                                 FASELHD.redirectUrl = detectedBase
-                                Log.d(TAG, "✅ تم تثبيت الدومين الجديد بنجاح: $detectedBase")
+                                Log.d(TAG, "🔄 [تم تحديث الرابط بنجاح]: $detectedBase")
                             }
                         } catch (e: Exception) {
-                            Log.e(TAG, "خطأ أثناء استخراج الدومين: ${e.message}")
+                            Log.e(TAG, "خطأ في قراءة الدومين الجديد: ${e.message}")
                         }
 
                         try {
@@ -92,7 +88,6 @@ object CloudflareSolver {
                         } catch (e: Exception) {}
 
                         if (html == null) {
-                            Log.w(TAG, "⚠️ فشل جلب محتوى HTML (انتهت المهلة)")
                             continuation.resume(null)
                             return
                         }
