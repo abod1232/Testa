@@ -67,11 +67,25 @@ object CloudflareSolver {
                     if (!isSolved) {
                         isSolved = true
                         cookieManager.flush()
+
                         Log.d(TAG, "==================================================")
                         Log.d(TAG, "🎯 [نجاح] الرابط النهائي المستقر بعد التحويلات:")
                         Log.d(TAG, "📍 Final URL: $finalResolvedUrl")
                         Log.d(TAG, "🍪 Cookies: ${cookieManager.getCookie(finalResolvedUrl)}")
                         Log.d(TAG, "==================================================")
+
+                        // 🎯 تحديث الرابط الجديد مباشرة في كلاس FASELHD
+                        try {
+                            val parsedUri = android.net.Uri.parse(finalResolvedUrl)
+                            val host = parsedUri.host
+                            if (!host.isNullOrBlank() && host.contains("faselhdx")) {
+                                val detectedBase = "${parsedUri.scheme ?: "https"}://$host"
+                                FASELHD.redirectUrl = detectedBase
+                                Log.d(TAG, "✅ تم تثبيت الدومين الجديد بنجاح: $detectedBase")
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "خطأ أثناء استخراج الدومين: ${e.message}")
+                        }
 
                         try {
                             pollingHandler.removeCallbacksAndMessages(null)
@@ -90,15 +104,10 @@ object CloudflareSolver {
                             .replace("\\u003E", ">")
                             .replace("\\\"", "\"")
                             .replace("\\\\", "\\")
+
                         continuation.resume(Jsoup.parse(cleanHtml, finalResolvedUrl))
                     }
                 }
-
-                pollingHandler.postDelayed({ 
-                    val currentFallbackUrl = webView.url ?: url
-                    Log.w(TAG, "⏰ انتهت مهلة 60 ثانية. الرابط عند التوقف: $currentFallbackUrl")
-                    finishSuccess(null, currentFallbackUrl) 
-                }, 60000)
 
                 fun simulateRealTouch(view: WebView, cssX: Float, cssY: Float) {
                     val density = activity.resources.displayMetrics.density
