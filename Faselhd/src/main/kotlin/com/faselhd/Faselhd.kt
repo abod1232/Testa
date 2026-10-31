@@ -566,8 +566,6 @@ class FASELHD(private val context: Context) : MainAPI() {
             dialog.setCancelable(false)
             dialog.setCanceledOnTouchOutside(false)
             dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
-
-            // حل مشكلة التجميد في النسخ الحديثة: نجعل النافذة شفافة ولكن غير معطلة برمجياً
             dialog.window?.apply {
                 setBackgroundDrawableResource(android.R.color.transparent)
                 setDimAmount(0f)
@@ -576,7 +574,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                     WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 )
-                // حجم صغير جداً ولكن مرئي للنظام لعدم إيقاف تشغيل الوسائط
                 attributes = attributes?.apply {
                     width = 2
                     height = 2
@@ -709,22 +706,16 @@ class FASELHD(private val context: Context) : MainAPI() {
                     scheduleNextQuality()
                 }
             }
-
-            // سكريبت صيد متطور يعترض fetch و XMLHttpRequest و JWPlayer مباشرة من البداية
             val fastSnifferJs = """
             (function() {
                 try {
                     window.open = function() { return null; };
-                    
-                    // محاكاة تفاعل المستخدم لمنع حظر التشغيل التلقائي
                     Object.defineProperty(navigator, 'userActivation', { 
                         get: () => ({ hasBeenActive: true, isActive: true }) 
                     });
 
                     if (!window.__NET_HOOKED__) {
                         window.__NET_HOOKED__ = true;
-                        
-                        // 1. اعتراض Fetch
                         const _fetch = window.fetch;
                         if (_fetch) {
                             window.fetch = function() {
@@ -741,8 +732,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                                 });
                             };
                         }
-
-                        // 2. اعتراض XMLHttpRequest
                         const _open = XMLHttpRequest.prototype.open;
                         XMLHttpRequest.prototype.open = function(method, u) {
                             try {
@@ -757,8 +746,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                             });
                             return _open.apply(this, arguments);
                         };
-
-                        // 3. اعتراض إعدادات مشغل JWPlayer مباشرة عند تعريفه
                         let checkJw = setInterval(function() {
                             if (typeof window.jwplayer === 'function' && !window.jwplayer.__hooked) {
                                 const orig = window.jwplayer;
@@ -804,8 +791,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                     val currentHost = try { Uri.parse(url).host?.replace("www.", "") ?: "" } catch (e: Exception) { "" }
                     return originalHost.isNotBlank() && currentHost.isNotBlank() && !currentHost.contains(originalHost)
                 }
-
-                // حقن فوري في بداية التحميل لمنع تفويت أي طلب
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                     super.onPageStarted(view, url, favicon)
                     view?.evaluateJavascript(fastSnifferJs, null)
