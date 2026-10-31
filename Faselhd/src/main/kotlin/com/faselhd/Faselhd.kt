@@ -362,14 +362,8 @@ class FASELHD(private val context: Context) : MainAPI() {
         }
     override suspend fun load(url: String): LoadResponse? {
         val base = baseUrl()
-        
-        // 1. توحيد الرابط ليكون كاملاً
         val rawAbsoluteUrl = if (url.startsWith("/")) "$base$url" else url
-        
-        // 2. حذف الـ / من نهاية الرابط إذا كانت موجودة
         val absoluteUrl = rawAbsoluteUrl.removeSuffix("/")
-
-        // 3. طلب الصفحة بالرابط النظيف بدون /
         val doc = smartGet(absoluteUrl)
         val rawTitle = doc.selectFirst(".singleInfo .title.h1")?.ownText() ?: ""
         val title = rawTitle.replace("\\n", "").replace("\n", "").trim()
