@@ -125,6 +125,8 @@ class Anime3rb(val context: Context) : MainAPI() {
     val headers = mutableMapOf(
         "User-Agent" to USER_AGENT,
         "Accept" to "*/*",
+        "X-Livewire" to "1",
+        "Sec-Fetch-Site" to "same-origin",
         "Content-Type" to "application/json",
         "Origin" to mainUrl,
         "Referer" to "$mainUrl/"
