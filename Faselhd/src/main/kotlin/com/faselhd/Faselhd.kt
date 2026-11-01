@@ -559,72 +559,36 @@ class FASELHD(private val context: Context) : MainAPI() {
         }
 
         val finalUrl = iframeUrl.replace("&amp;", "&").trim()
+        val originalHost = try { Uri.parse(finalUrl).host?.replace("www.", "") ?: "" } catch (e: Exception) { "" }
 
         activity.runOnUiThread {
             val dialog = Dialog(activity, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
             dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
             dialog.setCancelable(true)
 
-            val rootLayout = FrameLayout(activity).apply {
+            val webView = WebView(activity).apply {
                 layoutParams = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
-                setBackgroundColor(Color.BLACK)
-            }
-
-            val webView = WebView(activity).apply {
-                layoutParams = FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT
-                )
+                alpha = 1f
                 visibility = View.VISIBLE
             }
-            rootLayout.addView(webView)
-            val hudBar = LinearLayout(activity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                layoutParams = FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 45f, resources.displayMetrics).toInt()
-                )
-                setBackgroundColor(Color.parseColor("#E6000000"))
-                setPadding(20, 0, 20, 0)
-                gravity = Gravity.CENTER_VERTICAL
-                elevation = 50f
-            }
 
-            val statusText = TextView(activity).apply {
-                text = "جاري فتح المشغل بدون X-Requested-With..."
-                setTextColor(Color.YELLOW)
-                textSize = 12f
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            }
-            hudBar.addView(statusText)
-
-            val finishButton = android.widget.Button(activity).apply {
-                text = "حفظ وإنهاء ✔"
-                setTextColor(Color.WHITE)
-                textSize = 11f
-                setBackgroundColor(Color.parseColor("#2E7D32"))
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 38f, resources.displayMetrics).toInt()
-                )
-            }
-            hudBar.addView(finishButton)
-            rootLayout.addView(hudBar)
-
-            dialog.setContentView(rootLayout)
+            dialog.setContentView(webView)
             dialog.show()
 
             webView.settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
                 databaseEnabled = true
-                loadWithOverviewMode = true
-                useWideViewPort = true
                 mediaPlaybackRequiresUserGesture = false
-                userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Mobile Safari/537.36"
+                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                cacheMode = WebSettings.LOAD_DEFAULT
+                userAgentString = lastValidUserAgent
+                useWideViewPort = true
+                loadWithOverviewMode = true
+                blockNetworkImage = false
             }
 
             val cookieManager = CookieManager.getInstance()
@@ -659,45 +623,28 @@ class FASELHD(private val context: Context) : MainAPI() {
                 cleanup()
             }
 
-            finishButton.setOnClickListener { safeFinish() }
             dialog.setOnDismissListener { safeFinish() }
 
-            fun handleFoundLink(url: String) {
-                val clean = url.substringBefore("?")
-                if (!clean.endsWith(".m3u8")) return
-
-                synchronized(foundM3u8) {
-                    if (foundM3u8.contains(url)) return
-                    foundM3u8.add(url)
-                }
-
-                activity.runOnUiThread {
-                    statusText.text = "🎯 تم صيد (${foundM3u8.size}) روابط! أحدث: ${clean.substringAfterLast("/")}"
-                    statusText.setTextColor(Color.GREEN)
-                }
-            }
-
             fun clickQuality(qualityLabel: String) {
-                activity.runOnUiThread { statusText.text = "جاري النقر على: $qualityLabel" }
                 val js = """
                 (function() {
-                    try {
-                        let els = document.querySelectorAll('ul.quality_ch li, .quality_ch > *, [class*="quality"] li, .jw-settings-content-item, button');
-                        for (let el of els) {
-                            let txt = (el.innerText || el.textContent || '').trim().toLowerCase();
-                            if (txt.includes('$qualityLabel'.toLowerCase())) {
-                                ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(evt => {
-                                    el.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
-                                });
-                                if (typeof el.onclick === 'function') { el.onclick(); }
-                                break;
-                            }
+                    let clicked = false;
+                    let els = document.querySelectorAll('ul.quality_ch li, .quality_ch > *, [class*="quality"] li, .jw-settings-content-item, button');
+                    for (let el of els) {
+                        let txt = (el.innerText || el.textContent || '').trim().toLowerCase();
+                        if (txt.includes('$qualityLabel'.toLowerCase())) {
+                            ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(evt => {
+                                el.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
+                            });
+                            if (typeof el.onclick === 'function') { el.onclick(); }
+                            clicked = true;
+                            break;
                         }
+                    }
+                    if (!clicked) {
                         let p = typeof window.jwplayer === 'function' ? window.jwplayer("player") : null;
                         if (p && typeof p.play === 'function') { p.setMute(true); p.play(); }
-                        let playBtns = document.querySelectorAll('.jw-display-icon-display, .vjs-big-play-button, button, video');
-                        playBtns.forEach(b => { try { b.click(); } catch(e){} });
-                    } catch(e) {}
+                    }
                 })();
                 """.trimIndent()
                 activity.runOnUiThread { webView.evaluateJavascript(js, null) }
@@ -708,7 +655,10 @@ class FASELHD(private val context: Context) : MainAPI() {
 
             fun scheduleNextQuality() {
                 autoStepRunnable?.let { handler.removeCallbacks(it) }
-                if (currentQualityIndex >= qualitiesToTest.size) return
+                if (currentQualityIndex >= qualitiesToTest.size) {
+                    safeFinish()
+                    return
+                }
 
                 val currentTarget = qualitiesToTest[currentQualityIndex]
                 clickQuality(currentTarget)
@@ -717,24 +667,33 @@ class FASELHD(private val context: Context) : MainAPI() {
                     currentQualityIndex++
                     scheduleNextQuality()
                 }
-                handler.postDelayed(autoStepRunnable!!, 2000)
+                handler.postDelayed(autoStepRunnable!!, 2500)
+            }
+
+            fun handleFoundLink(url: String) {
+                val clean = url.substringBefore("?")
+                if (!clean.endsWith(".m3u8")) return
+
+                synchronized(foundM3u8) {
+                    if (foundM3u8.contains(url)) return
+                    foundM3u8.add(url)
+                }
+
+                handler.post {
+                    currentQualityIndex++
+                    scheduleNextQuality()
+                }
             }
 
             val fastSnifferJs = """
             (function() {
                 try {
                     window.open = function() { return null; };
-                    Object.defineProperty(navigator, 'userActivation', { get: () => ({ hasBeenActive: true, isActive: true }) });
                     if (!window.__NET_HOOKED__) {
                         window.__NET_HOOKED__ = true;
-                        
                         const _fetch = window.fetch;
                         if (_fetch) {
                             window.fetch = function() {
-                                const url = (arguments && arguments[0]) ? (arguments[0].url || arguments[0]) : '';
-                                if (typeof url === 'string' && url.indexOf('.m3u8') !== -1) {
-                                    console.log('NET_M3U8::' + url);
-                                }
                                 return _fetch.apply(this, arguments).then(function(resp) {
                                     try {
                                         const u = resp && resp.url ? resp.url : '';
@@ -744,12 +703,8 @@ class FASELHD(private val context: Context) : MainAPI() {
                                 });
                             };
                         }
-
                         const _open = XMLHttpRequest.prototype.open;
                         XMLHttpRequest.prototype.open = function(method, u) {
-                            if (typeof u === 'string' && u.indexOf('.m3u8') !== -1) {
-                                console.log('NET_M3U8::' + u);
-                            }
                             this.addEventListener('load', function() {
                                 try {
                                     if (typeof u === 'string' && u.indexOf('.m3u8') !== -1) { console.log('NET_M3U8::' + u); }
@@ -764,46 +719,44 @@ class FASELHD(private val context: Context) : MainAPI() {
 
             webView.webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                    return false
-                }
-
-                override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: android.net.http.SslError?) {
-                    handler?.proceed()
-                }
-
-                override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                    super.onPageStarted(view, url, favicon)
-                    view?.evaluateJavascript(fastSnifferJs, null)
+                    val url = request?.url.toString().lowercase()
+                    if (!url.startsWith("http")) return true
+                    if (url.contains("recaptcha") || url.contains("melbet") || url.contains("policies.google")) return true
+                    val currentHost = try { Uri.parse(url).host?.replace("www.", "") ?: "" } catch (e: Exception) { "" }
+                    return originalHost.isNotBlank() && currentHost.isNotBlank() && !currentHost.contains(originalHost)
                 }
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     view?.evaluateJavascript(fastSnifferJs, null)
-                    handler.postDelayed({ scheduleNextQuality() }, 1000)
+                    handler.postDelayed({ scheduleNextQuality() }, 1200)
                 }
+
                 override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
                     val reqUrl = request?.url.toString()
                     val lowerUrl = reqUrl.lowercase()
+
+                    // التقاط روابط البث
                     if (lowerUrl.contains(".m3u8")) {
                         handleFoundLink(reqUrl)
                     }
-                    if (lowerUrl.contains("faselhdx") || lowerUrl.contains("video_player")) {
+
+                    // اعتراض صفحة المشغل وحذف X-Requested-With وتجاوز الحماية
+                    if (lowerUrl.contains("faselhdx.life") || lowerUrl.contains("video_player")) {
                         try {
                             val url = URL(reqUrl)
                             val connection = (url.openConnection() as HttpURLConnection).apply {
                                 requestMethod = "GET"
-                                connectTimeout = 10000
-                                readTimeout = 10000
                                 setRequestProperty("sec-ch-ua", "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Android WebView\";v=\"156\"")
                                 setRequestProperty("sec-ch-ua-mobile", "?1")
                                 setRequestProperty("sec-ch-ua-platform", "\"Android\"")
                                 setRequestProperty("upgrade-insecure-requests", "1")
-                                setRequestProperty("user-agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Mobile Safari/537.36")
+                                setRequestProperty("user-agent", lastValidUserAgent)
                                 setRequestProperty("accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
                                 setRequestProperty("sec-fetch-mode", "navigate")
                                 setRequestProperty("sec-fetch-site", "none")
                                 setRequestProperty("sec-fetch-dest", "document")
-                                setRequestProperty("accept-language", "ar-EG,ar;q=0.9,en-US;q=0.8,en;q=0.7")
+                                setRequestProperty("accept-language", "ar-IQ,ar;q=0.9,en-US;q=0.8,en;q=0.7")
 
                                 val cookies = cookieManager.getCookie(reqUrl)
                                 if (!cookies.isNullOrBlank()) {
@@ -812,6 +765,7 @@ class FASELHD(private val context: Context) : MainAPI() {
 
                                 connect()
                             }
+
                             connection.headerFields["Set-Cookie"]?.forEach { ck ->
                                 cookieManager.setCookie(reqUrl, ck)
                             }
@@ -819,18 +773,21 @@ class FASELHD(private val context: Context) : MainAPI() {
                             val mimeType = connection.contentType?.substringBefore(";") ?: "text/html"
                             val encoding = connection.contentEncoding ?: "utf-8"
                             return WebResourceResponse(mimeType, encoding, connection.inputStream)
-                        } catch (_: Exception) {}
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
                     }
 
                     return super.shouldInterceptRequest(view, request)
                 }
+
+                @SuppressLint("WebViewClientOnReceivedSslError")
+                override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: android.net.http.SslError?) {
+                    handler?.proceed()
+                }
             }
 
             webView.webChromeClient = object : WebChromeClient() {
-                override fun onPermissionRequest(request: android.webkit.PermissionRequest?) {
-                    activity.runOnUiThread { request?.grant(request.resources) }
-                }
-
                 override fun onConsoleMessage(cm: ConsoleMessage?): Boolean {
                     val msg = cm?.message() ?: ""
                     if (msg.startsWith("NET_M3U8::")) {
@@ -842,7 +799,8 @@ class FASELHD(private val context: Context) : MainAPI() {
 
             timeoutRunnable = Runnable { safeFinish() }
             handler.postDelayed(timeoutRunnable!!, 25000L)
-            webView.loadUrl(finalUrl)
+
+            webView.loadUrl(finalUrl, mapOf("Referer" to referer))
 
             cont.invokeOnCancellation { handler.post { safeFinish() } }
         }
