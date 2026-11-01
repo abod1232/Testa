@@ -22,11 +22,7 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
             val context = requireContext()
             val screen = preferenceManager.createPreferenceScreen(context)
             preferenceScreen = screen
-
-            // الرابط المطلوب فتحه
             val targetUrl = "https://web11112x.faselhdx.life/video_player?player_token=VnFJTnhBcDdJZ2daWVlEVHZhckJnOXM4RFVTQjdnQWtXYXVPdk04bU03ZlVvTVNXSzhZN1dZMUg2Vm9GZGw4a204YnNGWkVNNmVPUENKUy9uNW1aczBtNmlOcEJMbjdXYVRQb0pnRlY0WkJ6UjIrSXN1NmlVbUJ3Z0FRL0Vxc3BFYkc0bUlQLzFxMVU5elE0NnhsSkpybjRldEtVcVdMM2EzZlZzc0dtMXh6OHBvd2xwblVvWENlb2VQdnVDMHVOc0tEeEo2ejNnb29kbmZEbzlNUG5HQkNMSnQ1dnZ0SzJnaHlQTVlaeVRQZz06OuerGytsGQy%2B92bETzzPxBY%3D"
-
-            // إنشاء زر بسيط واحد للاختبار
             val testPreference = Preference(context).apply {
                 title = "فتح الرابط في WebView"
                 summary = "اضغط هنا لمعاينة الـ WebView بشكل ظاهر"
@@ -43,14 +39,11 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
         private fun showVisibleWebView(context: Context, url: String) {
             val activity = requireActivity()
             val rootView = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
-
-            // إنشاء الـ WebView وجعله ظاهراً ومرئياً (Visible)
             val webView = WebView(context).apply {
                 layoutParams = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
-                // التأكد من أن الـ WebView مرئي تماماً وليس مخفياً
                 alpha = 1f
                 translationX = 0f
                 visibility = View.VISIBLE
@@ -64,8 +57,6 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                 }
                 webViewClient = WebViewClient()
             }
-
-            // إضافة الـ WebView فوق واجهة التطبيق الحالية ليكون ظاهراً للمستخدم
             rootView.addView(webView)
             webView.loadUrl(url)
         }
