@@ -74,8 +74,6 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                         return false
                     }
-
-                    // السماح بالاستمرار حتى لو كانت شهادة SSL غير موثوقة
                     override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
                         handler?.proceed()
                     }
