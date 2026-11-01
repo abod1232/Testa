@@ -286,8 +286,6 @@ class FASELHD(private val context: Context) : MainAPI() {
     override suspend fun search(query: String, page: Int): SearchResponseList {
         val base = baseUrl()
         val encoded = URLEncoder.encode(query, "UTF-8")
-
-        // 1. بناء الرابط الأساسي للبحث والصفحات التالية بدقة وبدون / زائدة
         val searchUrl = if (page == 1) {
             "$base?s=$encoded"
         } else {
@@ -299,16 +297,10 @@ class FASELHD(private val context: Context) : MainAPI() {
         } catch (e: Exception) {
             Jsoup.parse("", searchUrl)
         }
-
-        // استخراج الأفلام من الحاوية postList
         var items = doc.select("div#postList div.postDiv, div.postDiv, article").mapNotNull { it.toSearchResult() }
-        
-        // التحقق من وجود صفحة تالية عند التمرير (Pagination)
         val nextPage = page + 1
         var hasNext = doc.select("ul.pagination a[href*='/page/$nextPage']").isNotEmpty() ||
                 doc.select("ul.pagination a").any { it.text().contains("›") || it.text().contains("»") }
-
-        // 2. الخيار الثانوي (AJAX Fallback): يعمل فقط إذا كانت الصفحة الأولى فارغة تماماً
         if (items.isEmpty() && page == 1) {
             try {
                 val ajaxUrl = "$base/wp-admin/admin-ajax.php"
