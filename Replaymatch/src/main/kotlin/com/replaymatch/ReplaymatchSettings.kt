@@ -2,20 +2,19 @@ package com.replaymatch
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.net.http.SslError
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.webkit.*
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.FrameLayout
 import androidx.fragment.app.FragmentContainerView
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
-import java.net.HttpURLConnection
-import java.net.URL
 
 class ReplaymatchSettings : BottomSheetDialogFragment() {
 
@@ -29,10 +28,10 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
             val targetUrl = "https://web11112x.faselhdx.life/video_player?player_token=VnFJTnhBcDdJZ2daWVlEVHZhckJnOXM4RFVTQjdnQWtXYXVPdk04bU03ZlVvTVNXSzhZN1dZMUg2Vm9GZGw4a204YnNGWkVNNmVPUENKUy9uNW1aczBtNmlOcEJMbjdXYVRQb0pnRlY0WkJ6UjIrSXN1NmlVbUJ3Z0FRL0Vxc3BFYkc0bUlQLzFxMVU5elE0NnhsSkpybjRldEtVcVdMM2EzZlZzc0dtMXh6OHBvd2xwblVvWENlb2VQdnVDMHVOc0tEeEo2ejNnb29kbmZEbzlNUG5HQkNMSnQ1dnZ0SzJnaHlQTVlaeVRQZz06OuerGytsGQy%2B92bETzzPxBY%3D"
 
             val testPreference = Preference(context).apply {
-                title = "فتح الرابط (حجب X-Requested-With)"
-                summary = "اعتراض الطلبات وحجب الهيدرات التلقائية"
+                title = "مشغل الفيديو"
+                summary = "اضغط لفتح مشغل الفيديو"
                 setOnPreferenceClickListener {
-                    showCustomInterceptedWebView(context, targetUrl)
+                    showSimpleWebView(context, targetUrl)
                     true
                 }
             }
@@ -41,10 +40,11 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
         }
 
         @SuppressLint("SetJavaScriptEnabled")
-        private fun showCustomInterceptedWebView(context: Context, urlString: String) {
+        private fun showSimpleWebView(context: Context, url: String) {
             val activity = requireActivity()
             val rootView = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
 
+            // الحاوية الأساسية للـ WebView وزر الإغلاق
             val container = FrameLayout(context).apply {
                 layoutParams = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -53,6 +53,7 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                 setBackgroundColor(android.graphics.Color.BLACK)
             }
 
+            // إعداد WebView مبسط وخفيف
             val webView = WebView(context).apply {
                 layoutParams = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -60,25 +61,12 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                 )
                 alpha = 1f
                 visibility = View.VISIBLE
-                setLayerType(View.LAYER_TYPE_HARDWARE, null)
 
                 settings.apply {
                     javaScriptEnabled = true
-                    javaScriptCanOpenWindowsAutomatically = true
                     domStorageEnabled = true
-                    databaseEnabled = true
-                    allowFileAccess = true
-                    allowContentAccess = true
-                    allowFileAccessFromFileURLs = true
-                    allowUniversalAccessFromFileURLs = true
                     loadWithOverviewMode = true
                     useWideViewPort = true
-                    builtInZoomControls = true
-                    displayZoomControls = false
-                    cacheMode = WebSettings.LOAD_DEFAULT
-                    loadsImagesAutomatically = true
-                    mediaPlaybackRequiresUserGesture = false
-                    mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                     userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Mobile Safari/537.36"
                 }
 
@@ -86,72 +74,30 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                         return false
                     }
-
-                    override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
-                        handler?.proceed()
-                    }
-                    override fun shouldInterceptRequest(
-                        view: WebView?,
-                        request: WebResourceRequest?
-                    ): WebResourceResponse? {
-                        val reqUrl = request?.url.toString()
-                        if (reqUrl.startsWith("https://web11112x.faselhdx.life/video_player")) {
-                            try {
-                                val url = URL(reqUrl)
-                                val connection = (url.openConnection() as HttpURLConnection).apply {
-                                    requestMethod = "GET"
-                                    setRequestProperty("sec-ch-ua", "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"")
-                                    setRequestProperty("sec-ch-ua-mobile", "?1")
-                                    setRequestProperty("sec-ch-ua-platform", "\"Android\"")
-                                    setRequestProperty("upgrade-insecure-requests", "1")
-                                    setRequestProperty("user-agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Mobile Safari/537.36")
-                                    setRequestProperty("accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
-                                    setRequestProperty("sec-fetch-site", "none")
-                                    setRequestProperty("sec-fetch-mode", "navigate")
-                                    setRequestProperty("sec-fetch-user", "?1")
-                                    setRequestProperty("sec-fetch-dest", "document")
-                                    setRequestProperty("accept-language", "ar-IQ,ar;q=0.9,en-US;q=0.8,en;q=0.7")
-                                    connect()
-                                }
-
-                                val mimeType = connection.contentType?.substringBefore(";") ?: "text/html"
-                                val encoding = connection.contentEncoding ?: "utf-8"
-                                val stream = connection.inputStream
-
-                                return WebResourceResponse(mimeType, encoding, stream)
-                            } catch (e: Exception) {
-                                e.printStackTrace()
-                            }
-                        }
-                        return super.shouldInterceptRequest(view, request)
-                    }
-                }
-
-                webChromeClient = object : WebChromeClient() {
-                    override fun onPermissionRequest(request: PermissionRequest?) {
-                        request?.grant(request.resources)
-                    }
-
-                    override fun onGeolocationPermissionsShowPrompt(
-                        origin: String?,
-                        callback: GeolocationPermissions.Callback?
-                    ) {
-                        callback?.invoke(origin, true, false)
-                    }
                 }
             }
 
-            val cookieManager = CookieManager.getInstance().apply {
-                setAcceptCookie(true)
-                setAcceptThirdPartyCookies(webView, true)
-            }
-            webView.loadUrl(urlString)
-            cookieManager.flush()
+            // الترويسات المطلوبة للطلب
+            val headers = mapOf(
+                "sec-ch-ua" to "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
+                "sec-ch-ua-mobile" to "?1",
+                "sec-ch-ua-platform" to "\"Android\"",
+                "upgrade-insecure-requests" to "1",
+                "accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+                "sec-fetch-site" to "none",
+                "sec-fetch-mode" to "navigate",
+                "sec-fetch-user" to "?1",
+                "sec-fetch-dest" to "document",
+                "accept-language" to "ar-IQ,ar;q=0.9,en-US;q=0.8,en;q=0.7"
+            )
 
+            webView.loadUrl(url, headers)
+
+            // زر إغلاق بسيط وواضح في أعلى الشاشة
             val closeButton = Button(context).apply {
                 text = "✕ إغلاق"
                 setTextColor(android.graphics.Color.WHITE)
-                setBackgroundColor(android.graphics.Color.parseColor("#CC000000"))
+                setBackgroundColor(android.graphics.Color.parseColor("#99000000"))
                 layoutParams = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
@@ -162,7 +108,6 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                 setOnClickListener {
                     try {
                         webView.stopLoading()
-                        webView.clearCache(true)
                         webView.destroy()
                         rootView.removeView(container)
                     } catch (e: Exception) {
