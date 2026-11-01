@@ -38,10 +38,11 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
             screen.addPreference(testPreference)
         }
 
-        @SuppressLint("SetJavaScriptEnabled", "CookieSetup")
+        @SuppressLint("SetJavaScriptEnabled")
         private fun showUltimatePoweredWebView(context: Context, url: String) {
             val activity = requireActivity()
             val rootView = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
+
             val container = FrameLayout(context).apply {
                 layoutParams = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -49,6 +50,7 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                 )
                 setBackgroundColor(android.graphics.Color.BLACK)
             }
+
             val cookieManager = CookieManager.getInstance().apply {
                 setAcceptCookie(true)
                 setAcceptThirdPartyCookies(null, true)
@@ -79,36 +81,35 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                     supportZoom = true
                     cacheMode = WebSettings.LOAD_DEFAULT
                     loadsImagesAutomatically = true
-                    mediaPlaybackRequiresUserGesture = false // تشغيل الفيديوهات تلقائياً بدون تداخل
+                    mediaPlaybackRequiresUserGesture = false
                     mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                    blockNetworkLoads = false
-                    blockNetworkImage = false
-                    databaseEnabled = true
-                    
                     userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Mobile Safari/537.36"
                 }
+
                 webViewClient = object : WebViewClient() {
                     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                        return false // البقاء دائماً داخل نفس الـ WebView
+                        return false
                     }
 
                     override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
-                        handler?.proceed() // تجاوز أخطاء شهادات الأمان والسيرفرات الوهمية لمنع توقف الموقع
+                        handler?.proceed()
                     }
                 }
+
                 webChromeClient = object : WebChromeClient() {
                     override fun onPermissionRequest(request: PermissionRequest?) {
-                        request?.grant(request.resources) // منح كافة الأذونات المطلوبة من الموقع تلقائياً
+                        request?.grant(request.resources)
                     }
 
                     override fun onGeolocationPermissionsShowPrompt(
                         origin: String?,
                         callback: GeolocationPermissions.Callback?
                     ) {
-                        callback?.invoke(origin, true, false) // السماح بصلاحيات الموقع الجغرافي إن طلبها الموقع
+                        callback?.invoke(origin, true, false)
                     }
                 }
             }
+
             val headers = mapOf(
                 "sec-ch-ua" to "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
                 "sec-ch-ua-mobile" to "?1",
@@ -124,6 +125,7 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
 
             webView.loadUrl(url, headers)
             cookieManager.flush()
+
             val closeButton = Button(context).apply {
                 text = "✕ إغلاق"
                 setTextColor(android.graphics.Color.WHITE)
