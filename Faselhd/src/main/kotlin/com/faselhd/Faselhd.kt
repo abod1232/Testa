@@ -56,8 +56,6 @@ import java.io.InputStream
 import android.webkit.SslErrorHandler
 import android.widget.Toast
 import com.lagradost.cloudstream3.newMovieSearchResponse
-import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
-import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
 
 class FASELHD(private val context: Context) : MainAPI() {
     override var name = "FASELHD"
@@ -67,25 +65,30 @@ class FASELHD(private val context: Context) : MainAPI() {
     override val hasMainPage = true
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries, TvType.Anime)
     companion object {
-        private const val SAVED_BASE_KEY = "FASELHD_PERSISTENT_BASE_URL"
-        var redirectUrl: String? = null
-        fun savePermanentBaseUrl(url: String) {
-            redirectUrl = url
-            try {
-                setKey(SAVED_BASE_KEY, url)
-                Log.d("FASELHD", "💾 تم حفظ الرابط الدائم في الجهاز: $url")
-            } catch (_: Exception) {}
-        }
-    }
 
-    private fun baseUrl(): String {
+        var redirectUrl: String? = null
+
+    }
+    private suspend fun baseUrl(): String {
         redirectUrl?.let { return it }
-        val persistentUrl = try { getKey<String>(SAVED_BASE_KEY) } catch (_: Exception) { null }
-        if (!persistentUrl.isNullOrBlank()) {
-            redirectUrl = persistentUrl
-            return persistentUrl
+
+        return try {
+            val response = app.get(mainUrl, allowRedirects = true)
+            val finalUrl = response.url
+
+            val base = try {
+                val uri = java.net.URI(finalUrl)
+                "${uri.scheme}://${uri.host}"
+            } catch (e: Exception) {
+                mainUrl
+            }
+
+            redirectUrl = base
+
+            base
+        } catch (e: Exception) {
+            mainUrl
         }
-        return mainUrl
     }
 
     private val cfLock = Mutex()
@@ -374,8 +377,7 @@ class FASELHD(private val context: Context) : MainAPI() {
         }
     override suspend fun load(url: String): LoadResponse? {
         val base = baseUrl()
-        val rawAbsoluteUrl = if (url.startsWith("/")) "$base$url" else url
-        val absoluteUrl = rawAbsoluteUrl.removeSuffix("/")
+        val absoluteUrl = if (url.startsWith("/")) "$base$url" else url
         val doc = smartGet(absoluteUrl)
         val rawTitle = doc.selectFirst(".singleInfo .title.h1")?.ownText() ?: ""
         val title = rawTitle.replace("\\n", "").replace("\n", "").trim()
@@ -402,7 +404,7 @@ class FASELHD(private val context: Context) : MainAPI() {
             val seasonUrlRel = seasonUrlRegex.find(onclickAttr)?.groupValues?.get(1) ?: return@mapNotNull null
             val seasonTitle = seasonEl.selectFirst(".title")?.text()?.replace("\\n", "")?.trim() ?: "موسم"
             val fullSeasonUrl = if (seasonUrlRel.startsWith("http")) seasonUrlRel else "$base$seasonUrlRel"
-            newTvSeriesSearchResponse(seasonTitle, fullSeasonUrl.removeSuffix("/"), TvType.TvSeries) {
+            newTvSeriesSearchResponse(seasonTitle, fullSeasonUrl, TvType.TvSeries) {
                 this.posterUrl = seasonPoster
                 this.posterHeaders = headers
             }
@@ -417,7 +419,7 @@ class FASELHD(private val context: Context) : MainAPI() {
                 val onclickAttr = seasonEl.attr("onclick")
                 val seasonUrlRel = seasonUrlRegex.find(onclickAttr)?.groupValues?.get(1) ?: ""
                 val fullSeasonUrl = if (seasonUrlRel.startsWith("http")) seasonUrlRel else "$base$seasonUrlRel"
-                if (fullSeasonUrl.removeSuffix("/") == absoluteUrl) {
+                if (fullSeasonUrl.removeSuffix("/") == absoluteUrl.removeSuffix("/")) {
                     currentSeasonIndex = idx
                 }
             }
@@ -431,6 +433,7 @@ class FASELHD(private val context: Context) : MainAPI() {
             }
             if (currentSeasonIndex == -1) currentSeasonIndex = 0
 
+
             var fakeSeasonCounter = 2
             for (i in 0 until seasonCards.size) {
                 val actualSeasonNum = i + 1
@@ -443,8 +446,7 @@ class FASELHD(private val context: Context) : MainAPI() {
                             val epTitle = el.ownText().ifBlank { el.text() }.replace("\\n", "").replace("\n", "").trim()
                             if (!epTitle.contains("باقي الحلقات") && !epTitle.contains("المزيد")) {
                                 val epNum = Regex("""\d+""").find(epTitle)?.value?.toIntOrNull()
-                                val fullEpUrl = if (epUrlRaw.startsWith("http")) epUrlRaw else "$base$epUrlRaw"
-                                currentSeasonEpisodes.add(newEpisode(fullEpUrl.removeSuffix("/")) {
+                                currentSeasonEpisodes.add(newEpisode(if (epUrlRaw.startsWith("http")) epUrlRaw else "$base$epUrlRaw") {
                                     this.name = "$seasonName - $epTitle"
                                     this.episode = epNum
                                     this.season = 1
@@ -469,8 +471,7 @@ class FASELHD(private val context: Context) : MainAPI() {
                 if (epUrlRaw.isNotBlank()) {
                     val epTitle = el.ownText().ifBlank { el.text() }.replace("\\n", "").replace("\n", "").trim()
                     val epNum = Regex("""\d+""").find(epTitle)?.value?.toIntOrNull()
-                    val fullEpUrl = if (epUrlRaw.startsWith("http")) epUrlRaw else "$base$epUrlRaw"
-                    currentSeasonEpisodes.add(newEpisode(fullEpUrl.removeSuffix("/")) {
+                    currentSeasonEpisodes.add(newEpisode(if (epUrlRaw.startsWith("http")) epUrlRaw else "$base$epUrlRaw") {
                         this.name = epTitle
                         this.episode = epNum
                         this.season = 1
@@ -506,27 +507,29 @@ class FASELHD(private val context: Context) : MainAPI() {
             "google.com/recaptcha",
             "google.com/ads",
             "googlesyndication.com",
-            "googletagmanager.com",
-            "?p=" // استبعاد الروابط المختصرة للصفحة نفسها
+            "googletagmanager.com"
         )
-
-        fun addResult(url: String) {
+        fun addResult(url: String, sourceTag: String) {
             val fixedUrl = fixUrl(url)
             if (blockedKeywords.none { fixedUrl.contains(it) }) {
-                if (fixedUrl.contains("player") || fixedUrl.contains("embed") || fixedUrl.contains("video")) {
-                    results.add(fixedUrl)
-                }
+                Log.d("FASELHD_IFRAME", " [مقبول] تم العثور على رابط من ($sourceTag): $fixedUrl")
+                results.add(fixedUrl)
+            } else {
+                Log.d("FASELHD_IFRAME", " [مستبعد] رابط إعلاني أو تحقق من ($sourceTag): $fixedUrl")
             }
         }
+
+        Log.d("FASELHD_IFRAME", "========== بدء استخراج الإطارات (iframes) ==========")
+        Log.d("FASELHD_IFRAME", "رابط الصفحة الأساسي: ${doc.baseUri()}")
         doc.select("iframe[src]").forEach { el ->
             val src = el.attr("src")
-            if (src.isNotBlank()) addResult(src)
+            if (src.isNotBlank()) addResult(src, "iframe[src]")
         }
         val onClickRegex = Regex("""player_iframe\.location\.href\s*=\s*['"]([^'"]+)['"]""")
         doc.select("[onclick]").forEach { el ->
             val onclick = el.attr("onclick")
             onClickRegex.find(onclick)?.let { match ->
-                addResult(match.groupValues[1])
+                addResult(match.groupValues[1], "onclick (player_iframe)")
             }
         }
         val scriptRegex = Regex("""https?://[^\s"'<>]+""")
@@ -536,16 +539,22 @@ class FASELHD(private val context: Context) : MainAPI() {
                 scriptRegex.findAll(data).forEach { m ->
                     val url = m.value
                     if (url.contains("player") || url.contains("embed")) {
-                        addResult(url)
+                        addResult(url, "inline script")
                     }
                 }
             }
         }
+        doc.select("div.shortLink, span#liskSh, a[data-src]").forEach { el ->
+            val text = el.text().trim()
+            if (text.startsWith("http")) addResult(text, "server link element")
+        }
 
+        Log.d("FASELHD_IFRAME", "========== إجمالي الروابط الصالحة المكتشفة: ${results.size} ==========")
         return results.toList()
     }
 
 
+    
     @SuppressLint("SetJavaScriptEnabled")
     private suspend fun resolveWithWebView(
         iframeUrl: String,
@@ -562,42 +571,67 @@ class FASELHD(private val context: Context) : MainAPI() {
         val originalHost = try { Uri.parse(finalUrl).host?.replace("www.", "") ?: "" } catch (e: Exception) { "" }
 
         activity.runOnUiThread {
-            val dialog = Dialog(activity)
-            dialog.setCancelable(false)
-            dialog.setCanceledOnTouchOutside(false)
+            // نافذة حوارية ظاهرة بملء الشاشة
+            val dialog = Dialog(activity, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
             dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+            dialog.setCancelable(true)
 
-            dialog.window?.apply {
-                setBackgroundDrawableResource(android.R.color.transparent)
-                setDimAmount(0f)
-                clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-                addFlags(
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+            val rootLayout = FrameLayout(activity).apply {
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
                 )
-                attributes = attributes?.apply {
-                    width = 2
-                    height = 2
-                    gravity = Gravity.BOTTOM or Gravity.START
-                }
+                setBackgroundColor(Color.BLACK)
             }
 
+            // الـ WebView ظاهر بنسبة 100%
             val webView = WebView(activity).apply {
-                layoutParams = ViewGroup.LayoutParams(2, 2)
-                alpha = 0.01f
+                layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
                 visibility = View.VISIBLE
+                alpha = 1.0f
             }
             webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            rootLayout.addView(webView)
 
-            try {
-                dialog.setContentView(webView, ViewGroup.LayoutParams(2, 2))
-                dialog.show()
-            } catch (e: Exception) {
-                try {
-                    val decor = activity.window?.decorView as? ViewGroup
-                    decor?.addView(webView, FrameLayout.LayoutParams(2, 2, Gravity.BOTTOM or Gravity.START))
-                } catch (_: Exception) {}
+            // شريط علوي ملون لعرض ما يحدث وزر للإنهاء اليدوي
+            val hudBar = LinearLayout(activity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 48f, resources.displayMetrics).toInt()
+                )
+                setBackgroundColor(Color.parseColor("#E6000000"))
+                setPadding(20, 0, 20, 0)
+                gravity = Gravity.CENTER_VERTICAL
+                elevation = 50f
             }
+
+            val statusText = TextView(activity).apply {
+                text = "جاري تحميل المشغل عبر غلاف الـ Iframe..."
+                setTextColor(Color.YELLOW)
+                textSize = 12f
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            hudBar.addView(statusText)
+
+            val finishButton = android.widget.Button(activity).apply {
+                text = "حفظ وإنهاء ✔"
+                setTextColor(Color.WHITE)
+                textSize = 11f
+                setBackgroundColor(Color.parseColor("#2E7D32"))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 38f, resources.displayMetrics).toInt()
+                )
+            }
+            hudBar.addView(finishButton)
+            rootLayout.addView(hudBar)
+
+            dialog.setContentView(rootLayout)
+            dialog.show()
 
             webView.settings.apply {
                 javaScriptEnabled = true
@@ -605,10 +639,14 @@ class FASELHD(private val context: Context) : MainAPI() {
                 databaseEnabled = true
                 allowContentAccess = true
                 allowFileAccess = true
+                allowFileAccessFromFileURLs = true
+                allowUniversalAccessFromFileURLs = true
                 mediaPlaybackRequiresUserGesture = false
                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                 cacheMode = WebSettings.LOAD_DEFAULT
                 userAgentString = lastValidUserAgent
+                useWideViewPort = true
+                loadWithOverviewMode = true
                 blockNetworkImage = false
             }
 
@@ -616,6 +654,10 @@ class FASELHD(private val context: Context) : MainAPI() {
             try {
                 cookieManager.setAcceptCookie(true)
                 cookieManager.setAcceptThirdPartyCookies(webView, true)
+                val parentCookies = cookieManager.getCookie(referer) ?: ""
+                if (parentCookies.isNotBlank()) {
+                    cookieManager.setCookie(finalUrl, parentCookies)
+                }
                 cookieManager.flush()
             } catch (_: Exception) {}
 
@@ -645,6 +687,9 @@ class FASELHD(private val context: Context) : MainAPI() {
                 cleanup()
             }
 
+            finishButton.setOnClickListener { safeFinish() }
+            dialog.setOnDismissListener { safeFinish() }
+
             fun handleFoundLink(url: String) {
                 val clean = url.substringBefore("?")
                 if (!clean.endsWith(".m3u8")) return
@@ -653,9 +698,15 @@ class FASELHD(private val context: Context) : MainAPI() {
                     if (foundM3u8.contains(url)) return
                     foundM3u8.add(url)
                 }
+
+                activity.runOnUiThread {
+                    statusText.text = "🎯 تم صيد (${foundM3u8.size}) روابط! أحدث: ${clean.substringAfterLast("/")}"
+                    statusText.setTextColor(Color.GREEN)
+                }
             }
 
             fun clickQuality(qualityLabel: String) {
+                activity.runOnUiThread { statusText.text = "جاري النقر على: $qualityLabel" }
                 val js = """
                 (function() {
                     try {
@@ -696,10 +747,7 @@ class FASELHD(private val context: Context) : MainAPI() {
 
             fun scheduleNextQuality() {
                 autoStepRunnable?.let { handler.removeCallbacks(it) }
-                if (currentQualityIndex >= qualitiesToTest.size) {
-                    safeFinish()
-                    return
-                }
+                if (currentQualityIndex >= qualitiesToTest.size) return
 
                 val currentTarget = qualitiesToTest[currentQualityIndex]
                 clickQuality(currentTarget)
@@ -708,7 +756,7 @@ class FASELHD(private val context: Context) : MainAPI() {
                     currentQualityIndex++
                     scheduleNextQuality()
                 }
-                handler.postDelayed(autoStepRunnable!!, 1500)
+                handler.postDelayed(autoStepRunnable!!, 2000)
             }
 
             val fastSnifferJs = """
@@ -803,8 +851,11 @@ class FASELHD(private val context: Context) : MainAPI() {
                 }
             }
 
+            // إعطاء مهلة كافية للمعاينة بالعين (25 ثانية)
             timeoutRunnable = Runnable { safeFinish() }
-            handler.postDelayed(timeoutRunnable!!, 7000L)
+            handler.postDelayed(timeoutRunnable!!, 25000L)
+
+            // تشغيل المشغل داخل Iframe حقيقي مطابق للبيئة الأصلية
             val iframeHtmlWrapper = """
                 <!DOCTYPE html>
                 <html>
@@ -820,69 +871,73 @@ class FASELHD(private val context: Context) : MainAPI() {
                 </body>
                 </html>
             """.trimIndent()
+
             webView.loadDataWithBaseURL(referer, iframeHtmlWrapper, "text/html", "UTF-8", null)
 
             cont.invokeOnCancellation { handler.post { safeFinish() } }
         }
     }
-
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
+        Log.d("FASELHD_LOAD", "========== بدء معالجة الرابط الأساسي: $data ==========")
         val doc = smartGet(data)
         val iframeUrls = extractIframeSources(doc)
 
-        if (iframeUrls.isEmpty()) return false
+        if (iframeUrls.isEmpty()) {
+            Log.e("FASELHD_LOAD", "❌ فشل: لم يتم العثور على أي رابط iframe في الصفحة.")
+            return false
+        }
 
-        var totalExtractedLinks = 0
-        val cm = CookieManager.getInstance()
+        var foundLink = false
 
-        for ((index, iframeUrl) in iframeUrls.distinct().withIndex()) {
-            val caughtM3u8List = resolveWithWebView(iframeUrl, data)
-            if (caughtM3u8List.isEmpty()) continue
-
-            val iframeUri = try { Uri.parse(iframeUrl) } catch (e: Exception) { null }
-            val iframeOrigin = if (iframeUri != null && iframeUri.host != null) "${iframeUri.scheme}://${iframeUri.host}" else iframeUrl
-
-            caughtM3u8List.forEach { m3u8Url ->
-                val streamCookies = cm.getCookie(m3u8Url) ?: cm.getCookie(iframeUrl) ?: ""
-                val streamHeaders = mutableMapOf(
-                    "User-Agent" to lastValidUserAgent,
-                    "Referer" to iframeUrl,
-                    "Origin" to iframeOrigin
-                )
-                if (streamCookies.isNotBlank()) {
-                    streamHeaders["Cookie"] = streamCookies
+        iframeUrls.distinct().forEachIndexed { index, iframeUrl ->
+            Log.d("FASELHD_LOAD", "--------------------------------------------------")
+            Log.d("FASELHD_LOAD", "▶ فحص الـ Iframe رقم (${index + 1}/${iframeUrls.size}): $iframeUrl")
+            try {
+                val iframeDoc = smartGet(iframeUrl, referer = data)
+                val iframeHtml = iframeDoc.outerHtml()
+                Log.d("FASELHD_LOAD", " تم جلب محتوى HTML الخاص بالـ Iframe بنجاح (الطول: ${iframeHtml.length} حرف)")
+                val internalPlayers = iframeDoc.select("iframe, video, source, [id*='player'], [class*='player']")
+                Log.d("FASELHD_LOAD", " العناصر المشتبه بها داخل الـ Iframe: ${internalPlayers.size} عنصر")
+                internalPlayers.forEach { el ->
+                    Log.d("FASELHD_LOAD", "   <- عنصر: <${el.tagName()}> | المعرف: ${el.id()} | المصدر: ${el.attr("src")}")
                 }
+                val previewLength = if (iframeHtml.length > 800) 800 else iframeHtml.length
+                Log.d("FASELHD_LOAD", "📄 مقتطف من محتوى HTML:\n" + iframeHtml.substring(0, previewLength) + "\n...")
 
-                val (qName, qValue) = when {
-                    m3u8Url.contains("1080") -> "1080p" to Qualities.P1080.value
-                    m3u8Url.contains("720") -> "720p" to Qualities.P720.value
-                    m3u8Url.contains("480") -> "480p" to Qualities.P480.value
-                    m3u8Url.contains("360") -> "360p" to Qualities.P360.value
-                    m3u8Url.contains("master") -> "Auto" to Qualities.Unknown.value
-                    else -> "Server ${index + 1}" to Qualities.Unknown.value
-                }
+            } catch (e: Exception) {
+                Log.w("FASELHD_LOAD", "⚠️ تعذر جلب محتوى HTML الخاص بالـ Iframe كـ Document: ${e.message}")
+            }
+            Log.d("FASELHD_LOAD", " تشغيل WebView لمحاولة استخراج رابط البث (.m3u8)...")
+            val m3u8 = resolveWithWebView(iframeUrl, data)
 
-                callback(
-                    newExtractorLink(
-                        source = name,
-                        name = "$name - Server ${index + 1} ($qName)",
-                        url = m3u8Url,
-                        type = ExtractorLinkType.M3U8
-                    ) {
-                        this.referer = iframeUrl
-                        this.quality = qValue
-                        this.headers = streamHeaders
-                    }
-                )
-                totalExtractedLinks++
+            if (!m3u8.isNullOrBlank()) {
+                Log.d("FASELHD_LOAD", " نجاح: تم التقاط رابط البث: $m3u8")
+                foundLink = true
+
+                M3u8Helper.generateM3u8(
+                    source = name,
+                    streamUrl = m3u8,
+                    referer = iframeUrl,
+                    headers = mapOf(
+                        "Referer" to iframeUrl,
+                        "User-Agent" to lastValidUserAgent
+                    )
+                ).forEach(callback)
+                return true
+            } else {
+                Log.e("FASELHD_LOAD", "❌ فشل: لم يتم التقاط رابط .m3u8 من هذا الـ Iframe.")
             }
         }
 
-        return totalExtractedLinks > 0
+        if (!foundLink) {
+            Log.e("FASELHD_LOAD", "❌ فشلت جميع المحاولات لاستخراج روابط البث من الـ iframes المتوفرة.")
+        }
+
+        return foundLink
     }
 }
