@@ -581,11 +581,8 @@ class FASELHD(private val context: Context) : MainAPI() {
                 )
                 visibility = View.VISIBLE
             }
-            // تمكين تسريع العتاد لتشغيل محرك الفيديو دون شاشة بيضاء
             webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
             rootLayout.addView(webView)
-
-            // شريط علوي للمتابعة والإنهاء اليدوي
             val hudBar = LinearLayout(activity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 layoutParams = FrameLayout.LayoutParams(
@@ -621,8 +618,6 @@ class FASELHD(private val context: Context) : MainAPI() {
 
             dialog.setContentView(rootLayout)
             dialog.show()
-
-            // منح المتصفح كافة الصلاحيات بدون أي استثناء
             webView.settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
@@ -817,7 +812,6 @@ class FASELHD(private val context: Context) : MainAPI() {
             }
 
             webView.webChromeClient = object : WebChromeClient() {
-                // منح كل الأذونات تلقائياً (صوت، فيديو، ميديا)
                 override fun onPermissionRequest(request: android.webkit.PermissionRequest?) {
                     activity.runOnUiThread {
                         request?.grant(request.resources)
@@ -835,8 +829,6 @@ class FASELHD(private val context: Context) : MainAPI() {
 
             timeoutRunnable = Runnable { safeFinish() }
             handler.postDelayed(timeoutRunnable!!, 25000L)
-
-            // فتح الرابط كصفحة جديدة ومباشرة بدون قيود
             webView.loadUrl(finalUrl)
 
             cont.invokeOnCancellation { handler.post { safeFinish() } }
