@@ -287,8 +287,6 @@ class FASELHD(private val context: Context) : MainAPI() {
         val base = baseUrl()
         var items = listOf<SearchResponse>()
         var hasNext = false
-
-        // 1. في الصفحة الأولى: نطلب مباشرة مسار الـ AJAX (الطلب رقم 69 الناجح فقط)
         if (page == 1) {
             try {
                 val ajaxUrl = "$base/wp-admin/admin-ajax.php"
@@ -311,8 +309,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 Log.d("FASELHD", "AJAX search failed: ${e.message}")
             }
         }
-
-        // 2. إذا كنا في صفحة تالية (page > 1) أو لم يُرجع الـ AJAX نتائج، نطلب الرابط النظيف لمرة واحدة فقط
         if (items.isEmpty()) {
             val encoded = URLEncoder.encode(query, "UTF-8")
             val searchUrl = if (page == 1) "$base/?s=$encoded" else "$base/page/$page/?s=$encoded"
