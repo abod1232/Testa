@@ -119,11 +119,17 @@ class FASELHD(private val context: Context) : MainAPI() {
         referer: String? = null,
         timeoutSeconds: Long? = null
     ): Document {
-        val cleanUrl = if (!url.endsWith("/") && !url.substringAfterLast("/").contains(".")) "$url/" else url
+        // حذف الـ / من النهاية إذا كان مساراً فرعياً مثل /main/ أو /movies/.../
+        val cleanUrl = if (url.endsWith("/") && url.count { it == '/' } > 3) {
+            url.removeSuffix("/")
+        } else {
+            url
+        }
+
         for (attempt in 1..3) {
             try {
                 val headers = getModernHeaders(cleanUrl)
-                if (referer != null) headers["Referer"] = referer
+                if (referer != null) headers["Referer"] = referer.removeSuffix("/")
 
                 val response = app.get(
                     cleanUrl,
