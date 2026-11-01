@@ -29,7 +29,7 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
 
             val testPreference = Preference(context).apply {
                 title = "مشغل الفيديو"
-                summary = "اضغط لفتح مشغل الفيديو"
+                summary = "اضغط لفتح مشغل الفيديو بدون ترويسات زائدة"
                 setOnPreferenceClickListener {
                     showSimpleWebView(context, targetUrl)
                     true
@@ -43,6 +43,7 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
         private fun showSimpleWebView(context: Context, url: String) {
             val activity = requireActivity()
             val rootView = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
+
             val container = FrameLayout(context).apply {
                 layoutParams = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -50,6 +51,7 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                 )
                 setBackgroundColor(android.graphics.Color.BLACK)
             }
+
             val webView = WebView(context).apply {
                 layoutParams = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -72,6 +74,8 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                     }
                 }
             }
+
+            // الترويسات المطلوبة بدقة (خالية تماماً من أي ترويسات تخص التطبيق)
             val headers = mapOf(
                 "sec-ch-ua" to "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
                 "sec-ch-ua-mobile" to "?1",
@@ -85,7 +89,9 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                 "accept-language" to "ar-IQ,ar;q=0.9,en-US;q=0.8,en;q=0.7"
             )
 
+            // تحميل الرابط مع الترويسات النظيفة فقط
             webView.loadUrl(url, headers)
+
             val closeButton = Button(context).apply {
                 text = "✕ إغلاق"
                 setTextColor(android.graphics.Color.WHITE)
