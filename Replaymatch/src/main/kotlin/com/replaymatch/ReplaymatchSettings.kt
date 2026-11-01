@@ -43,8 +43,6 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
         private fun showSimpleWebView(context: Context, url: String) {
             val activity = requireActivity()
             val rootView = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
-
-            // الحاوية الأساسية للـ WebView وزر الإغلاق
             val container = FrameLayout(context).apply {
                 layoutParams = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -52,8 +50,6 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                 )
                 setBackgroundColor(android.graphics.Color.BLACK)
             }
-
-            // إعداد WebView مبسط وخفيف
             val webView = WebView(context).apply {
                 layoutParams = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -76,8 +72,6 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                     }
                 }
             }
-
-            // الترويسات المطلوبة للطلب
             val headers = mapOf(
                 "sec-ch-ua" to "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
                 "sec-ch-ua-mobile" to "?1",
@@ -92,8 +86,6 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
             )
 
             webView.loadUrl(url, headers)
-
-            // زر إغلاق بسيط وواضح في أعلى الشاشة
             val closeButton = Button(context).apply {
                 text = "✕ إغلاق"
                 setTextColor(android.graphics.Color.WHITE)
