@@ -218,8 +218,6 @@ class FASELHD(private val context: Context) : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val base = baseUrl()
-        
-        // استبدال mainUrl بالدومين المحدث base تلقائياً
         val targetPath = if (request.data.startsWith(mainUrl)) {
             request.data.replace(mainUrl, base)
         } else if (!request.data.startsWith("http")) {
