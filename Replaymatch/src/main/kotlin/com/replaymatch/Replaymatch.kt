@@ -11,8 +11,6 @@ class FullMatchShowsProvider(private val context: Context) : MainAPI() {
     override var lang = "en"
     override val hasMainPage = true
     override val supportedTypes = setOf(TvType.Movie)
-
-    // دالة أساسية واحدة فقط تعمل بدون أخطاء وتعيد صفحة رئيسية فارغة
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         return newHomePageResponse(emptyList())
     }
