@@ -42,8 +42,6 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
         private fun showUltimatePoweredWebView(context: Context, url: String) {
             val activity = requireActivity()
             val rootView = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
-
-            // حاوية العرض بملء الشاشة
             val container = FrameLayout(context).apply {
                 layoutParams = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -51,8 +49,6 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                 )
                 setBackgroundColor(android.graphics.Color.BLACK)
             }
-
-            // إعداد مدير الكوكيز العالمي لمنع فقدان الجلسات
             val cookieManager = CookieManager.getInstance().apply {
                 setAcceptCookie(true)
                 setAcceptThirdPartyCookies(null, true)
@@ -68,40 +64,29 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                 setLayerType(View.LAYER_TYPE_HARDWARE, null)
 
                 settings.apply {
-                    // صلاحيات JavaScript و DOM
                     javaScriptEnabled = true
                     javaScriptCanOpenWindowsAutomatically = true
                     domStorageEnabled = true
                     databaseEnabled = true
-                    
-                    // صلاحيات الملفات والوصول الشبكي
                     allowFileAccess = true
                     allowContentAccess = true
                     allowFileAccessFromFileURLs = true
                     allowUniversalAccessFromFileURLs = true
-                    
-                    // إعدادات الشاشة والتكبير
                     loadWithOverviewMode = true
                     useWideViewPort = true
                     builtInZoomControls = true
                     displayZoomControls = false
                     supportZoom = true
-                    
-                    // الكاش والاتصال والوسائط
                     cacheMode = WebSettings.LOAD_DEFAULT
                     loadsImagesAutomatically = true
                     mediaPlaybackRequiresUserGesture = false // تشغيل الفيديوهات تلقائياً بدون تداخل
                     mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                    
-                    // المتصفح والـ User-Agent الخارق
                     blockNetworkLoads = false
                     blockNetworkImage = false
                     databaseEnabled = true
                     
                     userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Mobile Safari/537.36"
                 }
-
-                // WebViewClient قوي جداً يتجاوز مشاكل الأمان والشهادات المنتهية
                 webViewClient = object : WebViewClient() {
                     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                         return false // البقاء دائماً داخل نفس الـ WebView
@@ -111,8 +96,6 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                         handler?.proceed() // تجاوز أخطاء شهادات الأمان والسيرفرات الوهمية لمنع توقف الموقع
                     }
                 }
-
-                // WebChromeClient للتعامل مع النوافذ المنبثقة، الأذونات، وتفعيل الكاميرا/الموقع/الميكروفون والفيديو
                 webChromeClient = object : WebChromeClient() {
                     override fun onPermissionRequest(request: PermissionRequest?) {
                         request?.grant(request.resources) // منح كافة الأذونات المطلوبة من الموقع تلقائياً
@@ -126,8 +109,6 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                     }
                 }
             }
-
-            // الترويسات المطلوبة للطلب
             val headers = mapOf(
                 "sec-ch-ua" to "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
                 "sec-ch-ua-mobile" to "?1",
@@ -143,8 +124,6 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
 
             webView.loadUrl(url, headers)
             cookieManager.flush()
-
-            // زر إغلاق أنيق في أعلى الشاشة
             val closeButton = Button(context).apply {
                 text = "✕ إغلاق"
                 setTextColor(android.graphics.Color.WHITE)
