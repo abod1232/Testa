@@ -753,8 +753,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                     if (lowerUrl.contains(".m3u8")) {
                         handleFoundLink(reqUrl)
                     }
-
-                    // اعتراض المشغل وإزالة X-Requested-With
                     if (lowerUrl.contains("faselhdx.life") || lowerUrl.contains("video_player")) {
                         try {
                             val url = URL(reqUrl)
