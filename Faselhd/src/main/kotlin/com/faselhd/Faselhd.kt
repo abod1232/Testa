@@ -581,8 +581,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 visibility = View.VISIBLE
             }
             rootLayout.addView(webView)
-
-            // شريط علوي لمتابعة الحالة والإنهاء اليدوي
             val hudBar = LinearLayout(activity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 layoutParams = FrameLayout.LayoutParams(
@@ -783,18 +781,12 @@ class FASELHD(private val context: Context) : MainAPI() {
                     view?.evaluateJavascript(fastSnifferJs, null)
                     handler.postDelayed({ scheduleNextQuality() }, 1000)
                 }
-
-                // 🎯 اعتراض الطلب وحذف X-Requested-With باستخدام HttpURLConnection
                 override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
                     val reqUrl = request?.url.toString()
                     val lowerUrl = reqUrl.lowercase()
-
-                    // رصد روابط البث
                     if (lowerUrl.contains(".m3u8")) {
                         handleFoundLink(reqUrl)
                     }
-
-                    // اعتراض صفحة المشغل وسيرفرات faselhd لحذف X-Requested-With
                     if (lowerUrl.contains("faselhdx") || lowerUrl.contains("video_player")) {
                         try {
                             val url = URL(reqUrl)
@@ -802,7 +794,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                                 requestMethod = "GET"
                                 connectTimeout = 10000
                                 readTimeout = 10000
-                                // هيدرز Chrome كاملة ونظيفة تماماً من X-Requested-With
                                 setRequestProperty("sec-ch-ua", "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Android WebView\";v=\"156\"")
                                 setRequestProperty("sec-ch-ua-mobile", "?1")
                                 setRequestProperty("sec-ch-ua-platform", "\"Android\"")
@@ -821,8 +812,6 @@ class FASELHD(private val context: Context) : MainAPI() {
 
                                 connect()
                             }
-
-                            // حفظ أي كوكيز جديدة يعيدها السيرفر
                             connection.headerFields["Set-Cookie"]?.forEach { ck ->
                                 cookieManager.setCookie(reqUrl, ck)
                             }
@@ -853,8 +842,6 @@ class FASELHD(private val context: Context) : MainAPI() {
 
             timeoutRunnable = Runnable { safeFinish() }
             handler.postDelayed(timeoutRunnable!!, 25000L)
-
-            // فتح الرابط المباشر
             webView.loadUrl(finalUrl)
 
             cont.invokeOnCancellation { handler.post { safeFinish() } }
