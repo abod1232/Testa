@@ -7,16 +7,15 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.webkit.SslErrorHandler
-import android.webkit.WebResourceRequest
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import android.webkit.*
 import android.widget.Button
 import android.widget.FrameLayout
 import androidx.fragment.app.FragmentContainerView
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
+import java.net.HttpURLConnection
+import java.net.URL
 
 class ReplaymatchSettings : BottomSheetDialogFragment() {
 
@@ -31,9 +30,9 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
 
             val testPreference = Preference(context).apply {
                 title = "مشغل الفيديو"
-                summary = "اضغط لفتح مشغل الفيديو (مع تجاوز شهادات SSL)"
+                summary = "فتح الرابط مع حجب x-requested-with وتجاوز SSL"
                 setOnPreferenceClickListener {
-                    showSimpleWebView(context, targetUrl)
+                    showCleanWebView(context, targetUrl)
                     true
                 }
             }
@@ -42,7 +41,7 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
         }
 
         @SuppressLint("SetJavaScriptEnabled")
-        private fun showSimpleWebView(context: Context, url: String) {
+        private fun showCleanWebView(context: Context, urlString: String) {
             val activity = requireActivity()
             val rootView = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
 
@@ -74,26 +73,53 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                         return false
                     }
+
                     override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
-                        handler?.proceed()
+                        handler?.proceed() // تجاوز أخطاء SSL
+                    }
+
+                    // هنا السر: اعتراض الطلب وإرساله يدوياً بدون أي آثار لـ x-requested-with الخاصة بالتطبيق
+                    override fun shouldInterceptRequest(
+                        view: WebView?,
+                        request: WebResourceRequest?
+                    ): WebResourceResponse? {
+                        val reqUrl = request?.url.toString()
+                        if (reqUrl.contains("faselhdx.life")) {
+                            try {
+                                val url = URL(reqUrl)
+                                val connection = (url.openConnection() as HttpURLConnection).apply {
+                                    requestMethod = "GET"
+                                    // وضع الترويسات النظيفة التي أرسلتها أنت فقط حرفياً
+                                    setRequestProperty("sec-ch-ua", "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Android WebView\";v=\"156\"")
+                                    setRequestProperty("sec-ch-ua-mobile", "?1")
+                                    setRequestProperty("sec-ch-ua-platform", "\"Android\"")
+                                    setRequestProperty("upgrade-insecure-requests", "1")
+                                    setRequestProperty("user-agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Mobile Safari/537.36")
+                                    setRequestProperty("accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
+                                    setRequestProperty("sec-fetch-mode", "navigate")
+                                    setRequestProperty("sec-fetch-site", "none")
+                                    setRequestProperty("accept-language", "ar-IQ,ar;q=0.9,en-US;q=0.8,en;q=0.7")
+                                    setRequestProperty("sec-fetch-user", "?1")
+                                    setRequestProperty("sec-fetch-dest", "document")
+                                    // ملاحظة هامة: تم إسقاط ورفض x-requested-with تماماً هنا
+                                    connect()
+                                }
+
+                                val mimeType = connection.contentType?.substringBefore(";") ?: "text/html"
+                                val encoding = connection.contentEncoding ?: "utf-8"
+                                val stream = connection.inputStream
+
+                                return WebResourceResponse(mimeType, encoding, stream)
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
+                        }
+                        return super.shouldInterceptRequest(view, request)
                     }
                 }
             }
 
-            val headers = mapOf(
-                "sec-ch-ua" to "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
-                "sec-ch-ua-mobile" to "?1",
-                "sec-ch-ua-platform" to "\"Android\"",
-                "upgrade-insecure-requests" to "1",
-                "accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-                "sec-fetch-site" to "none",
-                "sec-fetch-mode" to "navigate",
-                "sec-fetch-user" to "?1",
-                "sec-fetch-dest" to "document",
-                "accept-language" to "ar-IQ,ar;q=0.9,en-US;q=0.8,en;q=0.7"
-            )
-
-            webView.loadUrl(url, headers)
+            webView.loadUrl(urlString)
 
             val closeButton = Button(context).apply {
                 text = "✕ إغلاق"
