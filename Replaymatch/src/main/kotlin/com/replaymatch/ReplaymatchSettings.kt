@@ -6,7 +6,9 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
@@ -28,10 +30,10 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
             val targetUrl = "https://web11112x.faselhdx.life/video_player?player_token=VnFJTnhBcDdJZ2daWVlEVHZhckJnOXM4RFVTQjdnQWtXYXVPdk04bU03ZlVvTVNXSzhZN1dZMUg2Vm9GZGw4a204YnNGWkVNNmVPUENKUy9uNW1aczBtNmlOcEJMbjdXYVRQb0pnRlY0WkJ6UjIrSXN1NmlVbUJ3Z0FRL0Vxc3BFYkc0bUlQLzFxMVU5elE0NnhsSkpybjRldEtVcVdMM2EzZlZzc0dtMXh6OHBvd2xwblVvWENlb2VQdnVDMHVOc0tEeEo2ejNnb29kbmZEbzlNUG5HQkNMSnQ1dnZ0SzJnaHlQTVlaeVRQZz06OuerGytsGQy%2B92bETzzPxBY%3D"
 
             val testPreference = Preference(context).apply {
-                title = "فتح الرابط بـ WebView (الهيدر الجديد)"
-                summary = "اضغط هنا للعرض مع الترويسات المطلوبة للـ GET"
+                title = "فتح الرابط بـ WebView (صلاحيات كاملة كمتصفح)"
+                summary = "اضغط هنا للعرض بأقصى صلاحيات وقوة متصفح"
                 setOnPreferenceClickListener {
-                    showVisibleWebViewWithHeaders(context, targetUrl)
+                    showSuperPoweredWebView(context, targetUrl)
                     true
                 }
             }
@@ -40,9 +42,11 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
         }
 
         @SuppressLint("SetJavaScriptEnabled")
-        private fun showVisibleWebViewWithHeaders(context: Context, url: String) {
+        private fun showSuperPoweredWebView(context: Context, url: String) {
             val activity = requireActivity()
             val rootView = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
+
+            // حاوية لتجميع الـ WebView وزر الإغلاق
             val container = FrameLayout(context).apply {
                 layoutParams = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -50,6 +54,8 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                 )
                 setBackgroundColor(android.graphics.Color.BLACK)
             }
+
+            // إنشاء الـ WebView مع إعطائه أقصى الصلاحيات
             val webView = WebView(context).apply {
                 layoutParams = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -58,21 +64,49 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                 alpha = 1f
                 visibility = View.VISIBLE
 
+                // تفعيل تسريع الهاردوير للأداء العالي (مثل تشغيل الفيديوهات بسلاسة)
+                setLayerType(View.LAYER_TYPE_HARDWARE, null)
+
                 settings.apply {
+                    // صلاحيات الجافاسكريبت والتفاعل الكامل
                     javaScriptEnabled = true
+                    javaScriptCanOpenWindowsAutomatically = true
                     domStorageEnabled = true
                     databaseEnabled = true
+                    
+                    // صلاحيات التخزين والملفات والشبكة
+                    allowFileAccess = true
+                    allowContentAccess = true
+                    
+                    // العرض والتكيف مع الشاشات
                     loadWithOverviewMode = true
                     useWideViewPort = true
+                    builtInZoomControls = true
+                    displayZoomControls = false
+                    
+                    // التخزين المؤقت وحالة الاتصال
+                    cacheMode = WebSettings.LOAD_DEFAULT
+                    loadsImagesAutomatically = true
+                    mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    
+                    // ضبطUser-Agent مطابق لمتصفح كروم حقيقي على أندرويد
                     userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Mobile Safari/537.36"
                 }
 
+                // WebViewClient للتحكم بروابط الصفحة الداخلية
                 webViewClient = object : WebViewClient() {
                     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                        return false
+                        return false // فتح الروابط داخل نفس الـ WebView بدلاً من الخروج منه
                     }
                 }
+
+                // WebChromeClient لدعم تشغيل الفيديوهات (Fullscreen)، النوافذ المنبثقة، والأذونات
+                webChromeClient = object : WebChromeClient() {
+                    // يمكنك إضافة أي إعدادات إضافية تخص مشغلات الفيديو هنا إن لزم الأمر
+                }
             }
+
+            // الترويسات المطلوبة لطلب الـ GET
             val headers = mapOf(
                 "sec-ch-ua" to "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
                 "sec-ch-ua-mobile" to "?1",
@@ -87,6 +121,8 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
             )
 
             webView.loadUrl(url, headers)
+
+            // زر إغلاق (X) في أعلى الشاشة
             val closeButton = Button(context).apply {
                 text = "✕ إغلاق"
                 setTextColor(android.graphics.Color.WHITE)
