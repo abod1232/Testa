@@ -213,7 +213,7 @@ class FASELHD(private val context: Context) : MainAPI() {
         }
     }
     override val mainPage = mainPageOf(
-        "$mainUrl/main" to "الرئيسية" // تحديث الرابط ليكون /main
+        "$base/main" to "الرئيسية" // تحديث الرابط ليكون /main
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
