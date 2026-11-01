@@ -561,12 +561,6 @@ class FASELHD(private val context: Context) : MainAPI() {
         val finalUrl = iframeUrl.replace("&amp;", "&").trim()
         val originalHost = try { Uri.parse(finalUrl).host?.replace("www.", "") ?: "" } catch (e: Exception) { "" }
 
-        Log.d("FASEL_INSPECT", "==================================================")
-        Log.d("FASEL_INSPECT", "🚀 [بدء فحص الويب فيو الظاهر]")
-        Log.d("FASEL_INSPECT", "🔗 Target Iframe: $finalUrl")
-        Log.d("FASEL_INSPECT", "🔗 Referer: $referer")
-        Log.d("FASEL_INSPECT", "==================================================")
-
         activity.runOnUiThread {
             val dialog = Dialog(activity, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
             dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
@@ -579,15 +573,17 @@ class FASELHD(private val context: Context) : MainAPI() {
                 )
                 setBackgroundColor(Color.BLACK)
             }
+
             val webView = WebView(activity).apply {
                 layoutParams = FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     FrameLayout.LayoutParams.MATCH_PARENT
                 )
                 visibility = View.VISIBLE
-                alpha = 1.0f
             }
             rootLayout.addView(webView)
+
+            // شريط المعلومات في الأعلى لمتابعة الحالة
             val hudBar = LinearLayout(activity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 layoutParams = FrameLayout.LayoutParams(
@@ -601,7 +597,7 @@ class FASELHD(private val context: Context) : MainAPI() {
             }
 
             val statusText = TextView(activity).apply {
-                text = "جاري الاتصال بالسيرفر..."
+                text = "جاري تهيئة المشغل وتجاوز الحماية..."
                 setTextColor(Color.YELLOW)
                 textSize = 12f
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
@@ -624,6 +620,7 @@ class FASELHD(private val context: Context) : MainAPI() {
             dialog.setContentView(rootLayout)
             dialog.show()
 
+            // إعدادات المتصفح المحاكية لمتصفح Chrome حقيقي
             webView.settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
@@ -636,12 +633,20 @@ class FASELHD(private val context: Context) : MainAPI() {
                 userAgentString = lastValidUserAgent
                 useWideViewPort = true
                 loadWithOverviewMode = true
+                // السماح بتحميل الصور لتفادي حظر المشغل
+                blockNetworkImage = false 
             }
 
             val cookieManager = CookieManager.getInstance()
             try {
                 cookieManager.setAcceptCookie(true)
                 cookieManager.setAcceptThirdPartyCookies(webView, true)
+                // نقل كوكيز الصفحة الأصلية إلى المشغل لمنع ظهور Not Valid
+                val parentCookies = cookieManager.getCookie(referer) ?: ""
+                if (parentCookies.isNotBlank()) {
+                    cookieManager.setCookie(finalUrl, parentCookies)
+                }
+                cookieManager.flush()
             } catch (_: Exception) {}
 
             val foundM3u8 = linkedSetOf<String>()
@@ -666,21 +671,14 @@ class FASELHD(private val context: Context) : MainAPI() {
                     finished = true
                 }
                 val list = synchronized(foundM3u8) { foundM3u8.toList() }
-                Log.d("FASEL_INSPECT", "🏁 [إنهاء الفحص] إجمالي الروابط المصادة: ${list.size}")
-                list.forEachIndexed { i, l -> Log.d("FASEL_INSPECT", "   [$i] $l") }
                 try { if (cont.isActive) cont.resume(list) } catch (_: Exception) {}
                 cleanup()
             }
 
-            finishButton.setOnClickListener {
-                safeFinish()
-            }
+            finishButton.setOnClickListener { safeFinish() }
+            dialog.setOnDismissListener { safeFinish() }
 
-            dialog.setOnDismissListener {
-                safeFinish()
-            }
-
-            fun handleFoundLink(url: String, source: String) {
+            fun handleFoundLink(url: String) {
                 val clean = url.substringBefore("?")
                 if (!clean.endsWith(".m3u8")) return
 
@@ -689,24 +687,18 @@ class FASELHD(private val context: Context) : MainAPI() {
                     foundM3u8.add(url)
                 }
 
-                Log.d("FASEL_INSPECT", "🎯 [تم صيد M3U8 من $source]: $url")
-
                 activity.runOnUiThread {
-                    statusText.text = "🎯 تم صيد (${foundM3u8.size}) روابط! أحدث: ${clean.substringAfterLast("/")}"
+                    statusText.text = "🎯 تم صيد جودة (${foundM3u8.size}): ${clean.substringAfterLast("/")}"
                     statusText.setTextColor(Color.GREEN)
                 }
             }
 
             fun clickQuality(qualityLabel: String) {
-                activity.runOnUiThread {
-                    statusText.text = "محاولة النقر على جودة: $qualityLabel"
-                }
+                activity.runOnUiThread { statusText.text = "جاري النقر على: $qualityLabel" }
                 val js = """
                 (function() {
                     try {
-                        let clicked = false;
                         let els = document.querySelectorAll('ul.quality_ch li, .quality_ch > *, [class*="quality"] li, .jw-settings-content-item, button');
-                        console.log('DOM_INSPECT::Found ' + els.length + ' possible buttons in player');
                         for (let el of els) {
                             let txt = (el.innerText || el.textContent || '').trim().toLowerCase();
                             if (txt.includes('$qualityLabel'.toLowerCase())) {
@@ -714,21 +706,14 @@ class FASELHD(private val context: Context) : MainAPI() {
                                     el.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
                                 });
                                 if (typeof el.onclick === 'function') { el.onclick(); }
-                                console.log('DOM_INSPECT::Successfully clicked: ' + txt);
-                                clicked = true;
                                 break;
                             }
                         }
-                        if (!clicked) {
-                            console.log('DOM_INSPECT::Could not find button for $qualityLabel, trying fallback play');
-                            let p = typeof window.jwplayer === 'function' ? window.jwplayer("player") : null;
-                            if (p && typeof p.play === 'function') { p.setMute(true); p.play(); }
-                            let playBtns = document.querySelectorAll('.jw-display-icon-display, .vjs-big-play-button, button, video');
-                            playBtns.forEach(b => { try { b.click(); } catch(e){} });
-                        }
-                    } catch(e) {
-                        console.log('DOM_INSPECT_ERR::' + e.message);
-                    }
+                        let p = typeof window.jwplayer === 'function' ? window.jwplayer("player") : null;
+                        if (p && typeof p.play === 'function') { p.setMute(true); p.play(); }
+                        let playBtns = document.querySelectorAll('.jw-display-icon-display, .vjs-big-play-button, button, video');
+                        playBtns.forEach(b => { try { b.click(); } catch(e){} });
+                    } catch(e) {}
                 })();
                 """.trimIndent()
                 activity.runOnUiThread { webView.evaluateJavascript(js, null) }
@@ -739,13 +724,9 @@ class FASELHD(private val context: Context) : MainAPI() {
 
             fun scheduleNextQuality() {
                 autoStepRunnable?.let { handler.removeCallbacks(it) }
-                if (currentQualityIndex >= qualitiesToTest.size) {
-                    Log.d("FASEL_INSPECT", "اكتملت محاولات النقر التلقائي لجميع الجودات.")
-                    return
-                }
+                if (currentQualityIndex >= qualitiesToTest.size) return
 
                 val currentTarget = qualitiesToTest[currentQualityIndex]
-                Log.d("FASEL_INSPECT", "👉 [جدولة النقر] جاري فحص ونقر: $currentTarget")
                 clickQuality(currentTarget)
 
                 autoStepRunnable = Runnable {
@@ -762,7 +743,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                     Object.defineProperty(navigator, 'userActivation', { get: () => ({ hasBeenActive: true, isActive: true }) });
                     if (!window.__NET_HOOKED__) {
                         window.__NET_HOOKED__ = true;
-                        console.log('SNIFFER::Injected fastSnifferJs successfully');
                         
                         const _fetch = window.fetch;
                         if (_fetch) {
@@ -794,16 +774,13 @@ class FASELHD(private val context: Context) : MainAPI() {
                             return _open.apply(this, arguments);
                         };
                     }
-                } catch(err){
-                    console.log('SNIFFER_ERR::' + err.message);
-                }
+                } catch(err){}
             })();
             """.trimIndent()
 
             webView.webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                     val url = request?.url.toString().lowercase()
-                    Log.d("FASEL_INSPECT", "🌐 Navigation Request: $url")
                     if (!url.startsWith("http")) return true
                     if (url.contains("recaptcha") || url.contains("melbet") || url.contains("policies.google")) return true
                     val currentHost = try { Uri.parse(url).host?.replace("www.", "") ?: "" } catch (e: Exception) { "" }
@@ -812,17 +789,12 @@ class FASELHD(private val context: Context) : MainAPI() {
 
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                     super.onPageStarted(view, url, favicon)
-                    Log.d("FASEL_INSPECT", "📄 onPageStarted: $url")
                     view?.evaluateJavascript(fastSnifferJs, null)
                 }
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
-                    Log.d("FASEL_INSPECT", "📄 onPageFinished: $url")
                     view?.evaluateJavascript(fastSnifferJs, null)
-                    activity.runOnUiThread {
-                        statusText.text = "اكتمل تحميل الصفحة، بدء تجربة الأزرار..."
-                    }
                     handler.postDelayed({ scheduleNextQuality() }, 1000)
                 }
 
@@ -831,14 +803,13 @@ class FASELHD(private val context: Context) : MainAPI() {
                     val lower = url.lowercase()
 
                     if (lower.contains(".m3u8")) {
-                        handleFoundLink(url, "shouldInterceptRequest")
+                        handleFoundLink(url)
                     }
                     return super.shouldInterceptRequest(view, request)
                 }
 
                 @SuppressLint("WebViewClientOnReceivedSslError")
                 override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: android.net.http.SslError?) {
-                    Log.w("FASEL_INSPECT", "⚠️ SSL Error bypassed: ${error?.toString()}")
                     handler?.proceed()
                 }
             }
@@ -847,27 +818,27 @@ class FASELHD(private val context: Context) : MainAPI() {
                 override fun onConsoleMessage(cm: ConsoleMessage?): Boolean {
                     val msg = cm?.message() ?: ""
                     if (msg.startsWith("NET_M3U8::")) {
-                        handleFoundLink(msg.substringAfter("::").trim(), "Console Hook")
-                    } else if (msg.startsWith("DOM_INSPECT::")) {
-                        Log.d("FASEL_INSPECT", "🖥️ ${msg.substringAfter("::")}")
-                    } else if (msg.startsWith("SNIFFER") || msg.startsWith("DOM_INSPECT_ERR")) {
-                        Log.d("FASEL_INSPECT", "⚠️ $msg")
+                        handleFoundLink(msg.substringAfter("::").trim())
                     }
                     return true
                 }
             }
-            timeoutRunnable = Runnable { 
-                Log.d("FASEL_INSPECT", "⏰ انتهت مهلة الـ 25 ثانية.")
-                safeFinish() 
-            }
-            handler.postDelayed(timeoutRunnable!!, 25000L)
 
-            webView.loadUrl(finalUrl, mapOf("Referer" to referer))
+            timeoutRunnable = Runnable { safeFinish() }
+            handler.postDelayed(timeoutRunnable!!, 20000L)
 
-            cont.invokeOnCancellation { 
-                Log.d("FASEL_INSPECT", "🛑 Coroutine Cancelled by Caller!")
-                handler.post { safeFinish() } 
-            }
+            // إرسال الهيدرز الدقيقة التي يطلبها السيرفر لمنع رفض التوكن
+            val extraHeaders = mutableMapOf(
+                "Referer" to referer,
+                "Origin" to (Uri.parse(referer).let { "${it.scheme}://${it.host}" }),
+                "sec-fetch-site" to "same-origin",
+                "sec-fetch-mode" to "navigate",
+                "sec-fetch-dest" to "iframe"
+            )
+
+            webView.loadUrl(finalUrl, extraHeaders)
+
+            cont.invokeOnCancellation { handler.post { safeFinish() } }
         }
     }
 
