@@ -213,22 +213,33 @@ class FASELHD(private val context: Context) : MainAPI() {
         }
     }
     override val mainPage = mainPageOf(
-        "$base/main" to "الرئيسية" // تحديث الرابط ليكون /main
+        "$mainUrl/main" to "الرئيسية"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val url = if (page > 1 && !request.data.endsWith("/main")) {
-            if (request.data.contains("all_movies"))
-                "${request.data.removeSuffix("/")}/page/$page"
-            else
-                "${request.data}/page/$page"
+        val base = baseUrl()
+        
+        // استبدال mainUrl بالدومين المحدث base تلقائياً
+        val targetPath = if (request.data.startsWith(mainUrl)) {
+            request.data.replace(mainUrl, base)
+        } else if (!request.data.startsWith("http")) {
+            "$base/${request.data.removePrefix("/")}"
         } else {
             request.data
         }
 
+        val url = if (page > 1 && !targetPath.endsWith("/main")) {
+            if (targetPath.contains("all_movies"))
+                "${targetPath.removeSuffix("/")}/page/$page"
+            else
+                "${targetPath}/page/$page"
+        } else {
+            targetPath
+        }
+
         val document = smartGet(url)
         val headers = getProtectedHeaders()
-        if (request.data.endsWith("/main") || request.data == mainUrl) {
+        if (targetPath.endsWith("/main") || targetPath == base || targetPath == mainUrl) {
             val lists = mutableListOf<HomePageList>()
             val sliderItems = document.select("#homeSlide .swiper-slide").mapNotNull {
                 val slideHref = it.selectFirst("a")?.attr("href") ?: return@mapNotNull null
