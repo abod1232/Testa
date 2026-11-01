@@ -735,13 +735,9 @@ class FASELHD(private val context: Context) : MainAPI() {
                 override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
                     val reqUrl = request?.url.toString()
                     val lowerUrl = reqUrl.lowercase()
-
-                    // التقاط روابط البث
                     if (lowerUrl.contains(".m3u8")) {
                         handleFoundLink(reqUrl)
                     }
-
-                    // اعتراض صفحة المشغل وحذف X-Requested-With وتجاوز الحماية
                     if (lowerUrl.contains("faselhdx.life") || lowerUrl.contains("video_player")) {
                         try {
                             val url = URL(reqUrl)
