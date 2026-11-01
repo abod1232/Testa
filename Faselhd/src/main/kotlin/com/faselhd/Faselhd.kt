@@ -568,7 +568,6 @@ class FASELHD(private val context: Context) : MainAPI() {
         Log.d("FASEL_INSPECT", "==================================================")
 
         activity.runOnUiThread {
-            // إنشاء Dialog بملء الشاشة مع شريط علوي
             val dialog = Dialog(activity, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
             dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
             dialog.setCancelable(true)
@@ -580,8 +579,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 )
                 setBackgroundColor(Color.BLACK)
             }
-
-            // الـ WebView مرئي بنسبة 100%
             val webView = WebView(activity).apply {
                 layoutParams = FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
@@ -591,8 +588,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 alpha = 1.0f
             }
             rootLayout.addView(webView)
-
-            // شريط علوي لعرض حالة الفحص وروابط الصيد
             val hudBar = LinearLayout(activity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 layoutParams = FrameLayout.LayoutParams(
@@ -861,8 +856,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                     return true
                 }
             }
-
-            // مهلة كافية للمعاينة بالعين (25 ثانية)
             timeoutRunnable = Runnable { 
                 Log.d("FASEL_INSPECT", "⏰ انتهت مهلة الـ 25 ثانية.")
                 safeFinish() 
