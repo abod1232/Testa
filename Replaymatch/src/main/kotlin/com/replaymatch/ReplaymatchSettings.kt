@@ -103,8 +103,6 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                     }
                 }
             }
-
-            // تم تصحيح تفعيل الكوكيز للـ WebView بنجاح ودون تمرير قيمة null
             val cookieManager = CookieManager.getInstance().apply {
                 setAcceptCookie(true)
                 setAcceptThirdPartyCookies(webView, true)
