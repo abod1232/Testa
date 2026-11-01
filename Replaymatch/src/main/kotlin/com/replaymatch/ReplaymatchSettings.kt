@@ -14,6 +14,8 @@ import androidx.fragment.app.FragmentContainerView
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
+import java.net.HttpURLConnection
+import java.net.URL
 
 class ReplaymatchSettings : BottomSheetDialogFragment() {
 
@@ -27,10 +29,10 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
             val targetUrl = "https://web11112x.faselhdx.life/video_player?player_token=VnFJTnhBcDdJZ2daWVlEVHZhckJnOXM4RFVTQjdnQWtXYXVPdk04bU03ZlVvTVNXSzhZN1dZMUg2Vm9GZGw4a204YnNGWkVNNmVPUENKUy9uNW1aczBtNmlOcEJMbjdXYVRQb0pnRlY0WkJ6UjIrSXN1NmlVbUJ3Z0FRL0Vxc3BFYkc0bUlQLzFxMVU5elE0NnhsSkpybjRldEtVcVdMM2EzZlZzc0dtMXh6OHBvd2xwblVvWENlb2VQdnVDMHVOc0tEeEo2ejNnb29kbmZEbzlNUG5HQkNMSnQ1dnZ0SzJnaHlQTVlaeVRQZz06OuerGytsGQy%2B92bETzzPxBY%3D"
 
             val testPreference = Preference(context).apply {
-                title = "فتح الرابط (متصفح خارق الصلاحيات)"
-                summary = "أقصى صلاحيات، تجاوز الشهادات، ودعم تفعيل الميديا والكوكيز"
+                title = "فتح الرابط (حجب X-Requested-With)"
+                summary = "اعتراض الطلبات وحجب الهيدرات التلقائية"
                 setOnPreferenceClickListener {
-                    showUltimatePoweredWebView(context, targetUrl)
+                    showCustomInterceptedWebView(context, targetUrl)
                     true
                 }
             }
@@ -39,7 +41,7 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
         }
 
         @SuppressLint("SetJavaScriptEnabled")
-        private fun showUltimatePoweredWebView(context: Context, url: String) {
+        private fun showCustomInterceptedWebView(context: Context, urlString: String) {
             val activity = requireActivity()
             val rootView = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
 
@@ -88,6 +90,45 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                     override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
                         handler?.proceed()
                     }
+
+                    // اعتراض طلب الصفحة الرئيسية الرئيسي وحقن الهيدرات النظيفة فقط بدون X-Requested-With
+                    override fun shouldInterceptRequest(
+                        view: WebView?,
+                        request: WebResourceRequest?
+                    ): WebResourceResponse? {
+                        val reqUrl = request?.url.toString()
+                        // إذا كان الطلب هو الرابط المستهدف الأساسي، نقوم بإدارته أو ترك الطلبات الفرعية حسب الحاجة
+                        if (reqUrl.startsWith("https://web11112x.faselhdx.life/video_player")) {
+                            try {
+                                val url = URL(reqUrl)
+                                val connection = (url.openConnection() as HttpURLConnection).apply {
+                                    requestMethod = "GET"
+                                    setRequestProperty("sec-ch-ua", "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"")
+                                    setRequestProperty("sec-ch-ua-mobile", "?1")
+                                    setRequestProperty("sec-ch-ua-platform", "\"Android\"")
+                                    setRequestProperty("upgrade-insecure-requests", "1")
+                                    setRequestProperty("user-agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Mobile Safari/537.36")
+                                    setRequestProperty("accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
+                                    setRequestProperty("sec-fetch-site", "none")
+                                    setRequestProperty("sec-fetch-mode", "navigate")
+                                    setRequestProperty("sec-fetch-user", "?1")
+                                    setRequestProperty("sec-fetch-dest", "document")
+                                    setRequestProperty("accept-language", "ar-IQ,ar;q=0.9,en-US;q=0.8,en;q=0.7")
+                                    // ملاحظة: لا نضيف أبداً X-Requested-With هنا نهائياً
+                                    connect()
+                                }
+
+                                val mimeType = connection.contentType?.substringBefore(";") ?: "text/html"
+                                val encoding = connection.contentEncoding ?: "utf-8"
+                                val stream = connection.inputStream
+
+                                return WebResourceResponse(mimeType, encoding, stream)
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
+                        }
+                        return super.shouldInterceptRequest(view, request)
+                    }
                 }
 
                 webChromeClient = object : WebChromeClient() {
@@ -103,25 +144,14 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                     }
                 }
             }
+
             val cookieManager = CookieManager.getInstance().apply {
                 setAcceptCookie(true)
                 setAcceptThirdPartyCookies(webView, true)
             }
 
-            val headers = mapOf(
-                "sec-ch-ua" to "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
-                "sec-ch-ua-mobile" to "?1",
-                "sec-ch-ua-platform" to "\"Android\"",
-                "upgrade-insecure-requests" to "1",
-                "accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-                "sec-fetch-site" to "none",
-                "sec-fetch-mode" to "navigate",
-                "sec-fetch-user" to "?1",
-                "sec-fetch-dest" to "document",
-                "accept-language" to "ar-IQ,ar;q=0.9,en-US;q=0.8,en;q=0.7"
-            )
-
-            webView.loadUrl(url, headers)
+            // تحميل الرابط بشكل عادي، بينما سيتولى shouldInterceptRequest تنظيف وتعديل الهيدرات بدقة عند جلب الصفحة
+            webView.loadUrl(urlString)
             cookieManager.flush()
 
             val closeButton = Button(context).apply {
