@@ -2,10 +2,12 @@ package com.replaymatch
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.net.http.SslError
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.SslErrorHandler
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -29,7 +31,7 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
 
             val testPreference = Preference(context).apply {
                 title = "مشغل الفيديو"
-                summary = "اضغط لفتح مشغل الفيديو بدون ترويسات زائدة"
+                summary = "اضغط لفتح مشغل الفيديو (مع تجاوز شهادات SSL)"
                 setOnPreferenceClickListener {
                     showSimpleWebView(context, targetUrl)
                     true
@@ -72,8 +74,14 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                         return false
                     }
+
+                    // السماح بالاستمرار حتى لو كانت شهادة SSL غير موثوقة
+                    override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
+                        handler?.proceed()
+                    }
                 }
             }
+
             val headers = mapOf(
                 "sec-ch-ua" to "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
                 "sec-ch-ua-mobile" to "?1",
@@ -86,6 +94,7 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                 "sec-fetch-dest" to "document",
                 "accept-language" to "ar-IQ,ar;q=0.9,en-US;q=0.8,en;q=0.7"
             )
+
             webView.loadUrl(url, headers)
 
             val closeButton = Button(context).apply {
