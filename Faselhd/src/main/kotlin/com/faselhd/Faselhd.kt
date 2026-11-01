@@ -571,7 +571,6 @@ class FASELHD(private val context: Context) : MainAPI() {
         val originalHost = try { Uri.parse(finalUrl).host?.replace("www.", "") ?: "" } catch (e: Exception) { "" }
 
         activity.runOnUiThread {
-            // نافذة حوارية ظاهرة بملء الشاشة
             val dialog = Dialog(activity, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
             dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
             dialog.setCancelable(true)
@@ -583,8 +582,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 )
                 setBackgroundColor(Color.BLACK)
             }
-
-            // الـ WebView ظاهر بنسبة 100%
             val webView = WebView(activity).apply {
                 layoutParams = FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
@@ -595,8 +592,6 @@ class FASELHD(private val context: Context) : MainAPI() {
             }
             webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
             rootLayout.addView(webView)
-
-            // شريط علوي ملون لعرض ما يحدث وزر للإنهاء اليدوي
             val hudBar = LinearLayout(activity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 layoutParams = FrameLayout.LayoutParams(
@@ -850,12 +845,8 @@ class FASELHD(private val context: Context) : MainAPI() {
                     return true
                 }
             }
-
-            // إعطاء مهلة كافية للمعاينة بالعين (25 ثانية)
             timeoutRunnable = Runnable { safeFinish() }
             handler.postDelayed(timeoutRunnable!!, 25000L)
-
-            // تشغيل المشغل داخل Iframe حقيقي مطابق للبيئة الأصلية
             val iframeHtmlWrapper = """
                 <!DOCTYPE html>
                 <html>
