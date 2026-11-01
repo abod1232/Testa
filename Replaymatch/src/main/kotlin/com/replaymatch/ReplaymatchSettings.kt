@@ -43,8 +43,6 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
         private fun showVisibleWebViewWithHeaders(context: Context, url: String) {
             val activity = requireActivity()
             val rootView = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
-
-            // حاوية لتجميع الـ WebView وزر الإغلاق معاً
             val container = FrameLayout(context).apply {
                 layoutParams = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -52,8 +50,6 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                 )
                 setBackgroundColor(android.graphics.Color.BLACK)
             }
-
-            // إنشاء الـ WebView
             val webView = WebView(context).apply {
                 layoutParams = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -77,8 +73,6 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                     }
                 }
             }
-
-            // إعداد الترويسات الجديدة المطابقة تماماً لطلبك
             val headers = mapOf(
                 "sec-ch-ua" to "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
                 "sec-ch-ua-mobile" to "?1",
@@ -93,8 +87,6 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
             )
 
             webView.loadUrl(url, headers)
-
-            // إنشاء زر إغلاق (X) في الأعلى
             val closeButton = Button(context).apply {
                 text = "✕ إغلاق"
                 setTextColor(android.graphics.Color.WHITE)
