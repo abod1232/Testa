@@ -659,7 +659,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 val js = """
                 (function() {
                     try {
-                        // دعم النقر سواء في الإطار الحالي أو داخل الـ iframe
                         function triggerInDoc(doc) {
                             if (!doc) return false;
                             let els = doc.querySelectorAll('ul.quality_ch li, .quality_ch > *, [class*="quality"] li, .jw-settings-content-item, button');
@@ -806,8 +805,6 @@ class FASELHD(private val context: Context) : MainAPI() {
 
             timeoutRunnable = Runnable { safeFinish() }
             handler.postDelayed(timeoutRunnable!!, 7000L)
-
-            // 🎯 الحل الحاسم: تشغيل المشغل داخل Iframe حقيقي داخل صفحة تحاكي بيئة الموقع الأصلي
             val iframeHtmlWrapper = """
                 <!DOCTYPE html>
                 <html>
@@ -823,8 +820,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 </body>
                 </html>
             """.trimIndent()
-
-            // تحميل الصفحة بـ baseUrl لصفحة الفيلم الأصلية، لمنع ظهور (Not Valid!)
             webView.loadDataWithBaseURL(referer, iframeHtmlWrapper, "text/html", "UTF-8", null)
 
             cont.invokeOnCancellation { handler.post { safeFinish() } }
