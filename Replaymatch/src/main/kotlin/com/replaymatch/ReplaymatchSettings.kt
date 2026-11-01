@@ -74,8 +74,6 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                     }
                 }
             }
-
-            // الترويسات المطلوبة بدقة (خالية تماماً من أي ترويسات تخص التطبيق)
             val headers = mapOf(
                 "sec-ch-ua" to "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
                 "sec-ch-ua-mobile" to "?1",
@@ -88,8 +86,6 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                 "sec-fetch-dest" to "document",
                 "accept-language" to "ar-IQ,ar;q=0.9,en-US;q=0.8,en;q=0.7"
             )
-
-            // تحميل الرابط مع الترويسات النظيفة فقط
             webView.loadUrl(url, headers)
 
             val closeButton = Button(context).apply {
