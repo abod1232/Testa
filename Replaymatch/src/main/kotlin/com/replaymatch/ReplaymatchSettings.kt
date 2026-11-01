@@ -78,7 +78,6 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                     useWideViewPort = true
                     builtInZoomControls = true
                     displayZoomControls = false
-                    supportZoom = true
                     cacheMode = WebSettings.LOAD_DEFAULT
                     loadsImagesAutomatically = true
                     mediaPlaybackRequiresUserGesture = false
