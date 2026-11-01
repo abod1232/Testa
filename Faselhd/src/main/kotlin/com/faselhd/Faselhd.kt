@@ -562,21 +562,39 @@ class FASELHD(private val context: Context) : MainAPI() {
         val originalHost = try { Uri.parse(finalUrl).host?.replace("www.", "") ?: "" } catch (e: Exception) { "" }
 
         activity.runOnUiThread {
-            val dialog = Dialog(activity, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+            val dialog = Dialog(activity)
+            dialog.setCancelable(false)
+            dialog.setCanceledOnTouchOutside(false)
             dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
-            dialog.setCancelable(true)
 
-            val webView = WebView(activity).apply {
-                layoutParams = ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT
+            dialog.window?.apply {
+                setBackgroundDrawableResource(android.R.color.transparent)
+                setDimAmount(0f)
+                clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+                addFlags(
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 )
-                alpha = 1f
-                visibility = View.VISIBLE
+                attributes = attributes?.apply {
+                    width = 1; height = 1; x = -10000; y = -10000
+                    gravity = Gravity.START or Gravity.TOP
+                }
             }
 
-            dialog.setContentView(webView)
-            dialog.show()
+            val webView = WebView(activity).apply {
+                layoutParams = ViewGroup.LayoutParams(1, 1)
+                visibility = View.INVISIBLE
+            }
+
+            try {
+                dialog.setContentView(webView, ViewGroup.LayoutParams(1, 1))
+                dialog.show()
+            } catch (e: Exception) {
+                try {
+                    val decor = activity.window?.decorView as? ViewGroup
+                    decor?.addView(webView, FrameLayout.LayoutParams(1, 1, Gravity.START or Gravity.TOP))
+                } catch (_: Exception) {}
+            }
 
             webView.settings.apply {
                 javaScriptEnabled = true
@@ -586,9 +604,7 @@ class FASELHD(private val context: Context) : MainAPI() {
                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                 cacheMode = WebSettings.LOAD_DEFAULT
                 userAgentString = lastValidUserAgent
-                useWideViewPort = true
-                loadWithOverviewMode = true
-                blockNetworkImage = false
+                blockNetworkImage = true
             }
 
             val cookieManager = CookieManager.getInstance()
@@ -622,8 +638,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 try { if (cont.isActive) cont.resume(list) } catch (_: Exception) {}
                 cleanup()
             }
-
-            dialog.setOnDismissListener { safeFinish() }
 
             fun clickQuality(qualityLabel: String) {
                 val js = """
@@ -735,9 +749,12 @@ class FASELHD(private val context: Context) : MainAPI() {
                 override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
                     val reqUrl = request?.url.toString()
                     val lowerUrl = reqUrl.lowercase()
+
                     if (lowerUrl.contains(".m3u8")) {
                         handleFoundLink(reqUrl)
                     }
+
+                    // اعتراض المشغل وإزالة X-Requested-With
                     if (lowerUrl.contains("faselhdx.life") || lowerUrl.contains("video_player")) {
                         try {
                             val url = URL(reqUrl)
@@ -769,9 +786,7 @@ class FASELHD(private val context: Context) : MainAPI() {
                             val mimeType = connection.contentType?.substringBefore(";") ?: "text/html"
                             val encoding = connection.contentEncoding ?: "utf-8"
                             return WebResourceResponse(mimeType, encoding, connection.inputStream)
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                        }
+                        } catch (_: Exception) {}
                     }
 
                     return super.shouldInterceptRequest(view, request)
@@ -794,7 +809,7 @@ class FASELHD(private val context: Context) : MainAPI() {
             }
 
             timeoutRunnable = Runnable { safeFinish() }
-            handler.postDelayed(timeoutRunnable!!, 25000L)
+            handler.postDelayed(timeoutRunnable!!, 8500L)
 
             webView.loadUrl(finalUrl, mapOf("Referer" to referer))
 
