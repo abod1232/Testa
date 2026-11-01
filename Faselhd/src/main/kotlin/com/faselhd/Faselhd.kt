@@ -119,7 +119,6 @@ class FASELHD(private val context: Context) : MainAPI() {
         referer: String? = null,
         timeoutSeconds: Long? = null
     ): Document {
-        // حذف الـ / من النهاية إذا كان مساراً فرعياً مثل /main/ أو /movies/.../
         val cleanUrl = if (url.endsWith("/") && url.count { it == '/' } > 3) {
             url.removeSuffix("/")
         } else {
