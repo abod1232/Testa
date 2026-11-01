@@ -77,8 +77,6 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                     override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
                         handler?.proceed() // تجاوز أخطاء SSL
                     }
-
-                    // هنا السر: اعتراض الطلب وإرساله يدوياً بدون أي آثار لـ x-requested-with الخاصة بالتطبيق
                     override fun shouldInterceptRequest(
                         view: WebView?,
                         request: WebResourceRequest?
@@ -89,7 +87,6 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                                 val url = URL(reqUrl)
                                 val connection = (url.openConnection() as HttpURLConnection).apply {
                                     requestMethod = "GET"
-                                    // وضع الترويسات النظيفة التي أرسلتها أنت فقط حرفياً
                                     setRequestProperty("sec-ch-ua", "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Android WebView\";v=\"156\"")
                                     setRequestProperty("sec-ch-ua-mobile", "?1")
                                     setRequestProperty("sec-ch-ua-platform", "\"Android\"")
@@ -101,7 +98,6 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                                     setRequestProperty("accept-language", "ar-IQ,ar;q=0.9,en-US;q=0.8,en;q=0.7")
                                     setRequestProperty("sec-fetch-user", "?1")
                                     setRequestProperty("sec-fetch-dest", "document")
-                                    // ملاحظة هامة: تم إسقاط ورفض x-requested-with تماماً هنا
                                     connect()
                                 }
 
