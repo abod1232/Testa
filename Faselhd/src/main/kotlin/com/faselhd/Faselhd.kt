@@ -581,21 +581,25 @@ class FASELHD(private val context: Context) : MainAPI() {
                 )
                 visibility = View.VISIBLE
             }
+            // تمكين تسريع العتاد لتشغيل محرك الفيديو دون شاشة بيضاء
+            webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
             rootLayout.addView(webView)
+
+            // شريط علوي للمتابعة والإنهاء اليدوي
             val hudBar = LinearLayout(activity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 layoutParams = FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
-                    TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 50f, resources.displayMetrics).toInt()
+                    TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 45f, resources.displayMetrics).toInt()
                 )
-                setBackgroundColor(Color.parseColor("#E6000000"))
+                setBackgroundColor(Color.parseColor("#CC000000"))
                 setPadding(20, 0, 20, 0)
                 gravity = Gravity.CENTER_VERTICAL
                 elevation = 50f
             }
 
             val statusText = TextView(activity).apply {
-                text = "جاري تهيئة المشغل وتجاوز الحماية..."
+                text = "جاري تشغيل المتصفح بكامل الصلاحيات..."
                 setTextColor(Color.YELLOW)
                 textSize = 12f
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
@@ -603,13 +607,13 @@ class FASELHD(private val context: Context) : MainAPI() {
             hudBar.addView(statusText)
 
             val finishButton = android.widget.Button(activity).apply {
-                text = "حفظ وإنهاء ✔"
+                text = "إنهاء ✔"
                 setTextColor(Color.WHITE)
                 textSize = 11f
                 setBackgroundColor(Color.parseColor("#2E7D32"))
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
-                    TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 40f, resources.displayMetrics).toInt()
+                    TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 38f, resources.displayMetrics).toInt()
                 )
             }
             hudBar.addView(finishButton)
@@ -617,29 +621,33 @@ class FASELHD(private val context: Context) : MainAPI() {
 
             dialog.setContentView(rootLayout)
             dialog.show()
+
+            // منح المتصفح كافة الصلاحيات بدون أي استثناء
             webView.settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
                 databaseEnabled = true
                 allowContentAccess = true
                 allowFileAccess = true
+                allowFileAccessFromFileURLs = true
+                allowUniversalAccessFromFileURLs = true
+                javaScriptCanOpenWindowsAutomatically = true
+                setSupportMultipleWindows(true)
                 mediaPlaybackRequiresUserGesture = false
                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                 cacheMode = WebSettings.LOAD_DEFAULT
                 userAgentString = lastValidUserAgent
                 useWideViewPort = true
                 loadWithOverviewMode = true
-                blockNetworkImage = false 
+                builtInZoomControls = true
+                displayZoomControls = false
+                blockNetworkImage = false
             }
 
             val cookieManager = CookieManager.getInstance()
             try {
                 cookieManager.setAcceptCookie(true)
                 cookieManager.setAcceptThirdPartyCookies(webView, true)
-                val parentCookies = cookieManager.getCookie(referer) ?: ""
-                if (parentCookies.isNotBlank()) {
-                    cookieManager.setCookie(finalUrl, parentCookies)
-                }
                 cookieManager.flush()
             } catch (_: Exception) {}
 
@@ -682,13 +690,13 @@ class FASELHD(private val context: Context) : MainAPI() {
                 }
 
                 activity.runOnUiThread {
-                    statusText.text = "🎯 تم صيد جودة (${foundM3u8.size}): ${clean.substringAfterLast("/")}"
+                    statusText.text = "🎯 تم صيد (${foundM3u8.size}) روابط! أحدث: ${clean.substringAfterLast("/")}"
                     statusText.setTextColor(Color.GREEN)
                 }
             }
 
             fun clickQuality(qualityLabel: String) {
-                activity.runOnUiThread { statusText.text = "جاري النقر على: $qualityLabel" }
+                activity.runOnUiThread { statusText.text = "محاولة النقر على: $qualityLabel" }
                 val js = """
                 (function() {
                     try {
@@ -809,6 +817,13 @@ class FASELHD(private val context: Context) : MainAPI() {
             }
 
             webView.webChromeClient = object : WebChromeClient() {
+                // منح كل الأذونات تلقائياً (صوت، فيديو، ميديا)
+                override fun onPermissionRequest(request: android.webkit.PermissionRequest?) {
+                    activity.runOnUiThread {
+                        request?.grant(request.resources)
+                    }
+                }
+
                 override fun onConsoleMessage(cm: ConsoleMessage?): Boolean {
                     val msg = cm?.message() ?: ""
                     if (msg.startsWith("NET_M3U8::")) {
@@ -819,16 +834,10 @@ class FASELHD(private val context: Context) : MainAPI() {
             }
 
             timeoutRunnable = Runnable { safeFinish() }
-            handler.postDelayed(timeoutRunnable!!, 20000L)
-            val extraHeaders = mutableMapOf(
-                "Referer" to referer,
-                "Origin" to (Uri.parse(referer).let { "${it.scheme}://${it.host}" }),
-                "sec-fetch-site" to "same-origin",
-                "sec-fetch-mode" to "navigate",
-                "sec-fetch-dest" to "iframe"
-            )
+            handler.postDelayed(timeoutRunnable!!, 25000L)
 
-            webView.loadUrl(finalUrl, extraHeaders)
+            // فتح الرابط كصفحة جديدة ومباشرة بدون قيود
+            webView.loadUrl(finalUrl)
 
             cont.invokeOnCancellation { handler.post { safeFinish() } }
         }
