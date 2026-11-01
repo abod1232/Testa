@@ -582,8 +582,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 visibility = View.VISIBLE
             }
             rootLayout.addView(webView)
-
-            // شريط المعلومات في الأعلى لمتابعة الحالة
             val hudBar = LinearLayout(activity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 layoutParams = FrameLayout.LayoutParams(
@@ -619,8 +617,6 @@ class FASELHD(private val context: Context) : MainAPI() {
 
             dialog.setContentView(rootLayout)
             dialog.show()
-
-            // إعدادات المتصفح المحاكية لمتصفح Chrome حقيقي
             webView.settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
@@ -633,7 +629,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 userAgentString = lastValidUserAgent
                 useWideViewPort = true
                 loadWithOverviewMode = true
-                // السماح بتحميل الصور لتفادي حظر المشغل
                 blockNetworkImage = false 
             }
 
@@ -641,7 +636,6 @@ class FASELHD(private val context: Context) : MainAPI() {
             try {
                 cookieManager.setAcceptCookie(true)
                 cookieManager.setAcceptThirdPartyCookies(webView, true)
-                // نقل كوكيز الصفحة الأصلية إلى المشغل لمنع ظهور Not Valid
                 val parentCookies = cookieManager.getCookie(referer) ?: ""
                 if (parentCookies.isNotBlank()) {
                     cookieManager.setCookie(finalUrl, parentCookies)
@@ -826,8 +820,6 @@ class FASELHD(private val context: Context) : MainAPI() {
 
             timeoutRunnable = Runnable { safeFinish() }
             handler.postDelayed(timeoutRunnable!!, 20000L)
-
-            // إرسال الهيدرز الدقيقة التي يطلبها السيرفر لمنع رفض التوكن
             val extraHeaders = mutableMapOf(
                 "Referer" to referer,
                 "Origin" to (Uri.parse(referer).let { "${it.scheme}://${it.host}" }),
