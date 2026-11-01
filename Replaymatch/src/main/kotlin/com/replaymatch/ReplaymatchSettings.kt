@@ -51,11 +51,6 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                 setBackgroundColor(android.graphics.Color.BLACK)
             }
 
-            val cookieManager = CookieManager.getInstance().apply {
-                setAcceptCookie(true)
-                setAcceptThirdPartyCookies(null, true)
-            }
-
             val webView = WebView(context).apply {
                 layoutParams = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -107,6 +102,12 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                         callback?.invoke(origin, true, false)
                     }
                 }
+            }
+
+            // تم تصحيح تفعيل الكوكيز للـ WebView بنجاح ودون تمرير قيمة null
+            val cookieManager = CookieManager.getInstance().apply {
+                setAcceptCookie(true)
+                setAcceptThirdPartyCookies(webView, true)
             }
 
             val headers = mapOf(
