@@ -281,7 +281,9 @@ class FASELHD(private val context: Context) : MainAPI() {
         }
     }
 
-    override suspend fun quickSearch(query: String): List<SearchResponse>? = search(query, 1).items
+    override suspend fun search(query: String): List<SearchResponse>? {
+        return search(query, 1)?.items
+    }
 
     override suspend fun search(query: String, page: Int): SearchResponseList {
         val base = baseUrl()
