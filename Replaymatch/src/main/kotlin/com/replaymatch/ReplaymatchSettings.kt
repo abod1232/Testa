@@ -90,14 +90,11 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                     override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
                         handler?.proceed()
                     }
-
-                    // اعتراض طلب الصفحة الرئيسية الرئيسي وحقن الهيدرات النظيفة فقط بدون X-Requested-With
                     override fun shouldInterceptRequest(
                         view: WebView?,
                         request: WebResourceRequest?
                     ): WebResourceResponse? {
                         val reqUrl = request?.url.toString()
-                        // إذا كان الطلب هو الرابط المستهدف الأساسي، نقوم بإدارته أو ترك الطلبات الفرعية حسب الحاجة
                         if (reqUrl.startsWith("https://web11112x.faselhdx.life/video_player")) {
                             try {
                                 val url = URL(reqUrl)
@@ -114,7 +111,6 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                                     setRequestProperty("sec-fetch-user", "?1")
                                     setRequestProperty("sec-fetch-dest", "document")
                                     setRequestProperty("accept-language", "ar-IQ,ar;q=0.9,en-US;q=0.8,en;q=0.7")
-                                    // ملاحظة: لا نضيف أبداً X-Requested-With هنا نهائياً
                                     connect()
                                 }
 
@@ -149,8 +145,6 @@ class ReplaymatchSettings : BottomSheetDialogFragment() {
                 setAcceptCookie(true)
                 setAcceptThirdPartyCookies(webView, true)
             }
-
-            // تحميل الرابط بشكل عادي، بينما سيتولى shouldInterceptRequest تنظيف وتعديل الهيدرات بدقة عند جلب الصفحة
             webView.loadUrl(urlString)
             cookieManager.flush()
 
