@@ -562,80 +562,53 @@ class FASELHD(private val context: Context) : MainAPI() {
         val originalHost = try { Uri.parse(finalUrl).host?.replace("www.", "") ?: "" } catch (e: Exception) { "" }
 
         activity.runOnUiThread {
-            val dialog = Dialog(activity, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+            val dialog = Dialog(activity)
+            dialog.setCancelable(false)
+            dialog.setCanceledOnTouchOutside(false)
             dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
-            dialog.setCancelable(true)
 
-            val rootLayout = FrameLayout(activity).apply {
-                layoutParams = ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT
+            dialog.window?.apply {
+                setBackgroundDrawableResource(android.R.color.transparent)
+                setDimAmount(0f)
+                clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+                addFlags(
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 )
-                setBackgroundColor(Color.BLACK)
+                attributes = attributes?.apply {
+                    width = 2
+                    height = 2
+                    gravity = Gravity.BOTTOM or Gravity.START
+                }
             }
 
             val webView = WebView(activity).apply {
-                layoutParams = FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT
-                )
+                layoutParams = ViewGroup.LayoutParams(2, 2)
+                alpha = 0.01f
                 visibility = View.VISIBLE
             }
             webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-            rootLayout.addView(webView)
-            val hudBar = LinearLayout(activity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                layoutParams = FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 45f, resources.displayMetrics).toInt()
-                )
-                setBackgroundColor(Color.parseColor("#CC000000"))
-                setPadding(20, 0, 20, 0)
-                gravity = Gravity.CENTER_VERTICAL
-                elevation = 50f
+
+            try {
+                dialog.setContentView(webView, ViewGroup.LayoutParams(2, 2))
+                dialog.show()
+            } catch (e: Exception) {
+                try {
+                    val decor = activity.window?.decorView as? ViewGroup
+                    decor?.addView(webView, FrameLayout.LayoutParams(2, 2, Gravity.BOTTOM or Gravity.START))
+                } catch (_: Exception) {}
             }
 
-            val statusText = TextView(activity).apply {
-                text = "جاري تشغيل المتصفح بكامل الصلاحيات..."
-                setTextColor(Color.YELLOW)
-                textSize = 12f
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            }
-            hudBar.addView(statusText)
-
-            val finishButton = android.widget.Button(activity).apply {
-                text = "إنهاء ✔"
-                setTextColor(Color.WHITE)
-                textSize = 11f
-                setBackgroundColor(Color.parseColor("#2E7D32"))
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 38f, resources.displayMetrics).toInt()
-                )
-            }
-            hudBar.addView(finishButton)
-            rootLayout.addView(hudBar)
-
-            dialog.setContentView(rootLayout)
-            dialog.show()
             webView.settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
                 databaseEnabled = true
                 allowContentAccess = true
                 allowFileAccess = true
-                allowFileAccessFromFileURLs = true
-                allowUniversalAccessFromFileURLs = true
-                javaScriptCanOpenWindowsAutomatically = true
-                setSupportMultipleWindows(true)
                 mediaPlaybackRequiresUserGesture = false
                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                 cacheMode = WebSettings.LOAD_DEFAULT
                 userAgentString = lastValidUserAgent
-                useWideViewPort = true
-                loadWithOverviewMode = true
-                builtInZoomControls = true
-                displayZoomControls = false
                 blockNetworkImage = false
             }
 
@@ -672,9 +645,6 @@ class FASELHD(private val context: Context) : MainAPI() {
                 cleanup()
             }
 
-            finishButton.setOnClickListener { safeFinish() }
-            dialog.setOnDismissListener { safeFinish() }
-
             fun handleFoundLink(url: String) {
                 val clean = url.substringBefore("?")
                 if (!clean.endsWith(".m3u8")) return
@@ -683,33 +653,39 @@ class FASELHD(private val context: Context) : MainAPI() {
                     if (foundM3u8.contains(url)) return
                     foundM3u8.add(url)
                 }
-
-                activity.runOnUiThread {
-                    statusText.text = "🎯 تم صيد (${foundM3u8.size}) روابط! أحدث: ${clean.substringAfterLast("/")}"
-                    statusText.setTextColor(Color.GREEN)
-                }
             }
 
             fun clickQuality(qualityLabel: String) {
-                activity.runOnUiThread { statusText.text = "محاولة النقر على: $qualityLabel" }
                 val js = """
                 (function() {
                     try {
-                        let els = document.querySelectorAll('ul.quality_ch li, .quality_ch > *, [class*="quality"] li, .jw-settings-content-item, button');
-                        for (let el of els) {
-                            let txt = (el.innerText || el.textContent || '').trim().toLowerCase();
-                            if (txt.includes('$qualityLabel'.toLowerCase())) {
-                                ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(evt => {
-                                    el.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
-                                });
-                                if (typeof el.onclick === 'function') { el.onclick(); }
-                                break;
+                        // دعم النقر سواء في الإطار الحالي أو داخل الـ iframe
+                        function triggerInDoc(doc) {
+                            if (!doc) return false;
+                            let els = doc.querySelectorAll('ul.quality_ch li, .quality_ch > *, [class*="quality"] li, .jw-settings-content-item, button');
+                            for (let el of els) {
+                                let txt = (el.innerText || el.textContent || '').trim().toLowerCase();
+                                if (txt.includes('$qualityLabel'.toLowerCase())) {
+                                    ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(evt => {
+                                        el.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
+                                    });
+                                    if (typeof el.onclick === 'function') { el.onclick(); }
+                                    return true;
+                                }
+                            }
+                            let p = typeof doc.defaultView.jwplayer === 'function' ? doc.defaultView.jwplayer("player") : null;
+                            if (p && typeof p.play === 'function') { p.setMute(true); p.play(); }
+                            let playBtns = doc.querySelectorAll('.jw-display-icon-display, .vjs-big-play-button, button, video');
+                            playBtns.forEach(b => { try { b.click(); } catch(e){} });
+                            return false;
+                        }
+
+                        if (!triggerInDoc(document)) {
+                            let f = document.querySelector('iframe');
+                            if (f && f.contentDocument) {
+                                triggerInDoc(f.contentDocument);
                             }
                         }
-                        let p = typeof window.jwplayer === 'function' ? window.jwplayer("player") : null;
-                        if (p && typeof p.play === 'function') { p.setMute(true); p.play(); }
-                        let playBtns = document.querySelectorAll('.jw-display-icon-display, .vjs-big-play-button, button, video');
-                        playBtns.forEach(b => { try { b.click(); } catch(e){} });
                     } catch(e) {}
                 })();
                 """.trimIndent()
@@ -721,7 +697,10 @@ class FASELHD(private val context: Context) : MainAPI() {
 
             fun scheduleNextQuality() {
                 autoStepRunnable?.let { handler.removeCallbacks(it) }
-                if (currentQualityIndex >= qualitiesToTest.size) return
+                if (currentQualityIndex >= qualitiesToTest.size) {
+                    safeFinish()
+                    return
+                }
 
                 val currentTarget = qualitiesToTest[currentQualityIndex]
                 clickQuality(currentTarget)
@@ -730,7 +709,7 @@ class FASELHD(private val context: Context) : MainAPI() {
                     currentQualityIndex++
                     scheduleNextQuality()
                 }
-                handler.postDelayed(autoStepRunnable!!, 2000)
+                handler.postDelayed(autoStepRunnable!!, 1500)
             }
 
             val fastSnifferJs = """
@@ -813,9 +792,7 @@ class FASELHD(private val context: Context) : MainAPI() {
 
             webView.webChromeClient = object : WebChromeClient() {
                 override fun onPermissionRequest(request: android.webkit.PermissionRequest?) {
-                    activity.runOnUiThread {
-                        request?.grant(request.resources)
-                    }
+                    activity.runOnUiThread { request?.grant(request.resources) }
                 }
 
                 override fun onConsoleMessage(cm: ConsoleMessage?): Boolean {
@@ -828,8 +805,27 @@ class FASELHD(private val context: Context) : MainAPI() {
             }
 
             timeoutRunnable = Runnable { safeFinish() }
-            handler.postDelayed(timeoutRunnable!!, 25000L)
-            webView.loadUrl(finalUrl)
+            handler.postDelayed(timeoutRunnable!!, 7000L)
+
+            // 🎯 الحل الحاسم: تشغيل المشغل داخل Iframe حقيقي داخل صفحة تحاكي بيئة الموقع الأصلي
+            val iframeHtmlWrapper = """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <style>
+                        html, body { width: 100%; height: 100%; margin: 0; padding: 0; background-color: #000; overflow: hidden; }
+                        iframe { width: 100%; height: 100%; border: none; }
+                    </style>
+                </head>
+                <body>
+                    <iframe src="$finalUrl" allow="autoplay; fullscreen" allowfullscreen></iframe>
+                </body>
+                </html>
+            """.trimIndent()
+
+            // تحميل الصفحة بـ baseUrl لصفحة الفيلم الأصلية، لمنع ظهور (Not Valid!)
+            webView.loadDataWithBaseURL(referer, iframeHtmlWrapper, "text/html", "UTF-8", null)
 
             cont.invokeOnCancellation { handler.post { safeFinish() } }
         }
