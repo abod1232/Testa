@@ -281,61 +281,54 @@ class FASELHD(private val context: Context) : MainAPI() {
         }
     }
 
-    override suspend fun quickSearch(query: String): List<SearchResponse>? = search(query,1)?.items
+    override suspend fun quickSearch(query: String): List<SearchResponse>? = search(query, 1).items
+
     override suspend fun search(query: String, page: Int): SearchResponseList {
         val base = baseUrl()
-        val encoded = URLEncoder.encode(query, "UTF-8")
-        val originalSearch = if (page == 1) {
-            "$base/?s=$encoded"
-        } else {
-            "$base/page/$page/?s=$encoded"
-        }
+        var items = listOf<SearchResponse>()
+        var hasNext = false
 
-        var finalSearchUrl = originalSearch
-        try {
-            val resp = app.get(originalSearch, allowRedirects = true)
-            val final = resp.url
-            finalSearchUrl =
-                if (final.contains("?s=", ignoreCase = true)) final else "$final?s=$encoded"
-        } catch (_: Exception) {
-            finalSearchUrl = originalSearch
-        }
-        val document = try {
-            smartGet(finalSearchUrl, referer = base)
-        } catch (e: Exception) {
-            Log.d("FASELHD", "search: smartGet failed: ${e.message}")
-            Jsoup.parse("", finalSearchUrl)
-        }
+        // 1. في الصفحة الأولى: نطلب مباشرة مسار الـ AJAX (الطلب رقم 69 الناجح فقط)
+        if (page == 1) {
+            try {
+                val ajaxUrl = "$base/wp-admin/admin-ajax.php"
+                val formBody = FormBody.Builder()
+                    .add("action", "dtc_live")
+                    .add("trsearch", query)
+                    .build()
 
-        var items = document.select("div#postList div.postDiv, div.postDiv, article")
-            .mapNotNull { it.toSearchResult() }
-        var hasNext = document.select("ul.pagination a[href*='/page/${page + 1}']").isNotEmpty()
-
-            if (items.isEmpty() && page == 1) {
-                try {
-                    val ajaxUrl = "${baseUrl()}/wp-admin/admin-ajax.php"
-                    val formBody = FormBody.Builder()
-                        .add("action", "dtc_live")
-                        .add("trsearch", query)
-                        .build()
-                    val bodyStr = executeRequestWithCloudflareRetry { cookies ->
-                        makeAjaxRequest(ajaxUrl, finalSearchUrl, formBody, cookies)
-                    }
-                    if (!bodyStr.isNullOrBlank()) {
-                        val ajaxDoc = Jsoup.parse(bodyStr, baseUrl()) // يعمل الآن بأمان!
-
-                        items = ajaxDoc.select("div.postDiv, article, .result, .search-item").mapNotNull { it.toSearchResult() }
-                        hasNext = ajaxDoc.select("a.dtc_more").isNotEmpty() ||
-                                ajaxDoc.select("a").any { it.text().contains("المزيد", ignoreCase = true) }
-                        Log.d("FASELHD", "Search fallback: found ${items.size} items from AJAX")
-                    }
-                } catch (e: Exception) {
-                    Log.d("FASELHD", "Search fallback error: ${e.message}")
+                val bodyStr = executeRequestWithCloudflareRetry { cookies ->
+                    makeAjaxRequest(ajaxUrl, "$base/", formBody, cookies)
                 }
+
+                if (!bodyStr.isNullOrBlank()) {
+                    val ajaxDoc = Jsoup.parse(bodyStr, base)
+                    items = ajaxDoc.select("div.postDiv, article, .result, .search-item, li").mapNotNull { it.toSearchResult() }
+                    hasNext = ajaxDoc.select("a.dtc_more").isNotEmpty() ||
+                            ajaxDoc.select("a").any { it.text().contains("المزيد", ignoreCase = true) }
+                }
+            } catch (e: Exception) {
+                Log.d("FASELHD", "AJAX search failed: ${e.message}")
+            }
+        }
+
+        // 2. إذا كنا في صفحة تالية (page > 1) أو لم يُرجع الـ AJAX نتائج، نطلب الرابط النظيف لمرة واحدة فقط
+        if (items.isEmpty()) {
+            val encoded = URLEncoder.encode(query, "UTF-8")
+            val searchUrl = if (page == 1) "$base/?s=$encoded" else "$base/page/$page/?s=$encoded"
+
+            val doc = try {
+                smartGet(searchUrl, referer = base)
+            } catch (e: Exception) {
+                Jsoup.parse("", searchUrl)
             }
 
-            return newSearchResponseList(items, hasNext)
+            items = doc.select("div#postList div.postDiv, div.postDiv, article").mapNotNull { it.toSearchResult() }
+            hasNext = doc.select("ul.pagination a[href*='/page/${page + 1}']").isNotEmpty()
         }
+
+        return newSearchResponseList(items, hasNext)
+    }
 
         /**
          * دالة مساعدة لتنفيذ أي طلب مع إعادة محاولة تلقائية عند فشل Cloudflare.
