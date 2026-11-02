@@ -27,7 +27,8 @@ class AlooyTvProvider : MainAPI() {
 
         return try {
             val doc = app.get(mainUrl).document
-            val link = doc.select("a[href*='alooytv'][href*='.xyz']").firstOrNull()?.attr("href")
+            val link = doc.select("a[href*='alooytv']").map { it.attr("href") }
+                .firstOrNull { it.startsWith("http") && !it.contains("t.me") && !it.contains("instagram") }
 
             if (link != null) {
                 val uri = java.net.URI(link)
@@ -35,10 +36,10 @@ class AlooyTvProvider : MainAPI() {
                 actualDomain = domain
                 domain
             } else {
-                "https://n.alooytv14.xyz"
+                "https://h.alooytv16.com"
             }
         } catch (e: Exception) {
-            "https://n.alooytv14.xyz"
+            "https://h.alooytv16.com"
         }
     }
 
