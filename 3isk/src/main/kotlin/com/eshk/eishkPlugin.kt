@@ -5,8 +5,8 @@ import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 
 @CloudstreamPlugin
-class AnimeRift : Plugin() {
+class AnimeRiftt : Plugin() {
     override fun load(context: Context) {
-        registerMainAPI(Anime3rb(context))
+        registerMainAPI(AnimeRift(context))
     }
 }
