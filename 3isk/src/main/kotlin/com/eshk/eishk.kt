@@ -9,7 +9,6 @@ import org.jsoup.nodes.Element
 import java.net.URLEncoder
 
 
-
 class Anime3rb(val context: Context) : MainAPI() {
     override var mainUrl = "https://anime3rb.com"
     override var name = "Anime3rb"
