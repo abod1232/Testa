@@ -111,40 +111,67 @@ jobs:
                       except Exception as e:
                           print(f"Error processing {file_path}: {e}")
 
-      - name: Auto-increment version in build.gradle.kts
+      - name: Auto-increment version for modified plugins only
         working-directory: "src"
         shell: python
         run: |
           import os
           import re
+          import subprocess
 
-          # مطابقة version = X أو version=X
           version_pattern = re.compile(r'(\bversion\s*=\s*)(\d+)')
+
+          try:
+              diff_output = subprocess.check_output(
+                  ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"],
+                  text=True
+              ).strip().splitlines()
+          except Exception as e:
+              print(f"Error fetching git diff: {e}")
+              diff_output = []
+
+          print(f"Files changed in this commit: {diff_output}")
+
+          changed_plugin_dirs = set()
+          for path in diff_output:
+              parts = os.path.normpath(path).split(os.sep)
+              if len(parts) > 1:
+                  changed_plugin_dirs.add(parts[0])
+
+          print(f"Plugins detected with changes: {changed_plugin_dirs}")
 
           for root, dirs, files in os.walk('.'):
               dirs[:] = [d for d in dirs if not d.startswith('.')]
               for file in files:
                   if file == 'build.gradle.kts':
                       file_path = os.path.join(root, file)
-                      try:
-                          with open(file_path, 'r', encoding='utf-8') as f:
-                              content = f.read()
+                      norm_path = os.path.normpath(file_path)
+                      parts = norm_path.split(os.sep)
 
-                          def increment(match):
-                              prefix = match.group(1)
-                              current_ver = int(match.group(2))
-                              new_ver = current_ver + 1
-                              print(f"Bumping version in {file_path}: {current_ver} -> {new_ver}")
-                              return f"{prefix}{new_ver}"
+                      plugin_dir = parts[1] if len(parts) > 1 and parts[0] == '.' else parts[0]
 
-                          new_content = version_pattern.sub(increment, content)
+                      if plugin_dir in changed_plugin_dirs:
+                          try:
+                              with open(file_path, 'r', encoding='utf-8') as f:
+                                  content = f.read()
 
-                          if new_content != content:
-                              with open(file_path, 'w', encoding='utf-8') as f:
-                                  f.write(new_content)
+                              def increment(match):
+                                  prefix = match.group(1)
+                                  current_ver = int(match.group(2))
+                                  new_ver = current_ver + 1
+                                  print(f"Bumping version in [{plugin_dir}] -> {file_path}: {current_ver} to {new_ver}")
+                                  return f"{prefix}{new_ver}"
 
-                      except Exception as e:
-                          print(f"Error updating {file_path}: {e}")
+                              new_content = version_pattern.sub(increment, content)
+
+                              if new_content != content:
+                                  with open(file_path, 'w', encoding='utf-8') as f:
+                                      f.write(new_content)
+
+                          except Exception as e:
+                              print(f"Error updating {file_path}: {e}")
+                      else:
+                          print(f"Skipping unchanged plugin: {plugin_dir}")
 
       - name: Push cleaned files and version bump to source branch (Before Secrets Injection)
         working-directory: "src"
@@ -155,7 +182,7 @@ jobs:
           git add -u
 
           if ! git diff --cached --quiet; then
-            git commit -m "Bump versions and strip comments [skip ci]"
+            git commit -m "Bump modified plugin versions and strip comments [skip ci]"
             git push origin HEAD:${{ github.ref_name }}
           else
             echo "No changes to push"
@@ -206,7 +233,7 @@ jobs:
                   if file.endswith('.kt') or file.endswith('.kts'):
                       file_path = os.path.join(root, file)
                       try:
-                          with open(file_path, 'r', encoding='utf-8') as f:
+                          with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                               content = f.read()
 
                           modified = False
