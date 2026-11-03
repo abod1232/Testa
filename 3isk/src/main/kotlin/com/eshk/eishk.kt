@@ -18,7 +18,7 @@ import javax.crypto.spec.SecretKeySpec
 
 class AnimeRift : MainAPI() {
 
-    override var mainUrl = "https://gateway.embrassme.top/api/v4"
+    override var mainUrl = "https://gaay.embrassme.top/api/v4"
     override var name = "AnimeRift"
     override var lang = "ar"
     override val hasMainPage = true
