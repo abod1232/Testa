@@ -47,12 +47,8 @@ object RatingSettings {
 
     private const val PLUGINS_URL =
         "https://raw.githubusercontent.com/abod1232/Testa/refs/heads/builds/plugins.json"
-
-    // Abacus API
     private const val ABACUS_API = "https://abacus.jasoncameron.dev"
     private const val PREFS = "extension_ratings_prefs"
-
-    // تحديد 4 طلبات متزامنة لتسريع التحميل دون إجهاد السيرفر
     private val requestSemaphore = Semaphore(4)
 
     private val imageCache = ConcurrentHashMap<String, Bitmap>()
@@ -662,8 +658,6 @@ object RatingSettings {
             updateDislikeVisual(ctx, holder.dislikeBtn, hasDisliked)
 
             holder.card.addTouchScaleEffect()
-
-            // التصويت بالإعجاب
             holder.likeBtn.addTouchScaleEffect {
                 if (prefs.getBoolean("cs3_like_$key", false)) {
                     Toast.makeText(ctx, if (isEnglish) "You already liked this extension" else "لقد سجلت إعجابك بهذه الإضافة مسبقاً", Toast.LENGTH_SHORT).show()
@@ -699,8 +693,6 @@ object RatingSettings {
                     }
                 }
             }
-
-            // التصويت بعدم الإعجاب
             holder.dislikeBtn.addTouchScaleEffect {
                 if (prefs.getBoolean("cs3_dislike_$key", false)) {
                     Toast.makeText(ctx, if (isEnglish) "You already disliked this extension" else "لقد سجلت عدم إعجابك بهذه الإضافة مسبقاً", Toast.LENGTH_SHORT).show()
