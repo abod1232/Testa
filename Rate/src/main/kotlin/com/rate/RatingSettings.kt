@@ -1,3 +1,4 @@
+
 package com.rate
 
 import android.annotation.SuppressLint
@@ -11,6 +12,7 @@ import android.graphics.Outline
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.os.SystemClock
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.MotionEvent
@@ -33,7 +35,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -44,16 +49,21 @@ import java.util.concurrent.ConcurrentHashMap
 object RatingSettings {
 
     private const val PLUGINS_URL =
-        "https://raw.githubusercontent.com/abod1232/Testa/refs/heads/builds/plugins.json"
+        "https://raw.githubusercontent.com/Abodabodd/re-3arabi/refs/heads/builds/plugins.json"
 
-    private const val COUNTER_API =
-        "https://counterapi.com/api"
+    // Abacus API - لا يحتاج إلى حساب أو API Key
+    private const val ABACUS_API =
+        "https://abacus.jasoncameron.dev"
 
     private const val PREFS =
         "extension_ratings_prefs"
 
     private val imageCache = ConcurrentHashMap<String, Bitmap>()
     private var allPluginsMasterList = mutableListOf<PluginRating>()
+
+    // تنظيم الطلبات لتقليل احتمال تجاوز حد الطلبات في Abacus
+    private val abacusMutex = Mutex()
+    private var lastAbacusRequestTime = 0L
 
     fun show(fragmentManager: FragmentManager) {
         RatingListDialog().show(
@@ -74,6 +84,57 @@ object RatingSettings {
         return MessageDigest.getInstance("SHA-256")
             .digest("${url}#funny-salt".toByteArray())
             .joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * التعامل مع Abacus:
+     *
+     * action = "get"  للقراءة دون زيادة العداد
+     * action = "hit"  لزيادة العداد بمقدار واحد
+     *
+     * type = "like" أو "dislike"
+     */
+    private suspend fun requestCounter(
+        action: String,
+        pluginUrl: String,
+        type: String
+    ): Int? {
+        return try {
+            abacusMutex.withLock {
+
+                // نترك فاصلاً بسيطاً بين الطلبات لتجنب تجاوز حد الخدمة
+                val now = SystemClock.elapsedRealtime()
+                val waitTime = 400L - (now - lastAbacusRequestTime)
+
+                if (waitTime > 0) {
+                    delay(waitTime)
+                }
+
+                lastAbacusRequestTime = SystemClock.elapsedRealtime()
+
+                val repository = getRepository(pluginUrl)
+
+                // لكل إضافة عدادان مستقلان: like و dislike
+                val namespace = android.net.Uri.encode("cs-$repository")
+                val key = android.net.Uri.encode(
+                    "${transformUrl(pluginUrl)}-$type"
+                )
+
+                val url = "$ABACUS_API/$action/$namespace/$key"
+
+                val response = app.get(url)
+                val json = JSONObject(response.text)
+
+                val value = json.optInt(
+                    "value",
+                    json.optInt("count", -1)
+                )
+
+                if (value >= 0) value else null
+            }
+        } catch (e: Exception) {
+            null
+        }
     }
 
     private fun calculateScore(likes: Int, dislikes: Int): Double {
@@ -97,9 +158,9 @@ object RatingSettings {
     )
 
     private val THEMES = listOf(
+        ThemeColor("#0D051A", "#160A2E", "#4C1D95", "#C084FC"),
         ThemeColor("#040C1A", "#081326", "#0E3A6E", "#38BDF8"),
-        ThemeColor("#120C03", "#1F1406", "#5C3A08", "#FBBF24"),
-        ThemeColor("#0D051A", "#160A2E", "#4C1D95", "#C084FC")
+        ThemeColor("#120C03", "#1F1406", "#5C3A08", "#FBBF24")
     )
 
     class RatingListDialog : DialogFragment() {
@@ -116,7 +177,12 @@ object RatingSettings {
 
             val root = LinearLayout(requireContext()).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(10.dp(context), 14.dp(context), 10.dp(context), 8.dp(context))
+                setPadding(
+                    10.dp(context),
+                    14.dp(context),
+                    10.dp(context),
+                    8.dp(context)
+                )
                 setBackgroundColor(Color.parseColor(THEMES[0].rootBg))
             }
 
@@ -172,7 +238,12 @@ object RatingSettings {
                     1.dp(context),
                     11f
                 )
-                setPadding(8.dp(context), 6.dp(context), 8.dp(context), 6.dp(context))
+                setPadding(
+                    8.dp(context),
+                    6.dp(context),
+                    8.dp(context),
+                    6.dp(context)
+                )
                 layoutParams = LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
@@ -182,27 +253,43 @@ object RatingSettings {
             }
 
             val sortBtn = TextView(requireContext()).apply {
-                text = if (isEnglish) "🔥 Most Liked" else "🔥 الأكثر إعجاباً"
+                text = if (isEnglish) "📋 Default" else "📋 الافتراضي"
                 textSize = 11f
-                setTextColor(Color.parseColor("#38BDF8"))
+                setTextColor(Color.parseColor("#C084FC"))
                 gravity = Gravity.CENTER
                 background = roundedStrokeBackground(
-                    Color.parseColor("#0C1C36"),
-                    Color.parseColor("#0284C7"),
+                    Color.parseColor("#1E1438"),
+                    Color.parseColor("#7C3AED"),
                     1.dp(context),
                     11f
                 )
-                setPadding(9.dp(context), 6.dp(context), 9.dp(context), 6.dp(context))
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
+                setPadding(
+                    9.dp(context),
+                    6.dp(context),
+                    9.dp(context),
+                    6.dp(context)
                 )
             }
 
             fun updateSortButtonText() {
                 when (sortMode) {
                     1 -> {
-                        sortBtn.text = if (isEnglish) "⭐ Top Rated" else "⭐ الأعلى تقييماً"
+                        sortBtn.text =
+                            if (isEnglish) "🔥 Most Liked" else "🔥 الأكثر إعجاباً"
+
+                        sortBtn.setTextColor(Color.parseColor("#38BDF8"))
+                        sortBtn.background = roundedStrokeBackground(
+                            Color.parseColor("#0C1C36"),
+                            Color.parseColor("#0284C7"),
+                            1.dp(context),
+                            11f
+                        )
+                    }
+
+                    2 -> {
+                        sortBtn.text =
+                            if (isEnglish) "⭐ Top Rated" else "⭐ الأعلى تقييماً"
+
                         sortBtn.setTextColor(Color.parseColor("#FBBF24"))
                         sortBtn.background = roundedStrokeBackground(
                             Color.parseColor("#261C08"),
@@ -211,22 +298,15 @@ object RatingSettings {
                             11f
                         )
                     }
-                    2 -> {
-                        sortBtn.text = if (isEnglish) "📋 Default" else "📋 الافتراضي"
+
+                    else -> {
+                        sortBtn.text =
+                            if (isEnglish) "📋 Default" else "📋 الافتراضي"
+
                         sortBtn.setTextColor(Color.parseColor("#C084FC"))
                         sortBtn.background = roundedStrokeBackground(
                             Color.parseColor("#1E1438"),
                             Color.parseColor("#7C3AED"),
-                            1.dp(context),
-                            11f
-                        )
-                    }
-                    else -> {
-                        sortBtn.text = if (isEnglish) "🔥 Most Liked" else "🔥 الأكثر إعجاباً"
-                        sortBtn.setTextColor(Color.parseColor("#38BDF8"))
-                        sortBtn.background = roundedStrokeBackground(
-                            Color.parseColor("#0C1C36"),
-                            Color.parseColor("#0284C7"),
                             1.dp(context),
                             11f
                         )
@@ -238,19 +318,28 @@ object RatingSettings {
                 isEnglish = !isEnglish
                 langBtn.text = if (isEnglish) "🌐 عربي" else "🌐 EN"
                 title.text = if (isEnglish) "⭐ Ratings" else "⭐ التقييمات"
+
                 updateSortButtonText()
                 applySort()
             }
 
             sortBtn.addTouchScaleEffect {
-                if (allPluginsMasterList.isEmpty()) return@addTouchScaleEffect
+                if (allPluginsMasterList.isEmpty()) {
+                    return@addTouchScaleEffect
+                }
+
                 sortMode = (sortMode + 1) % 3
                 val currentTheme = THEMES[sortMode]
 
                 root.setBackgroundColor(Color.parseColor(currentTheme.rootBg))
+
                 dialog.window?.setBackgroundDrawable(
-                    roundedBackground(Color.parseColor(currentTheme.rootBg), 26f)
+                    roundedBackground(
+                        Color.parseColor(currentTheme.rootBg),
+                        26f
+                    )
                 )
+
                 title.setTextColor(Color.parseColor(currentTheme.titleColor))
 
                 updateSortButtonText()
@@ -287,7 +376,12 @@ object RatingSettings {
                 layoutManager = LinearLayoutManager(requireContext())
                 overScrollMode = View.OVER_SCROLL_NEVER
                 clipToPadding = false
-                setPadding(0, 6.dp(context), 0, 20.dp(context))
+                setPadding(
+                    0,
+                    6.dp(context),
+                    0,
+                    20.dp(context)
+                )
             }
 
             root.addView(
@@ -302,7 +396,10 @@ object RatingSettings {
             dialog.setContentView(root)
 
             dialog.window?.setBackgroundDrawable(
-                roundedBackground(Color.parseColor(THEMES[0].rootBg), 26f)
+                roundedBackground(
+                    Color.parseColor(THEMES[0].rootBg),
+                    26f
+                )
             )
 
             dialog.setOnShowListener {
@@ -312,9 +409,14 @@ object RatingSettings {
                 )
             }
 
-            adapter = RatingAdapter(mutableListOf(), 0, isEnglish) {
+            adapter = RatingAdapter(
+                mutableListOf(),
+                0,
+                isEnglish
+            ) {
                 applySort()
             }
+
             recycler.adapter = adapter
 
             loadRatings(progress)
@@ -327,27 +429,36 @@ object RatingSettings {
 
             val result = when (sortMode) {
                 1 -> allPluginsMasterList.sortedWith(
-                    compareByDescending<PluginRating> { calculateScore(it.likes, it.dislikes) }
-                        .thenByDescending { it.likes + it.dislikes }
-                        .thenByDescending { it.likes }
-                )
-                2 -> allPluginsMasterList.toList()
-                else -> allPluginsMasterList.sortedWith(
                     compareByDescending<PluginRating> { it.likes }
                         .thenByDescending { it.likes - it.dislikes }
                         .thenBy { it.dislikes }
                 )
+
+                2 -> allPluginsMasterList.sortedWith(
+                    compareByDescending<PluginRating> {
+                        calculateScore(it.likes, it.dislikes)
+                    }
+                        .thenByDescending { it.likes + it.dislikes }
+                        .thenByDescending { it.likes }
+                )
+
+                else -> allPluginsMasterList.toList()
             }
 
             adapter?.updateData(result, sortMode, isEnglish)
         }
 
         private fun parseTypesList(typesArray: JSONArray?): List<String> {
-            if (typesArray == null || typesArray.length() == 0) return emptyList()
+            if (typesArray == null || typesArray.length() == 0) {
+                return emptyList()
+            }
+
             val list = mutableListOf<String>()
+
             for (i in 0 until typesArray.length()) {
                 list.add(typesArray.optString(i))
             }
+
             return list
         }
 
@@ -370,19 +481,32 @@ object RatingSettings {
                                 val name = obj.optString("name")
                                 val url = obj.optString("url")
 
-                                if (name.isBlank() || url.isBlank()) return@async null
+                                if (name.isBlank() || url.isBlank()) {
+                                    return@async null
+                                }
 
                                 val icon = when {
-                                    obj.optString("iconUrl").isNotBlank() -> obj.optString("iconUrl")
-                                    obj.optString("icon").isNotBlank() -> obj.optString("icon")
+                                    obj.optString("iconUrl").isNotBlank() ->
+                                        obj.optString("iconUrl")
+
+                                    obj.optString("icon").isNotBlank() ->
+                                        obj.optString("icon")
+
                                     else -> ""
                                 }
 
                                 val rawLang = obj.optString("language", "ar")
-                                val rawTags = parseTypesList(obj.optJSONArray("tvTypes"))
+                                val rawTags = parseTypesList(
+                                    obj.optJSONArray("tvTypes")
+                                )
 
-                                val likesDeferred = async { getOfficialLikes(url) }
-                                val dislikesDeferred = async { getOfficialDislikes(url) }
+                                val likesDeferred = async {
+                                    getOfficialLikes(url)
+                                }
+
+                                val dislikesDeferred = async {
+                                    getOfficialDislikes(url)
+                                }
 
                                 PluginRating(
                                     name = name,
@@ -407,9 +531,14 @@ object RatingSettings {
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
                         progress.visibility = View.GONE
+
                         Toast.makeText(
                             requireContext(),
-                            if (isEnglish) "Error loading ratings" else "حدث خطأ أثناء تحميل التقييمات",
+                            if (isEnglish) {
+                                "Error loading ratings"
+                            } else {
+                                "حدث خطأ أثناء تحميل التقييمات"
+                            },
                             Toast.LENGTH_LONG
                         ).show()
                     }
@@ -418,29 +547,19 @@ object RatingSettings {
         }
 
         private suspend fun getOfficialLikes(pluginUrl: String): Int {
-            return try {
-                val repository = getRepository(pluginUrl)
-                val key = transformUrl(pluginUrl)
-                val url = "$COUNTER_API/cs-$repository/vote/$key?readOnly=true"
-                val response = app.get(url)
-                val json = JSONObject(response.text)
-                json.optInt("value", json.optInt("count", 0))
-            } catch (e: Exception) {
-                0
-            }
+            return RatingSettings.requestCounter(
+                "get",
+                pluginUrl,
+                "like"
+            ) ?: 0
         }
 
         private suspend fun getOfficialDislikes(pluginUrl: String): Int {
-            return try {
-                val repository = getRepository(pluginUrl)
-                val key = transformUrl(pluginUrl)
-                val url = "$COUNTER_API/cs-$repository/dislike/$key?readOnly=true"
-                val response = app.get(url)
-                val json = JSONObject(response.text)
-                json.optInt("value", json.optInt("count", 0))
-            } catch (e: Exception) {
-                0
-            }
+            return RatingSettings.requestCounter(
+                "get",
+                pluginUrl,
+                "dislike"
+            ) ?: 0
         }
     }
 
@@ -461,7 +580,11 @@ object RatingSettings {
         private val onDataChanged: () -> Unit
     ) : RecyclerView.Adapter<RatingAdapter.ViewHolder>() {
 
-        fun updateData(newItems: List<PluginRating>, themeIndex: Int, english: Boolean) {
+        fun updateData(
+            newItems: List<PluginRating>,
+            themeIndex: Int,
+            english: Boolean
+        ) {
             items = newItems
             currentThemeIndex = themeIndex
             isEnglish = english
@@ -470,7 +593,7 @@ object RatingSettings {
 
         private fun formatLanguageBadge(lang: String): String {
             return when (lang.lowercase()) {
-                "ar" -> if (isEnglish) "🇸🇦 Arabic" else "🇸🇦 عربي"
+                "ar" -> if (isEnglish) "🇮🇶 Arabic" else "🇮🇶 عربي"
                 "en" -> if (isEnglish) "🌐 English" else "🌐 EN"
                 "iq" -> if (isEnglish) "🇮🇶 Iraqi" else "🇮🇶 عراقي"
                 else -> lang.uppercase()
@@ -479,16 +602,34 @@ object RatingSettings {
 
         private fun formatTag(tag: String): String {
             val arMap = mapOf(
-                "TvSeries" to "مسلسلات", "Movie" to "أفلام", "Anime" to "أنمي",
-                "AsianDrama" to "آسيوي", "Live" to "مباشر", "Drama" to "دراما",
-                "Music" to "موسيقى", "Documentary" to "وثائقي", "Others" to "منوعة"
+                "TvSeries" to "مسلسلات",
+                "Movie" to "أفلام",
+                "Anime" to "أنمي",
+                "AsianDrama" to "آسيوي",
+                "Live" to "مباشر",
+                "Drama" to "دراما",
+                "Music" to "موسيقى",
+                "Documentary" to "وثائقي",
+                "Others" to "منوعة"
             )
+
             val enMap = mapOf(
-                "TvSeries" to "Series", "Movie" to "Movies", "Anime" to "Anime",
-                "AsianDrama" to "Asian", "Live" to "Live", "Drama" to "Drama",
-                "Music" to "Music", "Documentary" to "Doc", "Others" to "Other"
+                "TvSeries" to "Series",
+                "Movie" to "Movies",
+                "Anime" to "Anime",
+                "AsianDrama" to "Asian",
+                "Live" to "Live",
+                "Drama" to "Drama",
+                "Music" to "Music",
+                "Documentary" to "Doc",
+                "Others" to "Other"
             )
-            return if (isEnglish) enMap[tag] ?: tag else arMap[tag] ?: tag
+
+            return if (isEnglish) {
+                enMap[tag] ?: tag
+            } else {
+                arMap[tag] ?: tag
+            }
         }
 
         class ViewHolder(
@@ -512,6 +653,7 @@ object RatingSettings {
 
             val card = FrameLayout(ctx).apply {
                 layoutDirection = View.LAYOUT_DIRECTION_LTR
+
                 background = roundedStrokeBackground(
                     Color.parseColor(theme.cardBg),
                     Color.parseColor(theme.cardStroke),
@@ -523,18 +665,37 @@ object RatingSettings {
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     94.dp(ctx)
                 ).apply {
-                    setMargins(0, 3.dp(ctx), 0, 3.dp(ctx))
+                    setMargins(
+                        0,
+                        3.dp(ctx),
+                        0,
+                        3.dp(ctx)
+                    )
                 }
             }
 
             val icon = ImageView(ctx).apply {
                 scaleType = ImageView.ScaleType.CENTER_CROP
-                background = roundedBackground(Color.parseColor("#151D33"), 15f)
+                background = roundedBackground(
+                    Color.parseColor("#151D33"),
+                    15f
+                )
+
                 outlineProvider = object : ViewOutlineProvider() {
-                    override fun getOutline(view: View, outline: Outline) {
-                        outline.setRoundRect(0, 0, view.width, view.height, 15.dp(ctx).toFloat())
+                    override fun getOutline(
+                        view: View,
+                        outline: Outline
+                    ) {
+                        outline.setRoundRect(
+                            0,
+                            0,
+                            view.width,
+                            view.height,
+                            15.dp(ctx).toFloat()
+                        )
                     }
                 }
+
                 clipToOutline = true
 
                 layoutParams = FrameLayout.LayoutParams(
@@ -572,7 +733,12 @@ object RatingSettings {
             val tagsContainer = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
                 layoutDirection = View.LAYOUT_DIRECTION_LTR
-                setPadding(0, 3.dp(ctx), 0, 3.dp(ctx))
+                setPadding(
+                    0,
+                    3.dp(ctx),
+                    0,
+                    3.dp(ctx)
+                )
             }
 
             val ratingText = TextView(ctx).apply {
@@ -604,6 +770,7 @@ object RatingSettings {
             val likeBtn = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
+
                 background = roundedStrokeBackground(
                     Color.parseColor("#06241C"),
                     Color.parseColor("#10B981"),
@@ -623,7 +790,12 @@ object RatingSettings {
                 text = "👍"
                 textSize = 13f
                 gravity = Gravity.CENTER
-                setPadding(0, 0, 5.dp(ctx), 0)
+                setPadding(
+                    0,
+                    0,
+                    5.dp(ctx),
+                    0
+                )
             }
 
             val likeCount = TextView(ctx).apply {
@@ -639,6 +811,7 @@ object RatingSettings {
             val dislikeBtn = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
+
                 background = roundedStrokeBackground(
                     Color.parseColor("#260910"),
                     Color.parseColor("#EF4444"),
@@ -656,7 +829,12 @@ object RatingSettings {
                 text = "👎"
                 textSize = 13f
                 gravity = Gravity.CENTER
-                setPadding(0, 0, 5.dp(ctx), 0)
+                setPadding(
+                    0,
+                    0,
+                    5.dp(ctx),
+                    0
+                )
             }
 
             val dislikeCount = TextView(ctx).apply {
@@ -707,15 +885,38 @@ object RatingSettings {
             holder.name.text = item.name
 
             val total = item.likes + item.dislikes
+
             if (total == 0) {
-                holder.ratingText.text = if (isEnglish) "✨ New • Awaiting votes" else "✨ جديد • بانتظار التقييم"
-                holder.ratingText.setTextColor(Color.parseColor("#64748B"))
+                holder.ratingText.text =
+                    if (isEnglish) {
+                        "✨ New • Awaiting votes"
+                    } else {
+                        "✨ جديد • بانتظار التقييم"
+                    }
+
+                holder.ratingText.setTextColor(
+                    Color.parseColor("#64748B")
+                )
             } else {
-                val score = calculateScore(item.likes, item.dislikes)
-                val formattedScore = String.format(Locale.US, "%.1f", score)
+                val score = calculateScore(
+                    item.likes,
+                    item.dislikes
+                )
+
+                val formattedScore = String.format(
+                    Locale.US,
+                    "%.1f",
+                    score
+                )
+
                 val voteUnit = if (isEnglish) "votes" else "صوت"
-                holder.ratingText.text = "⭐ $formattedScore  ($total $voteUnit)"
-                holder.ratingText.setTextColor(Color.parseColor("#FBBF24"))
+
+                holder.ratingText.text =
+                    "⭐ $formattedScore  ($total $voteUnit)"
+
+                holder.ratingText.setTextColor(
+                    Color.parseColor("#FBBF24")
+                )
             }
 
             holder.tagsContainer.removeAllViews()
@@ -724,9 +925,18 @@ object RatingSettings {
                 text = formatLanguageBadge(item.rawLanguage)
                 textSize = 9.5f
                 setTextColor(Color.parseColor("#E2E8F0"))
-                background = roundedBackground(Color.parseColor("#334155"), 5f)
-                setPadding(5.dp(ctx), 2.dp(ctx), 5.dp(ctx), 2.dp(ctx))
+                background = roundedBackground(
+                    Color.parseColor("#334155"),
+                    5f
+                )
+                setPadding(
+                    5.dp(ctx),
+                    2.dp(ctx),
+                    5.dp(ctx),
+                    2.dp(ctx)
+                )
                 maxLines = 1
+
                 layoutParams = LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
@@ -734,6 +944,7 @@ object RatingSettings {
                     rightMargin = 4.dp(ctx)
                 }
             }
+
             holder.tagsContainer.addView(langTag)
 
             item.rawTags.take(2).forEach { rawTag ->
@@ -741,9 +952,18 @@ object RatingSettings {
                     text = formatTag(rawTag)
                     textSize = 9.5f
                     setTextColor(Color.parseColor("#93C5FD"))
-                    background = roundedBackground(Color.parseColor("#172554"), 5f)
-                    setPadding(5.dp(ctx), 2.dp(ctx), 5.dp(ctx), 2.dp(ctx))
+                    background = roundedBackground(
+                        Color.parseColor("#172554"),
+                        5f
+                    )
+                    setPadding(
+                        5.dp(ctx),
+                        2.dp(ctx),
+                        5.dp(ctx),
+                        2.dp(ctx)
+                    )
                     maxLines = 1
+
                     layoutParams = LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.WRAP_CONTENT,
                         ViewGroup.LayoutParams.WRAP_CONTENT
@@ -751,6 +971,7 @@ object RatingSettings {
                         rightMargin = 4.dp(ctx)
                     }
                 }
+
                 holder.tagsContainer.addView(tagView)
             }
 
@@ -762,6 +983,7 @@ object RatingSettings {
 
             if (item.icon.isNotBlank()) {
                 val cached = imageCache[item.icon]
+
                 if (cached != null) {
                     holder.icon.setImageBitmap(cached)
                 } else {
@@ -772,10 +994,15 @@ object RatingSettings {
                             val bytes = body.bytes()
                             body.close()
 
-                            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                            val bitmap = BitmapFactory.decodeByteArray(
+                                bytes,
+                                0,
+                                bytes.size
+                            )
 
                             if (bitmap != null) {
                                 imageCache[item.icon] = bitmap
+
                                 withContext(Dispatchers.Main) {
                                     if (holder.icon.tag == item.icon) {
                                         holder.icon.setImageBitmap(bitmap)
@@ -788,23 +1015,66 @@ object RatingSettings {
                 }
             }
 
-            val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            val key = transformUrl(item.url)
-            val hasLiked = prefs.getBoolean("cs3_like_$key", false)
-            val hasDisliked = prefs.getBoolean("cs3_dislike_$key", false)
+            val prefs = ctx.getSharedPreferences(
+                PREFS,
+                Context.MODE_PRIVATE
+            )
 
-            updateLikeVisual(ctx, holder.likeBtn, hasLiked)
-            updateDislikeVisual(ctx, holder.dislikeBtn, hasDisliked)
+            val key = transformUrl(item.url)
+
+            val hasLiked = prefs.getBoolean(
+                "cs3_like_$key",
+                false
+            )
+
+            val hasDisliked = prefs.getBoolean(
+                "cs3_dislike_$key",
+                false
+            )
+
+            updateLikeVisual(
+                ctx,
+                holder.likeBtn,
+                hasLiked
+            )
+
+            updateDislikeVisual(
+                ctx,
+                holder.dislikeBtn,
+                hasDisliked
+            )
 
             holder.card.addTouchScaleEffect()
 
+            // التصويت بالإعجاب
             holder.likeBtn.addTouchScaleEffect {
+
                 if (prefs.getBoolean("cs3_like_$key", false)) {
                     Toast.makeText(
                         ctx,
-                        if (isEnglish) "You already liked this extension" else "لقد سجلت إعجابك بهذه الإضافة مسبقاً",
+                        if (isEnglish) {
+                            "You already liked this extension"
+                        } else {
+                            "لقد سجلت إعجابك بهذه الإضافة مسبقاً"
+                        },
                         Toast.LENGTH_SHORT
                     ).show()
+
+                    return@addTouchScaleEffect
+                }
+
+                // منع التصويت بالديسلايك إذا كان مسجلاً مسبقاً
+                if (prefs.getBoolean("cs3_dislike_$key", false)) {
+                    Toast.makeText(
+                        ctx,
+                        if (isEnglish) {
+                            "You already voted for this extension"
+                        } else {
+                            "لقد قمت بالتصويت لهذه الإضافة مسبقاً"
+                        },
+                        Toast.LENGTH_SHORT
+                    ).show()
+
                     return@addTouchScaleEffect
                 }
 
@@ -817,22 +1087,52 @@ object RatingSettings {
                         holder.likeBtn.isEnabled = true
 
                         if (success) {
-                            prefs.edit().putBoolean("cs3_like_$key", true).apply()
+                            prefs.edit()
+                                .putBoolean("cs3_like_$key", true)
+                                .apply()
+
                             item.likes += 1
-                            allPluginsMasterList.find { it.url == item.url }?.likes = item.likes
+
+                            allPluginsMasterList
+                                .find { it.url == item.url }
+                                ?.likes = item.likes
 
                             holder.likeCount.text = item.likes.toString()
-                            val updatedTotal = item.likes + item.dislikes
-                            val updatedScore = String.format(Locale.US, "%.1f", calculateScore(item.likes, item.dislikes))
-                            val voteUnit = if (isEnglish) "votes" else "صوت"
-                            holder.ratingText.text = "⭐ $updatedScore  ($updatedTotal $voteUnit)"
-                            holder.ratingText.setTextColor(Color.parseColor("#FBBF24"))
 
-                            updateLikeVisual(ctx, holder.likeBtn, true)
+                            val updatedTotal = item.likes + item.dislikes
+
+                            val updatedScore = String.format(
+                                Locale.US,
+                                "%.1f",
+                                calculateScore(
+                                    item.likes,
+                                    item.dislikes
+                                )
+                            )
+
+                            val voteUnit = if (isEnglish) "votes" else "صوت"
+
+                            holder.ratingText.text =
+                                "⭐ $updatedScore  ($updatedTotal $voteUnit)"
+
+                            holder.ratingText.setTextColor(
+                                Color.parseColor("#FBBF24")
+                            )
+
+                            updateLikeVisual(
+                                ctx,
+                                holder.likeBtn,
+                                true
+                            )
+
                         } else {
                             Toast.makeText(
                                 ctx,
-                                if (isEnglish) "Failed to submit like" else "تعذر تسجيل الإعجاب",
+                                if (isEnglish) {
+                                    "Failed to submit like"
+                                } else {
+                                    "تعذر تسجيل الإعجاب"
+                                },
                                 Toast.LENGTH_SHORT
                             ).show()
                         }
@@ -840,20 +1140,57 @@ object RatingSettings {
                 }
             }
 
+            // التصويت بعدم الإعجاب
             holder.dislikeBtn.addTouchScaleEffect {
+
                 if (prefs.getBoolean("cs3_dislike_$key", false)) {
                     Toast.makeText(
                         ctx,
-                        if (isEnglish) "You already disliked this extension" else "لقد سجلت عدم إعجابك بهذه الإضافة مسبقاً",
+                        if (isEnglish) {
+                            "You already disliked this extension"
+                        } else {
+                            "لقد سجلت عدم إعجابك بهذه الإضافة مسبقاً"
+                        },
                         Toast.LENGTH_SHORT
                     ).show()
+
+                    return@addTouchScaleEffect
+                }
+
+                // منع التصويت بالإعجاب إذا كان مسجلاً مسبقاً
+                if (prefs.getBoolean("cs3_like_$key", false)) {
+                    Toast.makeText(
+                        ctx,
+                        if (isEnglish) {
+                            "You already voted for this extension"
+                        } else {
+                            "لقد قمت بالتصويت لهذه الإضافة مسبقاً"
+                        },
+                        Toast.LENGTH_SHORT
+                    ).show()
+
                     return@addTouchScaleEffect
                 }
 
                 AlertDialog.Builder(ctx)
-                    .setTitle(if (isEnglish) "Confirm Vote" else "تأكيد التصويت")
-                    .setMessage(if (isEnglish) "Are you sure you want to dislike this extension?" else "هل أنت متأكد أنك تريد تسجيل عدم الإعجاب بالإضافة؟")
-                    .setPositiveButton(if (isEnglish) "Yes" else "نعم") { _, _ ->
+                    .setTitle(
+                        if (isEnglish) {
+                            "Confirm Vote"
+                        } else {
+                            "تأكيد التصويت"
+                        }
+                    )
+                    .setMessage(
+                        if (isEnglish) {
+                            "Are you sure you want to dislike this extension?"
+                        } else {
+                            "هل أنت متأكد أنك تريد تسجيل عدم الإعجاب بالإضافة؟"
+                        }
+                    )
+                    .setPositiveButton(
+                        if (isEnglish) "Yes" else "نعم"
+                    ) { _, _ ->
+
                         holder.dislikeBtn.isEnabled = false
 
                         CoroutineScope(Dispatchers.IO).launch {
@@ -863,29 +1200,65 @@ object RatingSettings {
                                 holder.dislikeBtn.isEnabled = true
 
                                 if (success) {
-                                    prefs.edit().putBoolean("cs3_dislike_$key", true).apply()
+                                    prefs.edit()
+                                        .putBoolean("cs3_dislike_$key", true)
+                                        .apply()
+
                                     item.dislikes += 1
-                                    allPluginsMasterList.find { it.url == item.url }?.dislikes = item.dislikes
 
-                                    holder.dislikeCount.text = item.dislikes.toString()
-                                    val updatedTotal = item.likes + item.dislikes
-                                    val updatedScore = String.format(Locale.US, "%.1f", calculateScore(item.likes, item.dislikes))
-                                    val voteUnit = if (isEnglish) "votes" else "صوت"
-                                    holder.ratingText.text = "⭐ $updatedScore  ($updatedTotal $voteUnit)"
-                                    holder.ratingText.setTextColor(Color.parseColor("#FBBF24"))
+                                    allPluginsMasterList
+                                        .find { it.url == item.url }
+                                        ?.dislikes = item.dislikes
 
-                                    updateDislikeVisual(ctx, holder.dislikeBtn, true)
+                                    holder.dislikeCount.text =
+                                        item.dislikes.toString()
+
+                                    val updatedTotal =
+                                        item.likes + item.dislikes
+
+                                    val updatedScore = String.format(
+                                        Locale.US,
+                                        "%.1f",
+                                        calculateScore(
+                                            item.likes,
+                                            item.dislikes
+                                        )
+                                    )
+
+                                    val voteUnit =
+                                        if (isEnglish) "votes" else "صوت"
+
+                                    holder.ratingText.text =
+                                        "⭐ $updatedScore  ($updatedTotal $voteUnit)"
+
+                                    holder.ratingText.setTextColor(
+                                        Color.parseColor("#FBBF24")
+                                    )
+
+                                    updateDislikeVisual(
+                                        ctx,
+                                        holder.dislikeBtn,
+                                        true
+                                    )
+
                                 } else {
                                     Toast.makeText(
                                         ctx,
-                                        if (isEnglish) "Failed to submit dislike" else "تعذر تسجيل عدم الإعجاب",
+                                        if (isEnglish) {
+                                            "Failed to submit dislike"
+                                        } else {
+                                            "تعذر تسجيل عدم الإعجاب"
+                                        },
                                         Toast.LENGTH_SHORT
                                     ).show()
                                 }
                             }
                         }
                     }
-                    .setNegativeButton(if (isEnglish) "Cancel" else "إلغاء", null)
+                    .setNegativeButton(
+                        if (isEnglish) "Cancel" else "إلغاء",
+                        null
+                    )
                     .show()
             }
         }
@@ -893,33 +1266,29 @@ object RatingSettings {
         override fun getItemCount(): Int = items.size
     }
 
+    // إرسال لايك إلى Abacus
     private suspend fun voteLike(pluginUrl: String): Boolean {
-        return try {
-            val repository = getRepository(pluginUrl)
-            val key = transformUrl(pluginUrl)
-            val url = "$COUNTER_API/cs-$repository/vote/$key"
-            val response = app.get(url)
-            val json = JSONObject(response.text)
-            json.has("value") || json.has("count")
-        } catch (e: Exception) {
-            false
-        }
+        return requestCounter(
+            "hit",
+            pluginUrl,
+            "like"
+        ) != null
     }
 
+    // إرسال ديسلايك إلى Abacus
     private suspend fun voteDislike(pluginUrl: String): Boolean {
-        return try {
-            val repository = getRepository(pluginUrl)
-            val key = transformUrl(pluginUrl)
-            val url = "$COUNTER_API/cs-$repository/dislike/$key"
-            val response = app.get(url)
-            val json = JSONObject(response.text)
-            json.has("value") || json.has("count")
-        } catch (e: Exception) {
-            false
-        }
+        return requestCounter(
+            "hit",
+            pluginUrl,
+            "dislike"
+        ) != null
     }
 
-    private fun updateLikeVisual(ctx: Context, likeBtn: LinearLayout, active: Boolean) {
+    private fun updateLikeVisual(
+        ctx: Context,
+        likeBtn: LinearLayout,
+        active: Boolean
+    ) {
         if (active) {
             likeBtn.background = roundedStrokeBackground(
                 Color.parseColor("#064E3B"),
@@ -937,7 +1306,11 @@ object RatingSettings {
         }
     }
 
-    private fun updateDislikeVisual(ctx: Context, dislikeBtn: LinearLayout, active: Boolean) {
+    private fun updateDislikeVisual(
+        ctx: Context,
+        dislikeBtn: LinearLayout,
+        active: Boolean
+    ) {
         if (active) {
             dislikeBtn.background = roundedStrokeBackground(
                 Color.parseColor("#4C0519"),
@@ -956,37 +1329,74 @@ object RatingSettings {
     }
 
     @SuppressLint("ClickableViewAccessibility")
-    private fun View.addTouchScaleEffect(onClick: (() -> Unit)? = null) {
+    private fun View.addTouchScaleEffect(
+        onClick: (() -> Unit)? = null
+    ) {
         var isInside = false
+
         setOnTouchListener { v, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     isInside = true
-                    v.animate().scaleX(0.93f).scaleY(0.93f).setDuration(80).start()
+
+                    v.animate()
+                        .scaleX(0.93f)
+                        .scaleY(0.93f)
+                        .setDuration(80)
+                        .start()
                 }
+
                 MotionEvent.ACTION_MOVE -> {
-                    val withinBounds = event.x in 0f..v.width.toFloat() && event.y in 0f..v.height.toFloat()
+                    val withinBounds =
+                        event.x in 0f..v.width.toFloat() &&
+                        event.y in 0f..v.height.toFloat()
+
                     if (isInside != withinBounds) {
                         isInside = withinBounds
+
                         if (isInside) {
-                            v.animate().scaleX(0.93f).scaleY(0.93f).setDuration(80).start()
+                            v.animate()
+                                .scaleX(0.93f)
+                                .scaleY(0.93f)
+                                .setDuration(80)
+                                .start()
                         } else {
-                            v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(80).start()
+                            v.animate()
+                                .scaleX(1.0f)
+                                .scaleY(1.0f)
+                                .setDuration(80)
+                                .start()
                         }
                     }
                 }
+
                 MotionEvent.ACTION_UP -> {
-                    v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(100).start()
-                    val withinBounds = event.x in 0f..v.width.toFloat() && event.y in 0f..v.height.toFloat()
+                    v.animate()
+                        .scaleX(1.0f)
+                        .scaleY(1.0f)
+                        .setDuration(100)
+                        .start()
+
+                    val withinBounds =
+                        event.x in 0f..v.width.toFloat() &&
+                        event.y in 0f..v.height.toFloat()
+
                     if (withinBounds && isInside) {
                         onClick?.invoke()
                     }
                 }
+
                 MotionEvent.ACTION_CANCEL -> {
                     isInside = false
-                    v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(80).start()
+
+                    v.animate()
+                        .scaleX(1.0f)
+                        .scaleY(1.0f)
+                        .setDuration(80)
+                        .start()
                 }
             }
+
             true
         }
     }
@@ -1016,6 +1426,10 @@ object RatingSettings {
 
     private fun Number.dp(context: Context?): Int {
         val safeContext = context ?: return this.toInt()
-        return (this.toFloat() * safeContext.resources.displayMetrics.density).toInt()
+
+        return (
+            this.toFloat() *
+            safeContext.resources.displayMetrics.density
+        ).toInt()
     }
 }
