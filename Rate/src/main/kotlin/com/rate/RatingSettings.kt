@@ -51,8 +51,6 @@ object RatingSettings {
 
     private const val ABACUS_API = "https://abacus.jasoncameron.dev"
     private const val PREFS = "extension_ratings_prefs"
-
-    // حصر الطلبات المتزامنة بـ 2 فقط مع تأخير لعدم تجاوز حد 30 طلباً / 10 ثوانٍ
     private val requestSemaphore = Semaphore(2)
 
     private val imageCache = ConcurrentHashMap<String, Bitmap>()
@@ -70,8 +68,6 @@ object RatingSettings {
             .joinToString("-")
             .take(30) // حماية إضافية ألا يتجاوز اسم الـ namespace الحد المسموح
     }
-
-    // تقليص المفتاح إلى 32 حرفاً فقط لتفادي خطأ (Must be between 3 and 64 characters)
     private fun transformUrl(url: String): String {
         return MessageDigest.getInstance("MD5")
             .digest("${url}#funny-salt".toByteArray())
@@ -85,12 +81,10 @@ object RatingSettings {
     ): Int? {
         return requestSemaphore.withPermit {
             try {
-                // تأخير خفيف بين كل طلب وآخر لضمان عدم تجاوز RateLimit (30req/10s)
                 delay(120)
 
                 val repository = getRepository(pluginUrl)
                 val namespace = android.net.Uri.encode("cs-$repository")
-                // المفتاح الكلي سيكون طوله 32 + 5 إلى 8 أحرف = 40 حرفاً (أقل من الحد الأقصى 64)
                 val key = android.net.Uri.encode("${transformUrl(pluginUrl)}-$type")
                 val url = "$ABACUS_API/$action/$namespace/$key"
 
@@ -100,8 +94,6 @@ object RatingSettings {
                         "User-Agent" to "Cloudstream-Extension-App"
                     )
                 )
-
-                // 404 تعني أن العداد لم يُنشأ بعد، وقيمته 0
                 if (response.code == 404) {
                     return@withPermit 0
                 }
@@ -666,8 +658,6 @@ object RatingSettings {
             updateDislikeVisual(ctx, holder.dislikeBtn, hasDisliked)
 
             holder.card.addTouchScaleEffect()
-
-            // التصويت بالإعجاب
             holder.likeBtn.addTouchScaleEffect {
                 if (prefs.getBoolean("cs3_like_$key", false)) {
                     Toast.makeText(ctx, if (isEnglish) "You already liked this extension" else "لقد سجلت إعجابك بهذه الإضافة مسبقاً", Toast.LENGTH_SHORT).show()
@@ -703,8 +693,6 @@ object RatingSettings {
                     }
                 }
             }
-
-            // التصويت بعدم الإعجاب
             holder.dislikeBtn.addTouchScaleEffect {
                 if (prefs.getBoolean("cs3_dislike_$key", false)) {
                     Toast.makeText(ctx, if (isEnglish) "You already disliked this extension" else "لقد سجلت عدم إعجابك بهذه الإضافة مسبقاً", Toast.LENGTH_SHORT).show()
