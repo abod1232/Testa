@@ -50,8 +50,6 @@ object RatingSettings {
 
     private const val PLUGINS_URL =
         "https://raw.githubusercontent.com/Abodabodd/re-3arabi/refs/heads/builds/plugins.json"
-
-    // Abacus API - لا يحتاج إلى حساب أو API Key
     private const val ABACUS_API =
         "https://abacus.jasoncameron.dev"
 
@@ -60,8 +58,6 @@ object RatingSettings {
 
     private val imageCache = ConcurrentHashMap<String, Bitmap>()
     private var allPluginsMasterList = mutableListOf<PluginRating>()
-
-    // تنظيم الطلبات لتقليل احتمال تجاوز حد الطلبات في Abacus
     private val abacusMutex = Mutex()
     private var lastAbacusRequestTime = 0L
 
@@ -101,8 +97,6 @@ object RatingSettings {
     ): Int? {
         return try {
             abacusMutex.withLock {
-
-                // نترك فاصلاً بسيطاً بين الطلبات لتجنب تجاوز حد الخدمة
                 val now = SystemClock.elapsedRealtime()
                 val waitTime = 400L - (now - lastAbacusRequestTime)
 
@@ -113,8 +107,6 @@ object RatingSettings {
                 lastAbacusRequestTime = SystemClock.elapsedRealtime()
 
                 val repository = getRepository(pluginUrl)
-
-                // لكل إضافة عدادان مستقلان: like و dislike
                 val namespace = android.net.Uri.encode("cs-$repository")
                 val key = android.net.Uri.encode(
                     "${transformUrl(pluginUrl)}-$type"
@@ -1045,8 +1037,6 @@ object RatingSettings {
             )
 
             holder.card.addTouchScaleEffect()
-
-            // التصويت بالإعجاب
             holder.likeBtn.addTouchScaleEffect {
 
                 if (prefs.getBoolean("cs3_like_$key", false)) {
@@ -1062,8 +1052,6 @@ object RatingSettings {
 
                     return@addTouchScaleEffect
                 }
-
-                // منع التصويت بالديسلايك إذا كان مسجلاً مسبقاً
                 if (prefs.getBoolean("cs3_dislike_$key", false)) {
                     Toast.makeText(
                         ctx,
@@ -1139,8 +1127,6 @@ object RatingSettings {
                     }
                 }
             }
-
-            // التصويت بعدم الإعجاب
             holder.dislikeBtn.addTouchScaleEffect {
 
                 if (prefs.getBoolean("cs3_dislike_$key", false)) {
@@ -1156,8 +1142,6 @@ object RatingSettings {
 
                     return@addTouchScaleEffect
                 }
-
-                // منع التصويت بالإعجاب إذا كان مسجلاً مسبقاً
                 if (prefs.getBoolean("cs3_like_$key", false)) {
                     Toast.makeText(
                         ctx,
@@ -1265,8 +1249,6 @@ object RatingSettings {
 
         override fun getItemCount(): Int = items.size
     }
-
-    // إرسال لايك إلى Abacus
     private suspend fun voteLike(pluginUrl: String): Boolean {
         return requestCounter(
             "hit",
@@ -1274,8 +1256,6 @@ object RatingSettings {
             "like"
         ) != null
     }
-
-    // إرسال ديسلايك إلى Abacus
     private suspend fun voteDislike(pluginUrl: String): Boolean {
         return requestCounter(
             "hit",
