@@ -33,6 +33,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -47,9 +48,12 @@ object RatingSettings {
 
     private const val PLUGINS_URL =
         "https://raw.githubusercontent.com/abod1232/Testa/refs/heads/builds/plugins.json"
+
     private const val ABACUS_API = "https://abacus.jasoncameron.dev"
     private const val PREFS = "extension_ratings_prefs"
-    private val requestSemaphore = Semaphore(4)
+
+    // حصر الطلبات المتزامنة بـ 2 فقط مع تأخير لعدم تجاوز حد 30 طلباً / 10 ثوانٍ
+    private val requestSemaphore = Semaphore(2)
 
     private val imageCache = ConcurrentHashMap<String, Bitmap>()
     private var allPluginsMasterList = mutableListOf<PluginRating>()
@@ -64,19 +68,16 @@ object RatingSettings {
             .drop(2)
             .take(3)
             .joinToString("-")
+            .take(30) // حماية إضافية ألا يتجاوز اسم الـ namespace الحد المسموح
     }
 
+    // تقليص المفتاح إلى 32 حرفاً فقط لتفادي خطأ (Must be between 3 and 64 characters)
     private fun transformUrl(url: String): String {
-        return MessageDigest.getInstance("SHA-256")
+        return MessageDigest.getInstance("MD5")
             .digest("${url}#funny-salt".toByteArray())
             .joinToString("") { "%02x".format(it) }
     }
 
-    /**
-     * التعامل مع Abacus API:
-     * action: "get" أو "hit"
-     * type: "like" أو "dislike"
-     */
     suspend fun requestCounter(
         action: String,
         pluginUrl: String,
@@ -84,22 +85,33 @@ object RatingSettings {
     ): Int? {
         return requestSemaphore.withPermit {
             try {
+                // تأخير خفيف بين كل طلب وآخر لضمان عدم تجاوز RateLimit (30req/10s)
+                delay(120)
+
                 val repository = getRepository(pluginUrl)
                 val namespace = android.net.Uri.encode("cs-$repository")
+                // المفتاح الكلي سيكون طوله 32 + 5 إلى 8 أحرف = 40 حرفاً (أقل من الحد الأقصى 64)
                 val key = android.net.Uri.encode("${transformUrl(pluginUrl)}-$type")
                 val url = "$ABACUS_API/$action/$namespace/$key"
 
                 val response = app.get(
                     url,
-                    headers = mapOf("User-Agent" to "Cloudstream-Extension-Rating")
+                    headers = mapOf(
+                        "User-Agent" to "Cloudstream-Extension-App"
+                    )
                 )
 
-                if (response.code == 404 && action == "get") {
+                // 404 تعني أن العداد لم يُنشأ بعد، وقيمته 0
+                if (response.code == 404) {
                     return@withPermit 0
                 }
 
-                val json = JSONObject(response.text)
-                json.optInt("value", json.optInt("count", 0))
+                if (response.code == 200) {
+                    val json = JSONObject(response.text)
+                    return@withPermit json.optInt("value", json.optInt("count", 0))
+                }
+
+                if (action == "get") 0 else null
             } catch (e: Exception) {
                 if (action == "get") 0 else null
             }
@@ -194,10 +206,7 @@ object RatingSettings {
                 gravity = Gravity.CENTER
                 background = roundedStrokeBackground(Color.parseColor("#1E293B"), Color.parseColor("#475569"), 1.dp(context), 11f)
                 setPadding(8.dp(context), 6.dp(context), 8.dp(context), 6.dp(context))
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply {
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                     rightMargin = 5.dp(context)
                 }
             }
@@ -255,7 +264,6 @@ object RatingSettings {
 
             headerButtons.addView(langBtn)
             headerButtons.addView(sortBtn)
-
             header.addView(close)
             header.addView(title)
             header.addView(headerButtons)
@@ -658,6 +666,8 @@ object RatingSettings {
             updateDislikeVisual(ctx, holder.dislikeBtn, hasDisliked)
 
             holder.card.addTouchScaleEffect()
+
+            // التصويت بالإعجاب
             holder.likeBtn.addTouchScaleEffect {
                 if (prefs.getBoolean("cs3_like_$key", false)) {
                     Toast.makeText(ctx, if (isEnglish) "You already liked this extension" else "لقد سجلت إعجابك بهذه الإضافة مسبقاً", Toast.LENGTH_SHORT).show()
@@ -693,6 +703,8 @@ object RatingSettings {
                     }
                 }
             }
+
+            // التصويت بعدم الإعجاب
             holder.dislikeBtn.addTouchScaleEffect {
                 if (prefs.getBoolean("cs3_dislike_$key", false)) {
                     Toast.makeText(ctx, if (isEnglish) "You already disliked this extension" else "لقد سجلت عدم إعجابك بهذه الإضافة مسبقاً", Toast.LENGTH_SHORT).show()
