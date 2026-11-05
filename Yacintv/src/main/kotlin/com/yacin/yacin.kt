@@ -1,9 +1,16 @@
 package com.yacin
-import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
-import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
+
+
+
 import android.content.Context
 import android.content.Intent
+import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
+import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
+import android.content.res.ColorStateList
 import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.util.Base64
@@ -15,10 +22,16 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
+
+import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
+
 import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
+import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
@@ -26,14 +39,17 @@ import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.newExtractorLink
+
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
+
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.Socket
@@ -50,6 +66,7 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
 
+
 @CloudstreamPlugin
 class YacineTVPlugin : Plugin() {
     override fun load(context: Context) {
@@ -61,53 +78,184 @@ class YacineTVPlugin : Plugin() {
         }
     }
 }
+
+
+
+
 class YacineSettings : BottomSheetDialogFragment() {
+
+    private fun dp(dp: Int): Int = (dp * resources.displayMetrics.density + 0.5f).toInt()
+
+    override fun onStart() {
+        super.onStart()
+        val dialog = dialog as? BottomSheetDialog
+        dialog?.findViewById<View>(com.google.android.material.R.id.design_bottom_sheet)?.let { sheet ->
+            sheet.background = null
+        }
+    }
+
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View {
         val ctx = requireContext()
-
-        val layout = LinearLayout(ctx).apply {
+        val root = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(48, 48, 48, 48)
-            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(20), dp(12), dp(20), dp(28))
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#181926")) // خلفية داكنة حديثة
+                cornerRadii = floatArrayOf(
+                    dp(24).toFloat(), dp(24).toFloat(), // زاوية أعلى يسار
+                    dp(24).toFloat(), dp(24).toFloat(), // زاوية أعلى يمين
+                    0f, 0f, 0f, 0f
+                )
+            }
         }
-
+        val handle = View(ctx).apply {
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#45475A"))
+                cornerRadius = dp(3).toFloat()
+            }
+            layoutParams = LinearLayout.LayoutParams(dp(44), dp(5)).apply {
+                gravity = Gravity.CENTER_HORIZONTAL
+                bottomMargin = dp(20)
+            }
+        }
+        root.addView(handle)
         val title = TextView(ctx).apply {
-            text = "روابط الدعم والمجتمع"
-            textSize = 20f
-            setTextColor(Color.WHITE)
+            text = "مجتمع ودعم الإضافة"
+            textSize = 19f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor("#CAD3F5"))
             gravity = Gravity.CENTER
-            setPadding(0, 0, 0, 32)
         }
-        layout.addView(title)
+        root.addView(title)
 
-        fun createBtn(titleText: String, url: String): Button {
-            return Button(ctx).apply {
-                text = titleText
+        val subtitle = TextView(ctx).apply {
+            text = "تابع التحديثات وانضم لمجتمع النقاش والمطورين"
+            textSize = 12.5f
+            setTextColor(Color.parseColor("#8087A2"))
+            gravity = Gravity.CENTER
+            setPadding(0, dp(4), 0, dp(22))
+        }
+        root.addView(subtitle)
+        fun createPlatformCard(
+            badgeIcon: String,
+            badgeColor: String,
+            titleText: String,
+            descText: String,
+            targetUrl: String
+        ): View {
+            val card = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(16), dp(14), dp(16), dp(14))
+                val shape = GradientDrawable().apply {
+                    setColor(Color.parseColor("#24273A"))
+                    cornerRadius = dp(16).toFloat()
+                    setStroke(dp(1), Color.parseColor("#363A4F"))
+                }
+                background = RippleDrawable(
+                    ColorStateList.valueOf(Color.parseColor("#3B4252")),
+                    shape,
+                    shape
+                )
+
+                isClickable = true
+                isFocusable = true
                 setOnClickListener {
                     try {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                        startActivity(intent)
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)))
                     } catch (e: Exception) { }
                 }
+
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 ).apply {
-                    setMargins(0, 12, 0, 12)
+                    bottomMargin = dp(12)
                 }
             }
-        }
-        layout.addView(createBtn("قناة التليجرام", "https://t.me/cs3ara"))
-        layout.addView(createBtn("سيرفر الديسكورد", "https://discord.gg/xY63qaQRw"))
-        layout.addView(createBtn("مشروع GitHub", "https://github.com/Abodabodd/re-3arabi"))
+            val iconBadge = TextView(ctx).apply {
+                text = badgeIcon
+                textSize = 18f
+                gravity = Gravity.CENTER
+                background = GradientDrawable().apply {
+                    setColor(Color.parseColor(badgeColor))
+                    cornerRadius = dp(12).toFloat()
+                }
+                layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).apply {
+                    marginEnd = dp(14)
+                }
+            }
+            card.addView(iconBadge)
+            val textContainer = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
 
-        return layout
+            val cardTitle = TextView(ctx).apply {
+                text = titleText
+                textSize = 15f
+                setTypeface(null, Typeface.BOLD)
+                setTextColor(Color.parseColor("#CAD3F5"))
+            }
+            textContainer.addView(cardTitle)
+
+            val cardDesc = TextView(ctx).apply {
+                text = descText
+                textSize = 12f
+                setTextColor(Color.parseColor("#A5ADCB"))
+                setPadding(0, dp(2), 0, 0)
+            }
+            textContainer.addView(cardDesc)
+
+            card.addView(textContainer)
+            val arrow = TextView(ctx).apply {
+                text = "↗"
+                textSize = 17f
+                setTextColor(Color.parseColor("#6E738D"))
+                setTypeface(null, Typeface.BOLD)
+            }
+            card.addView(arrow)
+
+            return card
+        }
+        root.addView(
+            createPlatformCard(
+                badgeIcon = "📧",
+                badgeColor = "#229ED9",
+                titleText = "قناة التليجرام",
+                descText = "أحدث الإصدارات، الروابط والأخبار",
+                targetUrl = "https://t.me/cs3ara"
+            )
+        )
+
+        root.addView(
+            createPlatformCard(
+                badgeIcon = "☄️",
+                badgeColor = "#5865F2",
+                titleText = "سيرفر الديسكورد",
+                descText = "نقاشات المجتمع، الدعم الفني والاقتراحات",
+                targetUrl = "https://discord.gg/xY63qaQRw"
+            )
+        )
+
+        root.addView(
+            createPlatformCard(
+                badgeIcon = "🔗",
+                badgeColor = "#313244",
+                titleText = "مشروع GitHub",
+                descText = "المستودع المفتوح، الإبلاغ عن مشاكل والمساهمة",
+                targetUrl = "https://github.com/Abodabodd/re-3arabi"
+            )
+        )
+
+        return root
     }
 }
+
 
 class YacineTVProvider : MainAPI() {
     companion object {
@@ -134,6 +282,10 @@ class YacineTVProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Live)
 
     private val baseKey = "c!xZj+N9&G@Ev@vw"
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .build()
 
     private fun getSavedApiUrl(): String {
         return try {
@@ -149,34 +301,6 @@ class YacineTVProvider : MainAPI() {
             setKey(PREF_SAVED_DOMAIN_KEY, url)
         } catch (e: Exception) { }
     }
-
-    private fun getUnsafeOkHttpClient(): OkHttpClient {
-        return try {
-            val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
-                override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-                override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-                override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
-            })
-
-            val sslContext = SSLContext.getInstance("SSL")
-            sslContext.init(null, trustAllCerts, SecureRandom())
-            val sslSocketFactory = sslContext.socketFactory
-
-            OkHttpClient.Builder()
-                .sslSocketFactory(sslSocketFactory, trustAllCerts[0] as X509TrustManager)
-                .hostnameVerifier { _, _ -> true }
-                .connectTimeout(15, TimeUnit.SECONDS)
-                .readTimeout(15, TimeUnit.SECONDS)
-                .build()
-        } catch (e: Exception) {
-            OkHttpClient.Builder()
-                .connectTimeout(15, TimeUnit.SECONDS)
-                .readTimeout(15, TimeUnit.SECONDS)
-                .build()
-        }
-    }
-
-    private val client = getUnsafeOkHttpClient()
 
     data class LinkData(
         val id: String,
