@@ -204,8 +204,6 @@ class YacineTVProvider : MainAPI() {
             ""
         }
     }
-
-    // دالة مساعدة لتنفيذ الطلب على دومين محدد
     private fun executeYacineRequest(baseUrl: String, path: String): YacineResponse? {
         val cleanBase = baseUrl.trimEnd('/')
         val cleanPath = path.trimStart('/')
@@ -236,20 +234,13 @@ class YacineTVProvider : MainAPI() {
             null
         }
     }
-
-    // تم تعديل هذه الدالة لتجرب الدومين الحالي أولاً ولا تلجأ لفايربيس إلا عند الفشل
     private suspend fun fetchYacine(path: String): YacineResponse? = withContext(Dispatchers.IO) {
-        // 1. المحاولة أولاً بالدومينات المتوفرة حالياً (الكاش والاحتياطي) دون لمس فايربيس
         val initialEndpoints = listOf(cachedUrl, fallbackUrl).distinct()
         for (baseUrl in initialEndpoints) {
             val res = executeYacineRequest(baseUrl, path)
             if (res != null) return@withContext res
         }
-
-        // 2. إذا فشلت جميع الدومينات (تم حظرها)، حينها فقط نستعلم من Firebase لجلب الدومين الجديد
         val newDynamicUrl = syncDynamicApiUrl()
-
-        // إذا عاد فايربيس بدومين جديد مختلف عما جربناه سابقاً، نحاول به
         if (!initialEndpoints.contains(newDynamicUrl)) {
             val res = executeYacineRequest(newDynamicUrl, path)
             if (res != null) return@withContext res
