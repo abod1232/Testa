@@ -291,6 +291,8 @@ class YacineTVProvider : MainAPI() {
             this.plot = "شاهد بث مباشر لقناة ${data.name}"
         }
     }
+
+    // دالة لتجاوز حماية Cloudflare والحصول على رابط البث الفعلي (301 Location)
     private fun resolveDirectStreamUrl(rawUrl: String, rawReferer: String, userAgent: String): String {
         if (!rawUrl.contains("varie-redirect.com")) return rawUrl
 
@@ -308,6 +310,8 @@ class YacineTVProvider : MainAPI() {
                 Socket(host, port)
             }
             socket.soTimeout = 8000
+
+            // إرسال الحزمة بصيغتها الدقيقة الخام دون أي تلاعب من أندرويد في الحروف المخفية
             val rawRequest = "GET $path HTTP/1.1\r\n" +
                     "Host: $host\r\n" +
                     "User-Agent: $userAgent\r\n" +
@@ -369,6 +373,8 @@ class YacineTVProvider : MainAPI() {
                 val userAgent = streamHeaders["User-Agent"]
                     ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
                 val referer = streamHeaders["Referer"] ?: "http://yacinneeee.live⁠‍⁠ㅤ‌⁠‍⁠"
+
+                // حل الرابط المباشر لتخطي خطوة التحويل الوسيطة المحظورة
                 val finalStreamUrl = resolveDirectStreamUrl(rawUrl, referer, userAgent)
 
                 callback.invoke(
