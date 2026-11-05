@@ -25,10 +25,7 @@ import com.lagradost.cloudstream3.plugins.Plugin
 @CloudstreamPlugin
 class FaselhdPlugin : Plugin() {
     override fun load(context: Context) {
-        // تسجيل البروفايدر الأساسي
         registerMainAPI(FASELHD(context))
-
-        // تفعيل وربط شاشة الإعدادات بنافذة الـ BottomSheet
         openSettings = { activityContext ->
             (activityContext as? AppCompatActivity)?.let { activity ->
                 Settings().show(activity.supportFragmentManager, "FaselhdSettings")
@@ -68,8 +65,6 @@ class Settings : BottomSheetDialogFragment() {
                 )
             }
         }
-
-        // شريط السحب العلوي
         val handle = View(ctx).apply {
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#45475A"))
@@ -81,8 +76,6 @@ class Settings : BottomSheetDialogFragment() {
             }
         }
         root.addView(handle)
-
-        // العناوين
         val title = TextView(ctx).apply {
             text = "مجتمع ودعم الإضافة"
             textSize = 19f
@@ -100,8 +93,6 @@ class Settings : BottomSheetDialogFragment() {
             setPadding(0, dp(4), 0, dp(22))
         }
         root.addView(subtitle)
-
-        // دالة إنشاء كروت المنصات
         fun createPlatformCard(
             badgeIcon: String,
             badgeColor: String,
@@ -188,8 +179,6 @@ class Settings : BottomSheetDialogFragment() {
 
             return card
         }
-
-        // إضافة البطاقات
         root.addView(
             createPlatformCard(
                 badgeIcon = "✈️",
