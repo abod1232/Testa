@@ -160,7 +160,7 @@ class YacineSettings : BottomSheetDialogFragment() {
         }
         root.addView(
             createPlatformCard(
-                badgeIcon = "✈️",
+                badgeIcon = "📧",
                 badgeColor = "#229ED9",
                 titleText = "قناة التليجرام",
                 descText = "أحدث الإصدارات، الروابط والأخبار",
@@ -170,7 +170,7 @@ class YacineSettings : BottomSheetDialogFragment() {
 
         root.addView(
             createPlatformCard(
-                badgeIcon = "💬",
+                badgeIcon = "☄️",
                 badgeColor = "#5865F2",
                 titleText = "سيرفر الديسكورد",
                 descText = "نقاشات المجتمع، الدعم الفني والاقتراحات",
@@ -180,7 +180,7 @@ class YacineSettings : BottomSheetDialogFragment() {
 
         root.addView(
             createPlatformCard(
-                badgeIcon = "🐙",
+                badgeIcon = "🔗",
                 badgeColor = "#313244",
                 titleText = "مشروع GitHub",
                 descText = "المستودع المفتوح، الإبلاغ عن مشاكل والمساهمة",
