@@ -1,16 +1,9 @@
 package com.yacin
-
-
-
-import android.content.Context
-import android.content.Intent
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
-import android.content.res.ColorStateList
+import android.content.Context
+import android.content.Intent
 import android.graphics.Color
-import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.RippleDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.util.Base64
@@ -22,16 +15,10 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
-
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
-
-import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
-
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
-import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
@@ -39,17 +26,14 @@ import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.newExtractorLink
-
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
-
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.Socket
@@ -66,7 +50,6 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
 
-
 @CloudstreamPlugin
 class YacineTVPlugin : Plugin() {
     override fun load(context: Context) {
@@ -80,14 +63,13 @@ class YacineTVPlugin : Plugin() {
 }
 
 
-
-
 class YacineSettings : BottomSheetDialogFragment() {
 
     private fun dp(dp: Int): Int = (dp * resources.displayMetrics.density + 0.5f).toInt()
 
     override fun onStart() {
         super.onStart()
+        // جعل خلفية الـ BottomSheet شفافة لتظهر الحواف الدائرية بشكل جميل
         val dialog = dialog as? BottomSheetDialog
         dialog?.findViewById<View>(com.google.android.material.R.id.design_bottom_sheet)?.let { sheet ->
             sheet.background = null
@@ -100,6 +82,8 @@ class YacineSettings : BottomSheetDialogFragment() {
         savedInstanceState: Bundle?
     ): View {
         val ctx = requireContext()
+
+        // 1. الحاوية الرئيسية (Root Layout)
         val root = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(12), dp(20), dp(28))
@@ -112,6 +96,8 @@ class YacineSettings : BottomSheetDialogFragment() {
                 )
             }
         }
+
+        // 2. شريط السحب العلوي (Drag Handle)
         val handle = View(ctx).apply {
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#45475A"))
@@ -123,6 +109,8 @@ class YacineSettings : BottomSheetDialogFragment() {
             }
         }
         root.addView(handle)
+
+        // 3. العناوين
         val title = TextView(ctx).apply {
             text = "مجتمع ودعم الإضافة"
             textSize = 19f
@@ -140,6 +128,8 @@ class YacineSettings : BottomSheetDialogFragment() {
             setPadding(0, dp(4), 0, dp(22))
         }
         root.addView(subtitle)
+
+        // 4. دالة إنشاء بطاقة تفاعلية عصرية
         fun createPlatformCard(
             badgeIcon: String,
             badgeColor: String,
@@ -151,6 +141,8 @@ class YacineSettings : BottomSheetDialogFragment() {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(16), dp(14), dp(16), dp(14))
+
+                // خلفية بطاقة داكنة مع إطار وتأثير ضغط (Ripple)
                 val shape = GradientDrawable().apply {
                     setColor(Color.parseColor("#24273A"))
                     cornerRadius = dp(16).toFloat()
@@ -177,6 +169,8 @@ class YacineSettings : BottomSheetDialogFragment() {
                     bottomMargin = dp(12)
                 }
             }
+
+            // أيقونة المنصة (دائرة ملونة تحمل الرمز)
             val iconBadge = TextView(ctx).apply {
                 text = badgeIcon
                 textSize = 18f
@@ -190,6 +184,8 @@ class YacineSettings : BottomSheetDialogFragment() {
                 }
             }
             card.addView(iconBadge)
+
+            // نصوص البطاقة (العنوان والوصف)
             val textContainer = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
@@ -212,6 +208,8 @@ class YacineSettings : BottomSheetDialogFragment() {
             textContainer.addView(cardDesc)
 
             card.addView(textContainer)
+
+            // سهم الانتقال الصغير
             val arrow = TextView(ctx).apply {
                 text = "↗"
                 textSize = 17f
@@ -222,9 +220,11 @@ class YacineSettings : BottomSheetDialogFragment() {
 
             return card
         }
+
+        // 5. إضافة البطاقات الثلاث
         root.addView(
             createPlatformCard(
-                badgeIcon = "📧",
+                badgeIcon = "✈️",
                 badgeColor = "#229ED9",
                 titleText = "قناة التليجرام",
                 descText = "أحدث الإصدارات، الروابط والأخبار",
@@ -234,7 +234,7 @@ class YacineSettings : BottomSheetDialogFragment() {
 
         root.addView(
             createPlatformCard(
-                badgeIcon = "☄️",
+                badgeIcon = "💬",
                 badgeColor = "#5865F2",
                 titleText = "سيرفر الديسكورد",
                 descText = "نقاشات المجتمع، الدعم الفني والاقتراحات",
@@ -244,7 +244,7 @@ class YacineSettings : BottomSheetDialogFragment() {
 
         root.addView(
             createPlatformCard(
-                badgeIcon = "🔗",
+                badgeIcon = "🐙",
                 badgeColor = "#313244",
                 titleText = "مشروع GitHub",
                 descText = "المستودع المفتوح، الإبلاغ عن مشاكل والمساهمة",
@@ -255,7 +255,6 @@ class YacineSettings : BottomSheetDialogFragment() {
         return root
     }
 }
-
 
 class YacineTVProvider : MainAPI() {
     companion object {
@@ -282,10 +281,6 @@ class YacineTVProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Live)
 
     private val baseKey = "c!xZj+N9&G@Ev@vw"
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .build()
 
     private fun getSavedApiUrl(): String {
         return try {
@@ -301,6 +296,34 @@ class YacineTVProvider : MainAPI() {
             setKey(PREF_SAVED_DOMAIN_KEY, url)
         } catch (e: Exception) { }
     }
+
+    private fun getUnsafeOkHttpClient(): OkHttpClient {
+        return try {
+            val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
+                override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+                override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+                override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+            })
+
+            val sslContext = SSLContext.getInstance("SSL")
+            sslContext.init(null, trustAllCerts, SecureRandom())
+            val sslSocketFactory = sslContext.socketFactory
+
+            OkHttpClient.Builder()
+                .sslSocketFactory(sslSocketFactory, trustAllCerts[0] as X509TrustManager)
+                .hostnameVerifier { _, _ -> true }
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(15, TimeUnit.SECONDS)
+                .build()
+        } catch (e: Exception) {
+            OkHttpClient.Builder()
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(15, TimeUnit.SECONDS)
+                .build()
+        }
+    }
+
+    private val client = getUnsafeOkHttpClient()
 
     data class LinkData(
         val id: String,
