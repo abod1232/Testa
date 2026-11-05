@@ -19,7 +19,6 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.BufferedReader
 import java.io.InputStreamReader
-import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.URI
 import java.security.SecureRandom
@@ -206,39 +205,56 @@ class YacineTVProvider : MainAPI() {
         }
     }
 
-    private suspend fun fetchYacine(path: String): YacineResponse? = withContext(Dispatchers.IO) {
-        val dynamicUrl = syncDynamicApiUrl()
-        val endpoints = listOf(dynamicUrl, fallbackUrl)
+    // دالة مساعدة لتنفيذ الطلب على دومين محدد
+    private fun executeYacineRequest(baseUrl: String, path: String): YacineResponse? {
+        val cleanBase = baseUrl.trimEnd('/')
+        val cleanPath = path.trimStart('/')
+        val fullUrl = "$cleanBase/$cleanPath"
 
-        for (baseUrl in endpoints) {
-            val cleanBase = baseUrl.trimEnd('/')
-            val cleanPath = path.trimStart('/')
-            val fullUrl = "$cleanBase/$cleanPath"
+        return try {
+            val request = Request.Builder()
+                .url(fullUrl)
+                .header("User-Agent", "okhttp/4.12.0")
+                .header("Accept", "application/json")
+                .build()
 
-            try {
-                val request = Request.Builder()
-                    .url(fullUrl)
-                    .header("User-Agent", "okhttp/4.12.0")
-                    .header("Accept", "application/json")
-                    .build()
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: ""
+                    val tHeader = response.header("t") ?: ""
 
-                client.newCall(request).execute().use { response ->
-                    if (response.isSuccessful) {
-                        val body = response.body?.string() ?: ""
-                        val tHeader = response.header("t") ?: ""
-
-                        if (body.isEmpty()) return@use null
-
+                    if (body.isNotEmpty()) {
                         val decryptedJson = decrypt(body, tHeader)
                         if (decryptedJson.isNotEmpty()) {
-                            return@withContext parseJson<YacineResponse>(decryptedJson)
+                            return parseJson<YacineResponse>(decryptedJson)
                         }
                     }
                 }
-            } catch (e: Exception) {
-                continue
+                null
             }
+        } catch (e: Exception) {
+            null
         }
+    }
+
+    // تم تعديل هذه الدالة لتجرب الدومين الحالي أولاً ولا تلجأ لفايربيس إلا عند الفشل
+    private suspend fun fetchYacine(path: String): YacineResponse? = withContext(Dispatchers.IO) {
+        // 1. المحاولة أولاً بالدومينات المتوفرة حالياً (الكاش والاحتياطي) دون لمس فايربيس
+        val initialEndpoints = listOf(cachedUrl, fallbackUrl).distinct()
+        for (baseUrl in initialEndpoints) {
+            val res = executeYacineRequest(baseUrl, path)
+            if (res != null) return@withContext res
+        }
+
+        // 2. إذا فشلت جميع الدومينات (تم حظرها)، حينها فقط نستعلم من Firebase لجلب الدومين الجديد
+        val newDynamicUrl = syncDynamicApiUrl()
+
+        // إذا عاد فايربيس بدومين جديد مختلف عما جربناه سابقاً، نحاول به
+        if (!initialEndpoints.contains(newDynamicUrl)) {
+            val res = executeYacineRequest(newDynamicUrl, path)
+            if (res != null) return@withContext res
+        }
+
         null
     }
 
@@ -291,6 +307,7 @@ class YacineTVProvider : MainAPI() {
             this.plot = "شاهد بث مباشر لقناة ${data.name}"
         }
     }
+
     private fun resolveDirectStreamUrl(rawUrl: String, rawReferer: String, userAgent: String): String {
         if (!rawUrl.contains("varie-redirect.com")) return rawUrl
 
@@ -308,6 +325,7 @@ class YacineTVProvider : MainAPI() {
                 Socket(host, port)
             }
             socket.soTimeout = 8000
+
             val rawRequest = "GET $path HTTP/1.1\r\n" +
                     "Host: $host\r\n" +
                     "User-Agent: $userAgent\r\n" +
@@ -328,7 +346,7 @@ class YacineTVProvider : MainAPI() {
             var location: String? = null
 
             while (reader.readLine().also { line = it } != null) {
-                if (line.isNullOrEmpty()) break // نهاية ترويسات الرد
+                if (line.isNullOrEmpty()) break
                 if (line!!.startsWith("Location:", ignoreCase = true)) {
                     location = line!!.substring(9).trim()
                     break
@@ -369,6 +387,7 @@ class YacineTVProvider : MainAPI() {
                 val userAgent = streamHeaders["User-Agent"]
                     ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
                 val referer = streamHeaders["Referer"] ?: "http://yacinneeee.live⁠‍⁠ㅤ‌⁠‍⁠"
+
                 val finalStreamUrl = resolveDirectStreamUrl(rawUrl, referer, userAgent)
 
                 callback.invoke(
