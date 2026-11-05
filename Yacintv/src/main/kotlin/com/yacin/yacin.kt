@@ -52,8 +52,6 @@ class YacineTVProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Live)
 
     private val baseKey = "c!xZj+N9&G@Ev@vw"
-
-    // دالة إنشاء عميل OkHttpClient مخصص لتجاوز فحص شهادات SSL أثناء التطوير
     private fun getUnsafeOkHttpClient(): OkHttpClient {
         return try {
             val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
