@@ -58,8 +58,6 @@ class YacineTVProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Live)
 
     private val baseKey = "c!xZj+N9&G@Ev@vw"
-
-    // دوال الحفظ الدائم للدومين في ذاكرة الجهاز (Storage)
     private fun getSavedApiUrl(): String {
         return try {
             getKey<String>(PREF_SAVED_DOMAIN_KEY) ?: cachedUrl
@@ -221,8 +219,6 @@ class YacineTVProvider : MainAPI() {
             ""
         }
     }
-
-    // دالة تنفيذ الطلب مع التحقق الصريح من كود 200
     private fun executeYacineRequest(baseUrl: String, path: String): YacineResponse? {
         val cleanBase = baseUrl.trimEnd('/')
         val cleanPath = path.trimStart('/')
@@ -236,7 +232,6 @@ class YacineTVProvider : MainAPI() {
                 .build()
 
             client.newCall(request).execute().use { response ->
-                // إذا كان الرد جيداً (200 OK) فقط نقوم بقراءة البيانات
                 if (response.code == 200) {
                     val body = response.body?.string() ?: ""
                     val tHeader = response.header("t") ?: ""
@@ -256,11 +251,8 @@ class YacineTVProvider : MainAPI() {
     }
 
     private suspend fun fetchYacine(path: String): YacineResponse? = withContext(Dispatchers.IO) {
-        // 1. قراءة الدومين المحفوظ بشكل دائم
         val currentSavedUrl = getSavedApiUrl()
         val initialEndpoints = listOf(currentSavedUrl, fallbackUrl).distinct()
-
-        // 2. المحاولة أولاً بالدومين المحفوظ، وإذا أعاد 200 نرجع فوراً دون فايربيس
         for (baseUrl in initialEndpoints) {
             val res = executeYacineRequest(baseUrl, path)
             if (res != null) {
@@ -268,8 +260,6 @@ class YacineTVProvider : MainAPI() {
                 return@withContext res
             }
         }
-
-        // 3. فقط عندما تعيد الدومينات رداً غير جيد (ليس 200)، يتم استدعاء فايربيس
         val newDynamicUrl = syncDynamicApiUrl()
 
         if (!initialEndpoints.contains(newDynamicUrl)) {
