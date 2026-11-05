@@ -49,17 +49,10 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
 
-// -----------------------------------------------------------------------------------------
-// 1. كلاس تسجيل الإضافة والإعدادات (Plugin & Settings Registration)
-// -----------------------------------------------------------------------------------------
-
 @CloudstreamPlugin
 class YacineTVPlugin : Plugin() {
     override fun load(context: Context) {
-        // تسجيل البروفايدر الرئيسي
         registerMainAPI(YacineTVProvider())
-
-        // فتح واجهة الإعدادات عند الضغط على إعدادات الإضافة
         openSettings = { activityContext ->
             (activityContext as? AppCompatActivity)?.let { activity ->
                 YacineSettings().show(activity.supportFragmentManager, "YacineSettings")
@@ -67,8 +60,6 @@ class YacineTVPlugin : Plugin() {
         }
     }
 }
-
-// نافذة منبثقة (Bottom Sheet) برمجية بالكامل لعرض الروابط
 class YacineSettings : BottomSheetDialogFragment() {
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -109,8 +100,6 @@ class YacineSettings : BottomSheetDialogFragment() {
                 }
             }
         }
-
-        // الأزرار المطلوبة
         layout.addView(createBtn("قناة التليجرام", "https://t.me/cs3ara"))
         layout.addView(createBtn("سيرفر الديسكورد", "https://discord.gg/xY63qaQRw"))
         layout.addView(createBtn("مشروع GitHub", "https://github.com/Abodabodd/re-3arabi"))
@@ -118,10 +107,6 @@ class YacineSettings : BottomSheetDialogFragment() {
         return layout
     }
 }
-
-// -----------------------------------------------------------------------------------------
-// 2. كلاس البروفايدر الرئيسي (Provider Implementation)
-// -----------------------------------------------------------------------------------------
 
 class YacineTVProvider : MainAPI() {
     companion object {
