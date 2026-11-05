@@ -42,6 +42,7 @@ class YacineTVProvider : MainAPI() {
         private const val FB_PKG = "ver3.ycntivi.off"
         private const val FB_CERT = "E404353443FB03A54702D53E2C7563D791D92559"
 
+        private const val PREF_SAVED_DOMAIN_KEY = "YACINE_SAVED_DOMAIN_URL"
         @Volatile private var cachedUrl: String = "https://def11.ycnapi.com/api"
         @Volatile private var cachedEtag: String? = null
         @Volatile private var cachedFid: String? = null
@@ -57,6 +58,22 @@ class YacineTVProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Live)
 
     private val baseKey = "c!xZj+N9&G@Ev@vw"
+
+    // دوال الحفظ الدائم للدومين في ذاكرة الجهاز (Storage)
+    private fun getSavedApiUrl(): String {
+        return try {
+            getKey<String>(PREF_SAVED_DOMAIN_KEY) ?: cachedUrl
+        } catch (e: Exception) {
+            cachedUrl
+        }
+    }
+
+    private fun saveApiUrl(url: String) {
+        cachedUrl = url
+        try {
+            setKey(PREF_SAVED_DOMAIN_KEY, url)
+        } catch (e: Exception) { }
+    }
 
     private fun getUnsafeOkHttpClient(): OkHttpClient {
         return try {
@@ -141,7 +158,7 @@ class YacineTVProvider : MainAPI() {
             }
         }
 
-        if (token.isNullOrEmpty() || fid.isNullOrEmpty()) return@withContext cachedUrl
+        if (token.isNullOrEmpty() || fid.isNullOrEmpty()) return@withContext getSavedApiUrl()
 
         val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
             timeZone = TimeZone.getTimeZone("UTC")
@@ -177,18 +194,18 @@ class YacineTVProvider : MainAPI() {
                     val body = res.body?.string() ?: ""
                     val config = parseJson<RemoteConfigResponse>(body)
 
-                    if (config.state == "NO_CHANGE") {
-                        return@withContext cachedUrl
-                    } else if (config.state == "UPDATE") {
+                    if (config.state == "UPDATE") {
                         val newDomain = config.entries?.get("defaults")
                         if (!newDomain.isNullOrEmpty()) {
-                            cachedUrl = "https://$newDomain/api"
+                            val updatedUrl = "https://$newDomain/api"
+                            saveApiUrl(updatedUrl)
+                            return@withContext updatedUrl
                         }
                     }
                 }
             }
         } catch (e: Exception) { }
-        cachedUrl
+        getSavedApiUrl()
     }
 
     private fun decrypt(encryptedText: String, tHeader: String): String {
@@ -204,6 +221,8 @@ class YacineTVProvider : MainAPI() {
             ""
         }
     }
+
+    // دالة تنفيذ الطلب مع التحقق الصريح من كود 200
     private fun executeYacineRequest(baseUrl: String, path: String): YacineResponse? {
         val cleanBase = baseUrl.trimEnd('/')
         val cleanPath = path.trimStart('/')
@@ -217,7 +236,8 @@ class YacineTVProvider : MainAPI() {
                 .build()
 
             client.newCall(request).execute().use { response ->
-                if (response.isSuccessful) {
+                // إذا كان الرد جيداً (200 OK) فقط نقوم بقراءة البيانات
+                if (response.code == 200) {
                     val body = response.body?.string() ?: ""
                     val tHeader = response.header("t") ?: ""
 
@@ -228,22 +248,36 @@ class YacineTVProvider : MainAPI() {
                         }
                     }
                 }
-                null
+                null // أي كود آخر (403, 404, 500...) يعتبر رداً غير جيد
             }
         } catch (e: Exception) {
             null
         }
     }
+
     private suspend fun fetchYacine(path: String): YacineResponse? = withContext(Dispatchers.IO) {
-        val initialEndpoints = listOf(cachedUrl, fallbackUrl).distinct()
+        // 1. قراءة الدومين المحفوظ بشكل دائم
+        val currentSavedUrl = getSavedApiUrl()
+        val initialEndpoints = listOf(currentSavedUrl, fallbackUrl).distinct()
+
+        // 2. المحاولة أولاً بالدومين المحفوظ، وإذا أعاد 200 نرجع فوراً دون فايربيس
         for (baseUrl in initialEndpoints) {
             val res = executeYacineRequest(baseUrl, path)
-            if (res != null) return@withContext res
+            if (res != null) {
+                saveApiUrl(baseUrl)
+                return@withContext res
+            }
         }
+
+        // 3. فقط عندما تعيد الدومينات رداً غير جيد (ليس 200)، يتم استدعاء فايربيس
         val newDynamicUrl = syncDynamicApiUrl()
+
         if (!initialEndpoints.contains(newDynamicUrl)) {
             val res = executeYacineRequest(newDynamicUrl, path)
-            if (res != null) return@withContext res
+            if (res != null) {
+                saveApiUrl(newDynamicUrl) // حفظ الدومين الجديد بشكل دائم
+                return@withContext res
+            }
         }
 
         null
