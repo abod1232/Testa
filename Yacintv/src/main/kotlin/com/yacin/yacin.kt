@@ -52,8 +52,6 @@ class YacineTVProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Live)
 
     private val baseKey = "c!xZj+N9&G@Ev@vw"
-
-    // عميل OkHttpClient مخصص لتجاوز فحص شهادات SSL لمراقبة الحزم
     private fun getUnsafeOkHttpClient(): OkHttpClient {
         return try {
             val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
@@ -306,18 +304,12 @@ class YacineTVProvider : MainAPI() {
             val finalUrl = stream.url?.replace("www.elahmad.coo", "www.elahmad.com") ?: ""
             if (finalUrl.isNotEmpty()) {
                 val streamHeaders = mutableMapOf<String, String>()
-
-                // 1. نسخ ترويسات الاستجابة الأساسية
                 stream.headers?.forEach { (key, value) ->
                     if (value is String) streamHeaders[key] = value
                 }
-
-                // 2. ضمان وجود User-Agent المتطابق مع متصفح حديث
                 if (!streamHeaders.containsKey("User-Agent")) {
                     streamHeaders["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
                 }
-
-                // 3. إضافة ترويسات المحاكاة (Client Hints) المطلوبة لتفادي حظر Cloudflare 403
                 streamHeaders["sec-ch-ua"] = "\"Chromium\";v=\"91\", \" Not;A Brand\";v=\"99\""
                 streamHeaders["sec-ch-ua-mobile"] = "?0"
                 streamHeaders["sec-fetch-dest"] = "video"
