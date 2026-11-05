@@ -181,7 +181,7 @@ class Settings : BottomSheetDialogFragment() {
         }
         root.addView(
             createPlatformCard(
-                badgeIcon = "✈️",
+                badgeIcon = "📧",
                 badgeColor = "#229ED9",
                 titleText = "قناة التليجرام",
                 descText = "أحدث الإصدارات، الروابط والأخبار",
@@ -201,7 +201,7 @@ class Settings : BottomSheetDialogFragment() {
 
         root.addView(
             createPlatformCard(
-                badgeIcon = "🐙",
+                badgeIcon = "🔗",
                 badgeColor = "#313244",
                 titleText = "مشروع GitHub",
                 descText = "المستودع المفتوح، الإبلاغ عن مشاكل والمساهمة",
