@@ -24,7 +24,6 @@ class YacineSettings : BottomSheetDialogFragment() {
 
     override fun onStart() {
         super.onStart()
-        // جعل خلفية الـ BottomSheet شفافة لتظهر الحواف الدائرية بشكل جميل
         val dialog = dialog as? BottomSheetDialog
         dialog?.findViewById<View>(com.google.android.material.R.id.design_bottom_sheet)?.let { sheet ->
             sheet.background = null
@@ -37,8 +36,6 @@ class YacineSettings : BottomSheetDialogFragment() {
         savedInstanceState: Bundle?
     ): View {
         val ctx = requireContext()
-
-        // 1. الحاوية الرئيسية (Root Layout)
         val root = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(12), dp(20), dp(28))
@@ -51,8 +48,6 @@ class YacineSettings : BottomSheetDialogFragment() {
                 )
             }
         }
-
-        // 2. شريط السحب العلوي (Drag Handle)
         val handle = View(ctx).apply {
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#45475A"))
@@ -64,8 +59,6 @@ class YacineSettings : BottomSheetDialogFragment() {
             }
         }
         root.addView(handle)
-
-        // 3. العناوين
         val title = TextView(ctx).apply {
             text = "مجتمع ودعم الإضافة"
             textSize = 19f
@@ -83,8 +76,6 @@ class YacineSettings : BottomSheetDialogFragment() {
             setPadding(0, dp(4), 0, dp(22))
         }
         root.addView(subtitle)
-
-        // 4. دالة إنشاء بطاقة تفاعلية عصرية
         fun createPlatformCard(
             badgeIcon: String,
             badgeColor: String,
@@ -96,8 +87,6 @@ class YacineSettings : BottomSheetDialogFragment() {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(16), dp(14), dp(16), dp(14))
-
-                // خلفية بطاقة داكنة مع إطار وتأثير ضغط (Ripple)
                 val shape = GradientDrawable().apply {
                     setColor(Color.parseColor("#24273A"))
                     cornerRadius = dp(16).toFloat()
@@ -124,8 +113,6 @@ class YacineSettings : BottomSheetDialogFragment() {
                     bottomMargin = dp(12)
                 }
             }
-
-            // أيقونة المنصة (دائرة ملونة تحمل الرمز)
             val iconBadge = TextView(ctx).apply {
                 text = badgeIcon
                 textSize = 18f
@@ -139,8 +126,6 @@ class YacineSettings : BottomSheetDialogFragment() {
                 }
             }
             card.addView(iconBadge)
-
-            // نصوص البطاقة (العنوان والوصف)
             val textContainer = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
@@ -163,8 +148,6 @@ class YacineSettings : BottomSheetDialogFragment() {
             textContainer.addView(cardDesc)
 
             card.addView(textContainer)
-
-            // سهم الانتقال الصغير
             val arrow = TextView(ctx).apply {
                 text = "↗"
                 textSize = 17f
@@ -175,8 +158,6 @@ class YacineSettings : BottomSheetDialogFragment() {
 
             return card
         }
-
-        // 5. إضافة البطاقات الثلاث
         root.addView(
             createPlatformCard(
                 badgeIcon = "✈️",
