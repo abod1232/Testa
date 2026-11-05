@@ -1,5 +1,7 @@
 package com.yacin
 
+import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
+import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
