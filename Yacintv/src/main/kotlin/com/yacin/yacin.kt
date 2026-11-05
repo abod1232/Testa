@@ -9,6 +9,8 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import android.util.Base64
+import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
+import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
