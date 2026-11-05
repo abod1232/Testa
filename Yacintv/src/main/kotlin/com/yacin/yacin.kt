@@ -4,6 +4,8 @@ package com.yacin
 
 import android.content.Context
 import android.content.Intent
+import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
+import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
