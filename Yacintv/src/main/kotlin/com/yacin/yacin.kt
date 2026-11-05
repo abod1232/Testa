@@ -1,16 +1,30 @@
 package com.yacin
 
+import android.content.Context
+import android.content.Intent
+import android.graphics.Color
+import android.net.Uri
+import android.os.Bundle
+import android.util.Base64
+import android.view.Gravity
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.TextView
+import androidx.appcompat.app.AppCompatActivity
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
+import com.lagradost.cloudstream3.plugins.Plugin
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.newExtractorLink
-import android.util.Base64
-import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
-import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -34,6 +48,80 @@ import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
+
+// -----------------------------------------------------------------------------------------
+// 1. كلاس تسجيل الإضافة والإعدادات (Plugin & Settings Registration)
+// -----------------------------------------------------------------------------------------
+
+@CloudstreamPlugin
+class YacineTVPlugin : Plugin() {
+    override fun load(context: Context) {
+        // تسجيل البروفايدر الرئيسي
+        registerMainAPI(YacineTVProvider())
+
+        // فتح واجهة الإعدادات عند الضغط على إعدادات الإضافة
+        openSettings = { activityContext ->
+            (activityContext as? AppCompatActivity)?.let { activity ->
+                YacineSettings().show(activity.supportFragmentManager, "YacineSettings")
+            }
+        }
+    }
+}
+
+// نافذة منبثقة (Bottom Sheet) برمجية بالكامل لعرض الروابط
+class YacineSettings : BottomSheetDialogFragment() {
+    override fun onCreateView(
+        inflater: LayoutInflater,
+        container: ViewGroup?,
+        savedInstanceState: Bundle?
+    ): View {
+        val ctx = requireContext()
+
+        val layout = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 48, 48, 48)
+            gravity = Gravity.CENTER_HORIZONTAL
+        }
+
+        val title = TextView(ctx).apply {
+            text = "روابط الدعم والمجتمع"
+            textSize = 20f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, 32)
+        }
+        layout.addView(title)
+
+        fun createBtn(titleText: String, url: String): Button {
+            return Button(ctx).apply {
+                text = titleText
+                setOnClickListener {
+                    try {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                        startActivity(intent)
+                    } catch (e: Exception) { }
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    setMargins(0, 12, 0, 12)
+                }
+            }
+        }
+
+        // الأزرار المطلوبة
+        layout.addView(createBtn("قناة التليجرام", "https://t.me/cs3ara"))
+        layout.addView(createBtn("سيرفر الديسكورد", "https://discord.gg/xY63qaQRw"))
+        layout.addView(createBtn("مشروع GitHub", "https://github.com/Abodabodd/re-3arabi"))
+
+        return layout
+    }
+}
+
+// -----------------------------------------------------------------------------------------
+// 2. كلاس البروفايدر الرئيسي (Provider Implementation)
+// -----------------------------------------------------------------------------------------
 
 class YacineTVProvider : MainAPI() {
     companion object {
@@ -60,6 +148,7 @@ class YacineTVProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Live)
 
     private val baseKey = "c!xZj+N9&G@Ev@vw"
+
     private fun getSavedApiUrl(): String {
         return try {
             getKey<String>(PREF_SAVED_DOMAIN_KEY) ?: cachedUrl
@@ -221,6 +310,7 @@ class YacineTVProvider : MainAPI() {
             ""
         }
     }
+
     private fun executeYacineRequest(baseUrl: String, path: String): YacineResponse? {
         val cleanBase = baseUrl.trimEnd('/')
         val cleanPath = path.trimStart('/')
@@ -245,7 +335,7 @@ class YacineTVProvider : MainAPI() {
                         }
                     }
                 }
-                null // أي كود آخر (403, 404, 500...) يعتبر رداً غير جيد
+                null
             }
         } catch (e: Exception) {
             null
@@ -255,6 +345,7 @@ class YacineTVProvider : MainAPI() {
     private suspend fun fetchYacine(path: String): YacineResponse? = withContext(Dispatchers.IO) {
         val currentSavedUrl = getSavedApiUrl()
         val initialEndpoints = listOf(currentSavedUrl, fallbackUrl).distinct()
+
         for (baseUrl in initialEndpoints) {
             val res = executeYacineRequest(baseUrl, path)
             if (res != null) {
@@ -262,12 +353,13 @@ class YacineTVProvider : MainAPI() {
                 return@withContext res
             }
         }
+
         val newDynamicUrl = syncDynamicApiUrl()
 
         if (!initialEndpoints.contains(newDynamicUrl)) {
             val res = executeYacineRequest(newDynamicUrl, path)
             if (res != null) {
-                saveApiUrl(newDynamicUrl) // حفظ الدومين الجديد بشكل دائم
+                saveApiUrl(newDynamicUrl)
                 return@withContext res
             }
         }
