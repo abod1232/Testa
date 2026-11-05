@@ -4,11 +4,22 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.Dialog
 import android.content.Context
+import android.content.Intent
+import android.content.res.ColorStateList
+import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
+import android.net.Uri
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowManager
@@ -16,8 +27,26 @@ import android.webkit.CookieManager
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
+import android.webkit.ConsoleMessage
+import android.webkit.SslErrorHandler
+import android.widget.FrameLayout
+import android.widget.TextView
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.Toast
+
+import androidx.appcompat.app.AppCompatActivity
+
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
+import com.lagradost.cloudstream3.newMovieSearchResponse
+import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
+import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
+
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -26,39 +55,23 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+
 import okhttp3.CookieJar
 import okhttp3.FormBody
 import okhttp3.Request as OkRequest
+
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+
 import java.net.URLEncoder
-import kotlin.coroutines.resume
-import kotlin.coroutines.suspendCoroutine
-import android.widget.FrameLayout
-import android.widget.TextView
-import android.graphics.Color
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
-import android.net.Uri
-import android.widget.LinearLayout
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.suspendCancellableCoroutine
 import java.net.HttpURLConnection
 import java.net.URL
-import android.webkit.JavascriptInterface
-import android.widget.ScrollView
-import android.webkit.WebChromeClient
-import android.view.View
-import android.webkit.ConsoleMessage
-import android.graphics.Bitmap
 import java.io.InputStream
-import android.webkit.SslErrorHandler
-import android.widget.Toast
-import com.lagradost.cloudstream3.newMovieSearchResponse
-import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
-import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
 
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 class FASELHD(private val context: Context) : MainAPI() {
     override var name = "FASELHD"
     override val hasQuickSearch = true
