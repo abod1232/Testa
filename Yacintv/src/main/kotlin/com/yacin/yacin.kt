@@ -17,6 +17,11 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.net.InetSocketAddress
+import java.net.Socket
+import java.net.URI
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.text.SimpleDateFormat
@@ -24,6 +29,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import java.util.concurrent.TimeUnit
+import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
@@ -52,6 +58,7 @@ class YacineTVProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Live)
 
     private val baseKey = "c!xZj+N9&G@Ev@vw"
+
     private fun getUnsafeOkHttpClient(): OkHttpClient {
         return try {
             val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
@@ -285,6 +292,60 @@ class YacineTVProvider : MainAPI() {
         }
     }
 
+    // دالة لتجاوز حماية Cloudflare والحصول على رابط البث الفعلي (301 Location)
+    private fun resolveDirectStreamUrl(rawUrl: String, rawReferer: String, userAgent: String): String {
+        if (!rawUrl.contains("varie-redirect.com")) return rawUrl
+
+        return try {
+            val uri = URI(rawUrl)
+            val host = uri.host ?: return rawUrl
+            val isHttps = rawUrl.startsWith("https://", ignoreCase = true)
+            val port = if (uri.port != -1) uri.port else (if (isHttps) 443 else 80)
+            val path = (if (uri.rawPath.isNullOrEmpty()) "/" else uri.rawPath) +
+                    (if (uri.rawQuery != null) "?${uri.rawQuery}" else "")
+
+            val socket = if (isHttps) {
+                HttpsURLConnection.getDefaultSSLSocketFactory().createSocket(host, port)
+            } else {
+                Socket(host, port)
+            }
+            socket.soTimeout = 8000
+
+            // إرسال الحزمة بصيغتها الدقيقة الخام دون أي تلاعب من أندرويد في الحروف المخفية
+            val rawRequest = "GET $path HTTP/1.1\r\n" +
+                    "Host: $host\r\n" +
+                    "User-Agent: $userAgent\r\n" +
+                    "Referer: $rawReferer\r\n" +
+                    "sec-ch-ua: \"Chromium\";v=\"91\", \" Not;A Brand\";v=\"99\"\r\n" +
+                    "sec-ch-ua-mobile: ?0\r\n" +
+                    "sec-fetch-mode: navigate\r\n" +
+                    "sec-fetch-user: ?1\r\n" +
+                    "accept: */*\r\n" +
+                    "sec-fetch-dest: video\r\n" +
+                    "Connection: close\r\n\r\n"
+
+            socket.getOutputStream().write(rawRequest.toByteArray(Charsets.UTF_8))
+            socket.getOutputStream().flush()
+
+            val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
+            var line: String?
+            var location: String? = null
+
+            while (reader.readLine().also { line = it } != null) {
+                if (line.isNullOrEmpty()) break // نهاية ترويسات الرد
+                if (line!!.startsWith("Location:", ignoreCase = true)) {
+                    location = line!!.substring(9).trim()
+                    break
+                }
+            }
+            socket.close()
+
+            location ?: rawUrl
+        } catch (e: Exception) {
+            rawUrl
+        }
+    }
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -301,32 +362,30 @@ class YacineTVProvider : MainAPI() {
         val streams = responseData?.data ?: return@withContext false
 
         streams.forEachIndexed { index, stream ->
-            val finalUrl = stream.url?.replace("www.elahmad.coo", "www.elahmad.com") ?: ""
-            if (finalUrl.isNotEmpty()) {
+            val rawUrl = stream.url?.replace("www.elahmad.coo", "www.elahmad.com") ?: ""
+            if (rawUrl.isNotEmpty()) {
                 val streamHeaders = mutableMapOf<String, String>()
+
                 stream.headers?.forEach { (key, value) ->
                     if (value is String) streamHeaders[key] = value
                 }
-                if (!streamHeaders.containsKey("User-Agent")) {
-                    streamHeaders["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
-                }
-                streamHeaders["sec-ch-ua"] = "\"Chromium\";v=\"91\", \" Not;A Brand\";v=\"99\""
-                streamHeaders["sec-ch-ua-mobile"] = "?0"
-                streamHeaders["sec-fetch-dest"] = "video"
-                streamHeaders["sec-fetch-mode"] = "navigate"
-                streamHeaders["sec-fetch-user"] = "?1"
-                streamHeaders["accept"] = "*/*"
-                streamHeaders["Connection"] = "Keep-Alive"
+
+                val userAgent = streamHeaders["User-Agent"]
+                    ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+                val referer = streamHeaders["Referer"] ?: "http://yacinneeee.live⁠‍⁠ㅤ‌⁠‍⁠"
+
+                // حل الرابط المباشر لتخطي خطوة التحويل الوسيطة المحظورة
+                val finalStreamUrl = resolveDirectStreamUrl(rawUrl, referer, userAgent)
 
                 callback.invoke(
                     newExtractorLink(
                         this@YacineTVProvider.name,
                         stream.name ?: "Server ${index + 1}",
-                        finalUrl
+                        finalStreamUrl
                     ) {
                         this.headers = streamHeaders
                         this.quality = Qualities.Unknown.value
-                        this.referer = streamHeaders["Referer"] ?: ""
+                        this.referer = referer
                     }
                 )
             }
