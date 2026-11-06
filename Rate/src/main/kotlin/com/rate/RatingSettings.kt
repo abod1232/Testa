@@ -81,7 +81,7 @@ object RatingSettings {
     ): Int? {
         return requestSemaphore.withPermit {
             try {
-                delay(120)
+                delay(0)
 
                 val repository = getRepository(pluginUrl)
                 val namespace = android.net.Uri.encode("cs-$repository")
