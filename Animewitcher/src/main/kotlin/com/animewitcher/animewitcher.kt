@@ -2,8 +2,7 @@ package com.animewitcher
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONObject
 import okhttp3.MediaType.Companion.toMediaType
@@ -533,57 +532,63 @@ class AnimeWitcherProvider : MainAPI() {
                     }
             )
 
-            logd("⚡ Processing ${sortedServers.size} servers in parallel with apmap...")
-            sortedServers.apmap { server ->
-                try {
-                    val finalUrl = resolveServerModel(server)
-                    if (!finalUrl.isNullOrBlank() && !finalUrl.trim().startsWith("<")) {
-                        val serverName = server.name ?: "Server"
+            logd("⚡ Processing ${sortedServers.size} servers in parallel with coroutineScope...")
 
-                        when {
-                            serverName.equals("PD", ignoreCase = true) -> {
-                                try {
-                                    loadExtractor(finalUrl, mainUrl, subtitleCallback, callback)
-                                } catch (e: Exception) {
-                                    logd("Error invoking loadExtractor for PD: ${e.message}")
-                                }
-                            }
-                            serverName.uppercase(Locale.getDefault()) == "KF" -> {
-                                callback(
-                                    newExtractorLink(
-                                        source = name,
-                                        name = serverName,
-                                        url = finalUrl,
-                                    ) {
-                                        referer = "https://krakenfiles.com/"
-                                        quality = getQualityFromName(server.quality)
+            // تشغيل آمن وغير محظور (Non-blocking) بدون أي Deprecation
+            coroutineScope {
+                sortedServers.map { server ->
+                    async {
+                        try {
+                            val finalUrl = resolveServerModel(server)
+                            if (!finalUrl.isNullOrBlank() && !finalUrl.trim().startsWith("<")) {
+                                val serverName = server.name ?: "Server"
+
+                                when {
+                                    serverName.equals("PD", ignoreCase = true) -> {
+                                        try {
+                                            loadExtractor(finalUrl, mainUrl, subtitleCallback, callback)
+                                        } catch (e: Exception) {
+                                            logd("Error invoking loadExtractor for PD: ${e.message}")
+                                        }
                                     }
-                                )
-                            }
-                            else -> {
-                                try {
-                                    val handled = loadExtractor(finalUrl, mainUrl, subtitleCallback, callback)
-                                    if (!handled) {
+                                    serverName.uppercase(Locale.getDefault()) == "KF" -> {
                                         callback(
                                             newExtractorLink(
                                                 source = name,
-                                                name = "$serverName ${server.quality ?: ""}".trim(),
+                                                name = serverName,
                                                 url = finalUrl,
                                             ) {
-                                                this.referer = mainUrl
-                                                this.quality = getQualityFromName(server.quality)
+                                                referer = "https://krakenfiles.com/"
+                                                quality = getQualityFromName(server.quality)
                                             }
                                         )
                                     }
-                                } catch (e: Exception) {
-                                    logd("Error resolving $serverName: ${e.message}")
+                                    else -> {
+                                        try {
+                                            val handled = loadExtractor(finalUrl, mainUrl, subtitleCallback, callback)
+                                            if (!handled) {
+                                                callback(
+                                                    newExtractorLink(
+                                                        source = name,
+                                                        name = "$serverName ${server.quality ?: ""}".trim(),
+                                                        url = finalUrl,
+                                                    ) {
+                                                        this.referer = mainUrl
+                                                        this.quality = getQualityFromName(server.quality)
+                                                    }
+                                                )
+                                            }
+                                        } catch (e: Exception) {
+                                            logd("Error resolving $serverName: ${e.message}")
+                                        }
+                                    }
                                 }
                             }
+                        } catch (e: Exception) {
+                            logd("Exception on server ${server.name}: ${e.message}")
                         }
                     }
-                } catch (e: Exception) {
-                    logd("Exception on server ${server.name}: ${e.message}")
-                }
+                }.awaitAll()
             }
 
             logd("====== LOADLINKS END ======")
