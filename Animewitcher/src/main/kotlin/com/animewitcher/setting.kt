@@ -1,4 +1,4 @@
-package com.yacin
+package com.animewitcher
 
 import android.content.Context
 import android.content.Intent
