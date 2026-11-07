@@ -20,8 +20,6 @@ class AnimeWitcherProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie)
     override var lang = "ar"
     override val hasMainPage = true
-
-    // تم تحديث App ID للنسخة النشطة حالياً لمنع خطأ الـ DNS الأولي
     @Volatile
     private var algoliaAppId = "TVNESH8OZY"
     @Volatile
@@ -427,8 +425,6 @@ class AnimeWitcherProvider : MainAPI() {
             null
         }
     }
-
-    // تم تحديث الدالة لتجنب إسقاط أي سيرفر إطلاقاً
     private suspend fun resolveServerModel(server: ServerModel): String? = withContext(Dispatchers.IO) {
         val name = server.name ?: return@withContext null
         val link = server.link ?: return@withContext null
@@ -486,14 +482,12 @@ class AnimeWitcherProvider : MainAPI() {
                     return@withContext server.originalLink ?: link
                 }
                 else -> {
-                    // إذا كان السيرفر يحتاج كلمات دلالية وموجودة في الإعدادات نطبقها
                     if (words?.word1 != null && words.word2 != null) {
                         val res = try { app.get(link).text } catch (e: Exception) { "" }
                         if (res.isNotBlank()) {
                             return@withContext res.substringAfter(words.word1!!).substringBefore(words.word2!!).replace("amp;", "")
                         }
                     }
-                    // إذا لم توجد كلمات دلالية، نمرر الرابط الأصلي بدلاً من إرجاع null
                     return@withContext link
                 }
             }
@@ -579,10 +573,7 @@ class AnimeWitcherProvider : MainAPI() {
                     )
                 } else {
                     try {
-                        // نحاول تشغيل الرابط عبر مستخرجات CloudStream المدمجة
                         val handled = loadExtractor(finalUrl, mainUrl, subtitleCallback, callback)
-                        
-                        // في حال لم يتعرف CloudStream على الدومين (مثل SF)، يتم إرساله كرابط تشغيل مباشر
                         if (!handled) {
                             callback(
                                 newExtractorLink(
