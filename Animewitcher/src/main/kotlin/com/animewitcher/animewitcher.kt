@@ -533,8 +533,6 @@ class AnimeWitcherProvider : MainAPI() {
             )
 
             logd("⚡ Processing ${sortedServers.size} servers in parallel with coroutineScope...")
-
-            // تشغيل آمن وغير محظور (Non-blocking) بدون أي Deprecation
             coroutineScope {
                 sortedServers.map { server ->
                     async {
