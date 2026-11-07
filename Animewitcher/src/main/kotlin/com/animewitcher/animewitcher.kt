@@ -20,8 +20,10 @@ class AnimeWitcherProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie)
     override var lang = "ar"
     override val hasMainPage = true
+
+    // تم تحديث App ID للنسخة النشطة حالياً لمنع خطأ الـ DNS الأولي
     @Volatile
-    private var algoliaAppId = "D8LH9I7ZL7"
+    private var algoliaAppId = "TVNESH8OZY"
     @Volatile
     private var algoliaApiKey = "b56c01ef52540ef334bcdbaa00ded9e4"
     @Volatile
@@ -46,8 +48,20 @@ class AnimeWitcherProvider : MainAPI() {
         val number: Int,
         val imageUrl: String? = null
     )
-    data class ServerModel(val name: String?, val link: String?, val quality: String?, val originalLink: String?, val openBrowser: Boolean)
-    data class ServerWords(val name: String, val word1: String?, val word2: String?, val word3: String?, val word4: String?)
+    data class ServerModel(
+        val name: String?,
+        val link: String?,
+        val quality: String?,
+        val originalLink: String?,
+        val openBrowser: Boolean
+    )
+    data class ServerWords(
+        val name: String,
+        val word1: String?,
+        val word2: String?,
+        val word3: String?,
+        val word4: String?
+    )
 
     private fun logd(msg: String) {
         println("[AnimeWitcherLog] $msg")
@@ -58,6 +72,7 @@ class AnimeWitcherProvider : MainAPI() {
     private fun getQualityAsInt(quality: String?): Int {
         return quality?.filter { it.isDigit() }?.toIntOrNull() ?: 0
     }
+
     private suspend fun postAlgoliaQuery(index: String, body: okhttp3.RequestBody): String {
         val startTime = System.currentTimeMillis()
         return try {
@@ -78,6 +93,7 @@ class AnimeWitcherProvider : MainAPI() {
             response.text
         }
     }
+
     private suspend fun getAlgoliaObjectByPost(index: String, objectId: String): JSONObject? {
         val startTime = System.currentTimeMillis()
         logd("⏱️ [Algolia Object] Starting POST query for ObjectID: '$objectId'")
@@ -103,6 +119,7 @@ class AnimeWitcherProvider : MainAPI() {
             null
         }
     }
+
     private suspend fun refreshAlgoliaKeys() {
         try {
             val url = firestoreDocUrl("Settings/constants")
@@ -145,6 +162,7 @@ class AnimeWitcherProvider : MainAPI() {
             logd("❌ [Firestore Keys] Failed to refresh keys. Error: ${e.message}")
         }
     }
+
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse = withContext(Dispatchers.IO) {
         val indexName = "recent"
         val pageParam = (page - 1).coerceAtLeast(0)
@@ -159,7 +177,6 @@ class AnimeWitcherProvider : MainAPI() {
         val body = payload.toString().toRequestBody("application/json; charset=UTF-8".toMediaType())
 
         val res = postAlgoliaQuery(indexName, body)
-
         val json = try { JSONObject(res) } catch (e: Exception) { JSONObject() }
         val hits = json.optJSONArray("hits") ?: JSONArray()
 
@@ -189,7 +206,6 @@ class AnimeWitcherProvider : MainAPI() {
         val body = payload.toString().toRequestBody("application/json; charset=UTF-8".toMediaType())
 
         val res = postAlgoliaQuery(indexName, body)
-
         val json = try { JSONObject(res) } catch (e: Exception) { JSONObject() }
         val hits = json.optJSONArray("hits") ?: JSONArray()
 
@@ -264,6 +280,7 @@ class AnimeWitcherProvider : MainAPI() {
             this.tags = tags
         }
     }
+
     private suspend fun fetchEpisodes(animeId: String): List<EpisodeInfo> = withContext(Dispatchers.IO) {
         val startTime = System.currentTimeMillis()
         val encodedAnimeId = URLEncoder.encode(animeId, "utf-8").replace("+", "%20")
@@ -316,6 +333,7 @@ class AnimeWitcherProvider : MainAPI() {
 
     private fun firestoreDocUrl(path: String): String =
         "https://firestore.googleapis.com/v1/projects/$FIREBASE_PROJECT_ID/databases/(default)/documents/$path?key=$firebaseApiKey"
+
     private suspend fun fetchServersForEpisode(animeId: String, episodeId: String): List<ServerModel> = withContext(Dispatchers.IO) {
         val encodedAnimeId = URLEncoder.encode(animeId, "utf-8").replace("+", "%20")
         val encodedEpisodeId = URLEncoder.encode(episodeId, "utf-8").replace("+", "%20")
@@ -410,6 +428,7 @@ class AnimeWitcherProvider : MainAPI() {
         }
     }
 
+    // تم تحديث الدالة لتجنب إسقاط أي سيرفر إطلاقاً
     private suspend fun resolveServerModel(server: ServerModel): String? = withContext(Dispatchers.IO) {
         val name = server.name ?: return@withContext null
         val link = server.link ?: return@withContext null
@@ -417,13 +436,13 @@ class AnimeWitcherProvider : MainAPI() {
 
         try {
             when (name.uppercase(Locale.getDefault())) {
-                "MF", "ST", "MG" -> {
+                "MF", "MF2", "ST", "MG", "SF" -> {
                     return@withContext link
                 }
                 "KF" -> {
-                    if (words?.word1 == null || words.word2 == null) return@withContext null
+                    if (words?.word1 == null || words.word2 == null) return@withContext link
                     val res = try { app.get(link).text } catch (e: Exception) { "" }
-                    if (res.isBlank()) return@withContext null
+                    if (res.isBlank()) return@withContext link
                     return@withContext "https://${res.substringAfter(words.word1!!).substringBefore(words.word2!!).replace("amp;", "")}"
                 }
                 "PD" -> {
@@ -447,7 +466,7 @@ class AnimeWitcherProvider : MainAPI() {
                     return@withContext link
                 }
                 "VT" -> {
-                    if (words?.word1 == null || words.word2 == null || words.word3 == null || words.word4 == null) return@withContext null
+                    if (words?.word1 == null || words.word2 == null || words.word3 == null || words.word4 == null) return@withContext link
                     val res1 = try { app.get(link).text } catch (e: Exception) { "" }
                     val part1 = res1.substringAfter(words.word1!!).substringBefore(words.word2!!).replace("\">", "").trim()
                     val newLink = "https://vidtube.one$part1"
@@ -455,10 +474,10 @@ class AnimeWitcherProvider : MainAPI() {
                     return@withContext "https://${res2.substringAfter(words.word3!!).substringBefore(words.word4!!)}"
                 }
                 "AR" -> {
-                    return@withContext getFinalRedirectUrl(link)
+                    return@withContext getFinalRedirectUrl(link) ?: link
                 }
                 "WC" -> {
-                    return@withContext getFinalDownloadUrl(link)
+                    return@withContext getFinalDownloadUrl(link) ?: link
                 }
                 "BU" -> {
                     return@withContext link
@@ -467,15 +486,20 @@ class AnimeWitcherProvider : MainAPI() {
                     return@withContext server.originalLink ?: link
                 }
                 else -> {
-                    if (words?.word1 == null || words.word2 == null) return@withContext null
-                    val res = try { app.get(link).text } catch (e: Exception) { "" }
-                    if (res.isBlank()) return@withContext null
-                    return@withContext res.substringAfter(words.word1!!).substringBefore(words.word2!!).replace("amp;", "")
+                    // إذا كان السيرفر يحتاج كلمات دلالية وموجودة في الإعدادات نطبقها
+                    if (words?.word1 != null && words.word2 != null) {
+                        val res = try { app.get(link).text } catch (e: Exception) { "" }
+                        if (res.isNotBlank()) {
+                            return@withContext res.substringAfter(words.word1!!).substringBefore(words.word2!!).replace("amp;", "")
+                        }
+                    }
+                    // إذا لم توجد كلمات دلالية، نمرر الرابط الأصلي بدلاً من إرجاع null
+                    return@withContext link
                 }
             }
         } catch (e: Exception) {
             e.printStackTrace()
-            return@withContext null
+            return@withContext link
         }
     }
 
@@ -534,7 +558,6 @@ class AnimeWitcherProvider : MainAPI() {
                 val serverName = server.name ?: "Server"
 
                 if (serverName.equals("PD", ignoreCase = true)) {
-
                     try {
                         loadExtractor(finalUrl, mainUrl, subtitleCallback, callback)
                     } catch (e: Exception) {
@@ -556,7 +579,22 @@ class AnimeWitcherProvider : MainAPI() {
                     )
                 } else {
                     try {
-                        loadExtractor(finalUrl, mainUrl, subtitleCallback, callback)
+                        // نحاول تشغيل الرابط عبر مستخرجات CloudStream المدمجة
+                        val handled = loadExtractor(finalUrl, mainUrl, subtitleCallback, callback)
+                        
+                        // في حال لم يتعرف CloudStream على الدومين (مثل SF)، يتم إرساله كرابط تشغيل مباشر
+                        if (!handled) {
+                            callback(
+                                newExtractorLink(
+                                    source = name,
+                                    name = "$serverName ${server.quality ?: ""}".trim(),
+                                    url = finalUrl,
+                                ) {
+                                    this.referer = mainUrl
+                                    this.quality = getQualityFromName(server.quality)
+                                }
+                            )
+                        }
                     } catch (e: Exception) {
                         logd("Error invoking loadExtractor for $serverName: ${e.message}")
                     }
