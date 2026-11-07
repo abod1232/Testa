@@ -534,8 +534,6 @@ class AnimeWitcherProvider : MainAPI() {
             )
 
             logd("⚡ Processing ${sortedServers.size} servers in parallel...")
-
-            // تشغيل جميع السيرفرات في نفس اللحظة بالتوازي (Async / AwaitAll)
             sortedServers.map { server ->
                 async(Dispatchers.IO) {
                     try {
@@ -566,10 +564,8 @@ class AnimeWitcherProvider : MainAPI() {
                             }
                             else -> {
                                 try {
-                                    // محاولة الاستخراج عبر مشغلات Cloudstream
                                     val handled = loadExtractor(finalUrl, mainUrl, subtitleCallback, callback)
                                     if (!handled) {
-                                        // إذا لم يتعرف التطبيق على المستخرج يُرسله كرابط مباشر
                                         callback(
                                             newExtractorLink(
                                                 source = name,
