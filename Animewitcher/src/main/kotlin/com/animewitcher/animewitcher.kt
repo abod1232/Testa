@@ -38,8 +38,7 @@ class AnimeWitcherProvider : MainAPI() {
     }
 
     private val FIREBASE_PROJECT_ID = "animewitcher-1c66d"
-    private val serverWordsCache = HashMap<String, ServerWords>()
-
+    private val serverWordsCache = java.util.concurrent.ConcurrentHashMap<String, ServerWords>()
     data class EpisodeInfo(
         val id: String,
         val name: String?,
@@ -503,7 +502,7 @@ class AnimeWitcherProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean = withContext(Dispatchers.IO) {
-        logd("====== LOADLINKS START ======")
+        logd("====== LOADLINKS START (PARALLEL) ======")
         try {
             val parts = data.split('|')
             if (parts.size < 2) return@withContext false
@@ -521,76 +520,77 @@ class AnimeWitcherProvider : MainAPI() {
 
             val animeId = rawAnimeId
             val servers = fetchServersForEpisode(animeId, episodeId)
+            if (servers.isEmpty()) return@withContext false
 
-            val sortedServers = servers.sortedWith(compareByDescending<ServerModel> { getQualityAsInt(it.quality) }
-                .thenBy {
-                    when(it.name?.uppercase(Locale.getDefault())) {
-                        "PD" -> 0
-                        "PD EU TEST" -> 1
-                        else -> 2
+            val sortedServers = servers.sortedWith(
+                compareByDescending<ServerModel> { getQualityAsInt(it.quality) }
+                    .thenBy {
+                        when (it.name?.uppercase(Locale.getDefault())) {
+                            "PD" -> 0
+                            "PD EU TEST" -> 1
+                            else -> 2
+                        }
                     }
-                }
             )
 
-            logd("Sorted ${sortedServers.size} servers for resolution.")
+            logd("⚡ Processing ${sortedServers.size} servers in parallel...")
 
-            val resolvedList = mutableListOf<Pair<ServerModel, String>>()
-            for (server in sortedServers) {
-                try {
-                    val resolvedUrl = resolveServerModel(server)
-                    if (!resolvedUrl.isNullOrBlank()) {
-                        resolvedList.add(Pair(server, resolvedUrl))
-                    }
-                } catch (e: Exception) {
-                    logd("Exception resolving ${server.name}: ${e.message}")
-                }
-            }
-
-            for ((server, finalUrl) in resolvedList) {
-                if (finalUrl.trim().startsWith("<")) continue
-
-                val serverName = server.name ?: "Server"
-
-                if (serverName.equals("PD", ignoreCase = true)) {
+            // تشغيل جميع السيرفرات في نفس اللحظة بالتوازي (Async / AwaitAll)
+            sortedServers.map { server ->
+                async(Dispatchers.IO) {
                     try {
-                        loadExtractor(finalUrl, mainUrl, subtitleCallback, callback)
-                    } catch (e: Exception) {
-                        logd("Error invoking loadExtractor for PD: ${e.message}")
-                    }
-                    continue
-                }
+                        val finalUrl = resolveServerModel(server)
+                        if (finalUrl.isNullOrBlank() || finalUrl.trim().startsWith("<")) return@async
 
-                if (serverName.uppercase(Locale.getDefault()) == "KF") {
-                    callback(
-                        newExtractorLink(
-                            source = name,
-                            name = serverName,
-                            url = finalUrl,
-                        ) {
-                            referer = "https://krakenfiles.com/"
-                            quality = getQualityFromName(server.quality)
-                        }
-                    )
-                } else {
-                    try {
-                        val handled = loadExtractor(finalUrl, mainUrl, subtitleCallback, callback)
-                        if (!handled) {
-                            callback(
-                                newExtractorLink(
-                                    source = name,
-                                    name = "$serverName ${server.quality ?: ""}".trim(),
-                                    url = finalUrl,
-                                ) {
-                                    this.referer = mainUrl
-                                    this.quality = getQualityFromName(server.quality)
+                        val serverName = server.name ?: "Server"
+
+                        when {
+                            serverName.equals("PD", ignoreCase = true) -> {
+                                try {
+                                    loadExtractor(finalUrl, mainUrl, subtitleCallback, callback)
+                                } catch (e: Exception) {
+                                    logd("Error invoking loadExtractor for PD: ${e.message}")
                                 }
-                            )
+                            }
+                            serverName.uppercase(Locale.getDefault()) == "KF" -> {
+                                callback(
+                                    newExtractorLink(
+                                        source = name,
+                                        name = serverName,
+                                        url = finalUrl,
+                                    ) {
+                                        referer = "https://krakenfiles.com/"
+                                        quality = getQualityFromName(server.quality)
+                                    }
+                                )
+                            }
+                            else -> {
+                                try {
+                                    // محاولة الاستخراج عبر مشغلات Cloudstream
+                                    val handled = loadExtractor(finalUrl, mainUrl, subtitleCallback, callback)
+                                    if (!handled) {
+                                        // إذا لم يتعرف التطبيق على المستخرج يُرسله كرابط مباشر
+                                        callback(
+                                            newExtractorLink(
+                                                source = name,
+                                                name = "$serverName ${server.quality ?: ""}".trim(),
+                                                url = finalUrl,
+                                            ) {
+                                                this.referer = mainUrl
+                                                this.quality = getQualityFromName(server.quality)
+                                            }
+                                        )
+                                    }
+                                } catch (e: Exception) {
+                                    logd("Error resolving $serverName: ${e.message}")
+                                }
+                            }
                         }
                     } catch (e: Exception) {
-                        logd("Error invoking loadExtractor for $serverName: ${e.message}")
+                        logd("Exception on server ${server.name}: ${e.message}")
                     }
                 }
-            }
+            }.awaitAll() // ينتظر حتى تنتهي جميع المهام المتوازية
 
             logd("====== LOADLINKS END ======")
             return@withContext true
