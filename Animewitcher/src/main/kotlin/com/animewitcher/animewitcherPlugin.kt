@@ -24,7 +24,6 @@ import com.lagradost.cloudstream3.plugins.Plugin
 @CloudstreamPlugin
 class animewitcherPlugin : Plugin() {
     override fun load(context: Context) {
-        // تم تصحيح الاستدعاء بحذف context
         registerMainAPI(AnimeWitcherProvider())
 
         openSettings = { activityContext ->
