@@ -534,8 +534,6 @@ class AnimeWitcherProvider : MainAPI() {
             )
 
             logd("⚡ Processing ${sortedServers.size} servers in parallel with apmap...")
-
-            // تشغيل جميع السيرفرات بالتوازي عبر الدالة المدمجة apmap
             sortedServers.apmap { server ->
                 try {
                     val finalUrl = resolveServerModel(server)
@@ -565,7 +563,6 @@ class AnimeWitcherProvider : MainAPI() {
                             else -> {
                                 try {
                                     val handled = loadExtractor(finalUrl, mainUrl, subtitleCallback, callback)
-                                    // إذا لم يكن هناك مستخرج جاهز، يتم تمريره كرابط تشغيل مباشر
                                     if (!handled) {
                                         callback(
                                             newExtractorLink(
