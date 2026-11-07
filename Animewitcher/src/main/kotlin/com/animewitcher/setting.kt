@@ -18,7 +18,7 @@ import android.widget.TextView
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 
-class YacineSettings : BottomSheetDialogFragment() {
+class Settings : BottomSheetDialogFragment() {
 
     private fun dp(dp: Int): Int = (dp * resources.displayMetrics.density + 0.5f).toInt()
 
@@ -36,14 +36,15 @@ class YacineSettings : BottomSheetDialogFragment() {
         savedInstanceState: Bundle?
     ): View {
         val ctx = requireContext()
+
         val root = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(12), dp(20), dp(28))
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#181926")) // خلفية داكنة حديثة
                 cornerRadii = floatArrayOf(
-                    dp(24).toFloat(), dp(24).toFloat(), // زاوية أعلى يسار
-                    dp(24).toFloat(), dp(24).toFloat(), // زاوية أعلى يمين
+                    dp(24).toFloat(), dp(24).toFloat(),
+                    dp(24).toFloat(), dp(24).toFloat(),
                     0f, 0f, 0f, 0f
                 )
             }
@@ -87,6 +88,7 @@ class YacineSettings : BottomSheetDialogFragment() {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(16), dp(14), dp(16), dp(14))
+
                 val shape = GradientDrawable().apply {
                     setColor(Color.parseColor("#24273A"))
                     cornerRadius = dp(16).toFloat()
@@ -113,6 +115,7 @@ class YacineSettings : BottomSheetDialogFragment() {
                     bottomMargin = dp(12)
                 }
             }
+
             val iconBadge = TextView(ctx).apply {
                 text = badgeIcon
                 textSize = 18f
@@ -126,6 +129,7 @@ class YacineSettings : BottomSheetDialogFragment() {
                 }
             }
             card.addView(iconBadge)
+
             val textContainer = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
@@ -148,6 +152,7 @@ class YacineSettings : BottomSheetDialogFragment() {
             textContainer.addView(cardDesc)
 
             card.addView(textContainer)
+
             val arrow = TextView(ctx).apply {
                 text = "↗"
                 textSize = 17f
@@ -170,7 +175,7 @@ class YacineSettings : BottomSheetDialogFragment() {
 
         root.addView(
             createPlatformCard(
-                badgeIcon = "☄️",
+                badgeIcon = "💬",
                 badgeColor = "#5865F2",
                 titleText = "سيرفر الديسكورد",
                 descText = "نقاشات المجتمع، الدعم الفني والاقتراحات",
