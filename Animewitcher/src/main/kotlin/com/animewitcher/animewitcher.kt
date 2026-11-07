@@ -533,13 +533,13 @@ class AnimeWitcherProvider : MainAPI() {
                     }
             )
 
-            logd("⚡ Processing ${sortedServers.size} servers in parallel...")
-            sortedServers.map { server ->
-                async(Dispatchers.IO) {
-                    try {
-                        val finalUrl = resolveServerModel(server)
-                        if (finalUrl.isNullOrBlank() || finalUrl.trim().startsWith("<")) return@async
+            logd("⚡ Processing ${sortedServers.size} servers in parallel with apmap...")
 
+            // تشغيل جميع السيرفرات بالتوازي عبر الدالة المدمجة apmap
+            sortedServers.apmap { server ->
+                try {
+                    val finalUrl = resolveServerModel(server)
+                    if (!finalUrl.isNullOrBlank() && !finalUrl.trim().startsWith("<")) {
                         val serverName = server.name ?: "Server"
 
                         when {
@@ -565,6 +565,7 @@ class AnimeWitcherProvider : MainAPI() {
                             else -> {
                                 try {
                                     val handled = loadExtractor(finalUrl, mainUrl, subtitleCallback, callback)
+                                    // إذا لم يكن هناك مستخرج جاهز، يتم تمريره كرابط تشغيل مباشر
                                     if (!handled) {
                                         callback(
                                             newExtractorLink(
@@ -582,11 +583,11 @@ class AnimeWitcherProvider : MainAPI() {
                                 }
                             }
                         }
-                    } catch (e: Exception) {
-                        logd("Exception on server ${server.name}: ${e.message}")
                     }
+                } catch (e: Exception) {
+                    logd("Exception on server ${server.name}: ${e.message}")
                 }
-            }.awaitAll() // ينتظر حتى تنتهي جميع المهام المتوازية
+            }
 
             logd("====== LOADLINKS END ======")
             return@withContext true
