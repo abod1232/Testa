@@ -33,6 +33,18 @@ import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 
+@CloudstreamPlugin
+class animewitcherPlugin : Plugin() {
+    override fun load(context: Context) {
+        registerMainAPI(AnimeWitcherProvider())
+
+        openSettings = { activityContext ->
+            (activityContext as? AppCompatActivity)?.let { activity ->
+                Settings().show(activity.supportFragmentManager, "AnimewitcherSettings")
+            }
+        }
+    }
+}
 
 class Settings : BottomSheetDialogFragment() {
 
