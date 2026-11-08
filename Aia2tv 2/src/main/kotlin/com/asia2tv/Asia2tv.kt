@@ -3,6 +3,7 @@ package com.asia2tv
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.nodes.Element
+import android.util.Log
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
 
@@ -107,32 +108,43 @@ class Asia2tvProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
+        val tag = "Asia2TV"
+
+        // 1. تحديد رابط صفحة المشاهدة
         val serverPageUrl = if (data.contains("/watching/")) {
             data
         } else {
             val doc = app.get(data).document
             doc.selectFirst("div.loop-episode a.current")?.attr("href") // للمسلسلات
                 ?: doc.selectFirst("a.watch_player")?.attr("href") // للأفلام
-                ?: return false
+                ?: run {
+                    Log.w(tag, "Failed to find watch URL for: $data")
+                    return false
+                }
         }
 
-        println("Asia2TV: Opening watching page -> $serverPageUrl")
+        Log.d(tag, "Opening watching page: $serverPageUrl")
+
+        // 2. جلب صفحة المشاهدة وتحديد عناصر السيرفرات
         val serversPage = app.get(serverPageUrl).document
         val serverElements = serversPage.select("ul.server-list-menu li")
+
+        // 3. استخراج وطباعة السيرفرات المتوفرة في Logcat
         val serverUrls = serverElements.mapNotNull { element ->
             val url = element.attr("data-server").trim()
             val name = element.text().trim()
 
             if (url.isNotBlank()) {
-                println("Asia2TV Found Server: [$name] -> $url")
-                
+                Log.d(tag, "Found Server: [$name] -> $url")
                 url
             } else {
                 null
             }
         }
 
-        println("Asia2TV: Total servers found = ${serverUrls.size}")
+        Log.i(tag, "Total servers extracted: ${serverUrls.size}")
+
+        // 4. تشغيل المستخرجات (Extractors) لكل سيرفر
         serverUrls.amap { url ->
             loadExtractor(url, mainUrl, subtitleCallback, callback)
         }
