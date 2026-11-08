@@ -111,8 +111,6 @@ override suspend fun loadLinks(
     callback: (ExtractorLink) -> Unit
 ): Boolean {
     val tag = "Asia2TV"
-
-    // 1. استخراج رابط صفحة المشاهدة
     val serverPageUrl = if (data.contains("/watching/")) {
         data
     } else {
@@ -126,8 +124,6 @@ override suspend fun loadLinks(
     }
 
     Log.d(tag, "[*] صفحة المشاهدة: $serverPageUrl")
-
-    // 2. جلب صفحة السيرفرات
     val serversPage = app.get(serverPageUrl).document
     val serverElements = serversPage.select("ul.server-list-menu li")
 
@@ -141,8 +137,6 @@ override suspend fun loadLinks(
     }
 
     Log.i(tag, "[*] إجمالي السيرفرات المستخرجة: ${serverUrls.size}")
-
-    // 3. محاولة تشغيل المستخرجات مع فحص الأخطاء بدقة
     serverUrls.amap { url ->
         try {
             Log.d(tag, "[>] بدء استخراج الرابط من: $url")
@@ -159,8 +153,6 @@ override suspend fun loadLinks(
                     callback(link)
                 }
             )
-
-            // إذا أرجعت loadExtractor القيمة false، فهذا يعني أن التطبيق لا يملك كود مستخرج لهذا النطاق
             if (!isHandled) {
                 Log.w(
                     tag,
@@ -170,7 +162,6 @@ override suspend fun loadLinks(
             }
 
         } catch (t: Throwable) {
-            // تفصيل نوع الخطأ البرمجي أو خطأ الشبكة
             val errorType = t::class.java.simpleName
             val errorMsg = t.message ?: "لا توجد رسالة خطأ"
             val causeMsg = t.cause?.let { " | السبب الداخلي: ${it::class.java.simpleName} (${it.message})" } ?: ""
