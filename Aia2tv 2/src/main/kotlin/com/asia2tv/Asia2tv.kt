@@ -192,7 +192,6 @@ class Asia2tvProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // 1. تحديد صفحة المشاهدة
         val watchPageUrl = if (data.contains("/watching/")) {
             data
         } else {
@@ -204,8 +203,6 @@ class Asia2tvProvider : MainAPI() {
 
         val resolvedWatchUrl = fixUrl(watchPageUrl)
         val serversPage = app.get(resolvedWatchUrl).document
-        
-        // جلب جميع روابط السيرفرات أو وسوم الـ iframe
         val serverUrls = serversPage.select("ul.server-list-menu li").mapNotNull { 
             it.attr("data-server").takeIf { s -> s.isNotBlank() } 
         }.ifEmpty { 
@@ -213,19 +210,14 @@ class Asia2tvProvider : MainAPI() {
         }
 
         Log.i(TAG, "[*] بدء الاستخراج المزدوج المتوازي لـ ${serverUrls.size} سيرفر...")
-
-        // لتجنب إرسال نفس الرابط المكرر للمشغل إذا استخرجه المساران معاً
         val emittedUrls = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
 
         val uniqueCallback: (ExtractorLink) -> Unit = { link ->
-            // فحص الرابط لمنع التكرار
             if (emittedUrls.add(link.url.trim())) {
                 Log.i(TAG, "[✔] تم اعتماد رابط جديد: [${link.name}] (${link.quality}p) -> ${link.url}")
                 callback(link)
             }
         }
-
-        // 2. إطلاق الفحص على كافة السيرفرات
         coroutineScope {
             serverUrls.map { rawUrl ->
                 async {
@@ -256,7 +248,6 @@ class Asia2tvProvider : MainAPI() {
         if (depth > 2 || url.isBlank()) return
 
         coroutineScope {
-            // المسار 1: تشغيل مستخرج Cloudstream الافتراضي
             val defaultExtractorJob = async {
                 try {
                     loadExtractor(url, referer, subtitleCallback, callback)
@@ -264,8 +255,6 @@ class Asia2tvProvider : MainAPI() {
                     Log.w(TAG, "loadExtractor error on $url: ${e.message}")
                 }
             }
-
-            // المسار 2 (يعمل بالتزامن مع الأول): فك التشفير اليدوي والبحث في الـ DOM والـ JS
             val manualExtractorJob = async {
                 try {
                     extractManually(url, referer, subtitleCallback, callback, depth)
@@ -273,8 +262,6 @@ class Asia2tvProvider : MainAPI() {
                     Log.w(TAG, "manual extraction error on $url: ${e.message}")
                 }
             }
-
-            // انتظار انتهاء المحاولتين معاً
             awaitAll(defaultExtractorJob, manualExtractorJob)
         }
     }
@@ -292,8 +279,6 @@ class Asia2tvProvider : MainAPI() {
         val hostUri = runCatching { URI(url) }.getOrNull() ?: return
         val origin = "${hostUri.scheme}://${hostUri.host}"
         val serverName = hostUri.host.removePrefix("www.").substringBefore(".")
-
-        // طلب كود الصفحة بترويسات متصفح كاملة
         val rawHtml = runCatching {
             app.get(
                 url,
@@ -301,8 +286,6 @@ class Asia2tvProvider : MainAPI() {
                 headers = mapOf("User-Agent" to DEFAULT_UA, "Accept" to "*/*")
             ).text
         }.getOrNull() ?: return
-
-        // فك تشفير كافة سكربتات eval(function(p,a,c,k,e,r)...)
         val unpackedHtml = buildString {
             append(rawHtml)
             val evalRegex = Regex("""eval\(function\(p,a,c,k,e,[dr]\).*?\)\)\s*;?""", RegexOption.DOT_MATCHES_ALL)
@@ -314,8 +297,6 @@ class Asia2tvProvider : MainAPI() {
         }.replace("\\/", "/")
 
         val commonHeaders = mapOf("User-Agent" to DEFAULT_UA, "Referer" to "$origin/", "Origin" to origin)
-
-        // 1. نمط كائنات JSON ومتغيرات الروابط (StreamWish / JWPlayer / Vidmoly)
         val jsonPattern = Regex("""var\s+links\s*=\s*(\{[^;]+\})""").find(unpackedHtml)?.groupValues?.get(1)
         if (jsonPattern != null) {
             runCatching {
@@ -328,8 +309,6 @@ class Asia2tvProvider : MainAPI() {
                 }
             }
         }
-
-        // 2. نمط تجميع السلاسل النصية (StreamTape)
         val concatRegex = Regex("""getElementById\(['"][^'"]+['"]\)\.innerHTML\s*=\s*['"]([^'"]+)['"]\s*\+\s*\(?['"]([^'"]+)['"]\)?""")
         concatRegex.find(unpackedHtml)?.let { m ->
             var direct = m.groupValues[1] + m.groupValues[2]
@@ -337,24 +316,18 @@ class Asia2tvProvider : MainAPI() {
             if (!direct.contains("&stream=")) direct += "&stream=1"
             emitMedia(serverName, direct, "$origin/", commonHeaders, callback)
         }
-
-        // 3. البحث المباشر عن أي رابط M3U8 أو master.txt
         val hlsRegex = Regex("""(?i)["']((?:https?:)?//[^\s"'<>\\]+?\.(?:m3u8|txt)(?:\?[^\s"'<>\\]*)?)["']""")
         hlsRegex.findAll(unpackedHtml).forEach { m ->
             val hlsLink = m.groupValues[1]
             val fullHls = if (hlsLink.startsWith("//")) "https:$hlsLink" else hlsLink
             emitMedia(serverName, fullHls, "$origin/", commonHeaders, callback)
         }
-
-        // 4. البحث عن روابط MP4 صريحة
         val mp4Regex = Regex("""(?i)["']((?:https?:)?//[^\s"'<>\\]+?\.mp4(?:\?[^\s"'<>\\]*)?)["']""")
         mp4Regex.findAll(unpackedHtml).forEach { m ->
             val mp4Link = m.groupValues[1]
             val fullMp4 = if (mp4Link.startsWith("//")) "https:$mp4Link" else mp4Link
             emitMedia(serverName, fullMp4, "$origin/", commonHeaders, callback)
         }
-
-        // 5. فحص وجود iframe داخلي متداخل
         val innerIframe = Regex("""<iframe[^>]+src=["']([^"']+)["']""").find(unpackedHtml)?.groupValues?.get(1)
         if (!innerIframe.isNullOrBlank() && !innerIframe.startsWith("javascript")) {
             val nextUrl = if (innerIframe.startsWith("//")) "https:$innerIframe" else if (innerIframe.startsWith("/")) "$origin$innerIframe" else innerIframe
