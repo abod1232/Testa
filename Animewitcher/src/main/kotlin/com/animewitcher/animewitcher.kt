@@ -256,7 +256,7 @@ class Settings : BottomSheetDialogFragment() {
                 badgeBackgroundColor = "#5865F2",
                 titleText = "سيرفر الديسكورد",
                 descText = "نقاشات المجتمع، الدعم الفني والاقتراحات",
-                targetUrl = "https://discord.gg/xY63qaQRw"
+                targetUrl = "https://discord.gg/zfaXdKpbDH"
             )
         )
 
