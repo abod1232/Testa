@@ -109,8 +109,6 @@ class Asia2tvProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val tag = "Asia2TV"
-
-        // 1. تحديد رابط صفحة المشاهدة
         val serverPageUrl = if (data.contains("/watching/")) {
             data
         } else {
@@ -124,12 +122,8 @@ class Asia2tvProvider : MainAPI() {
         }
 
         Log.d(tag, "Opening watching page: $serverPageUrl")
-
-        // 2. جلب صفحة المشاهدة وتحديد عناصر السيرفرات
         val serversPage = app.get(serverPageUrl).document
         val serverElements = serversPage.select("ul.server-list-menu li")
-
-        // 3. استخراج وطباعة السيرفرات المتوفرة في Logcat
         val serverUrls = serverElements.mapNotNull { element ->
             val url = element.attr("data-server").trim()
             val name = element.text().trim()
@@ -143,8 +137,6 @@ class Asia2tvProvider : MainAPI() {
         }
 
         Log.i(tag, "Total servers extracted: ${serverUrls.size}")
-
-        // 4. تشغيل المستخرجات (Extractors) لكل سيرفر
         serverUrls.amap { url ->
             loadExtractor(url, mainUrl, subtitleCallback, callback)
         }
