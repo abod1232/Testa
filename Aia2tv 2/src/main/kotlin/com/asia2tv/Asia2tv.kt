@@ -104,78 +104,187 @@ class Asia2tvProvider : MainAPI() {
 
     
 
-override suspend fun loadLinks(
-    data: String,
-    isCasting: Boolean,
-    subtitleCallback: (SubtitleFile) -> Unit,
-    callback: (ExtractorLink) -> Unit
-): Boolean {
-    val tag = "Asia2TV"
-    val serverPageUrl = if (data.contains("/watching/")) {
-        data
-    } else {
-        val doc = app.get(data).document
-        doc.selectFirst("div.loop-episode a.current")?.attr("href")
-            ?: doc.selectFirst("a.watch_player")?.attr("href")
-            ?: run {
-                Log.e(tag, "[-] تعذر إيجاد رابط صفحة المشاهدة في: $data")
-                return false
-            }
-    }
+package com.asia2tv
 
-    Log.d(tag, "[*] صفحة المشاهدة: $serverPageUrl")
-    val serversPage = app.get(serverPageUrl).document
-    val serverElements = serversPage.select("ul.server-list-menu li")
+import android.util.Log
+import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.newExtractorLink
+import com.lagradost.cloudstream3.utils.loadExtractor
+import com.lagradost.cloudstream3.utils.Qualities
+import org.jsoup.nodes.Element
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import java.net.URL
 
-    val serverUrls = serverElements.mapNotNull { element ->
-        val url = element.attr("data-server").trim()
-        val name = element.text().trim()
-        if (url.isNotBlank()) {
-            Log.d(tag, "[+] تم استخراج سيرفر: [$name] -> $url")
-            url
-        } else null
-    }
+// أضف هذه الدوال داخل كلاس Asia2tvProvider:
 
-    Log.i(tag, "[*] إجمالي السيرفرات المستخرجة: ${serverUrls.size}")
-    serverUrls.amap { url ->
+    // 1. فك تشفير سكربتات Packer (eval(function(p,a,c,k...)))
+    private fun deobfuscatePacker(packed: String): String {
         try {
-            Log.d(tag, "[>] بدء استخراج الرابط من: $url")
+            val packerRegex = """eval\(function\(p,a,c,k,e,[rd]\)\{.*?\}\((['"])(.*?)\1\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])(.*?)\5\.split\(['"]\|['"]\)""".toRegex()
+            val match = packerRegex.find(packed) ?: return ""
+            val (_, p, aStr, cStr, _, kStr) = match.destructured
+            val a = aStr.toIntOrNull() ?: return ""
+            val c = cStr.toIntOrNull() ?: return ""
+            val k = kStr.split('|')
 
-            val isHandled = loadExtractor(
-                url = url,
-                referer = mainUrl,
-                subtitleCallback = { sub ->
-                    Log.i(tag, "[✔] تم جلب ترجمة من [$url]: [${sub.lang}] ${sub.url}")
-                    subtitleCallback(sub)
-                },
-                callback = { link ->
-                    Log.i(tag, "[✔] نجح الاستخراج! [${link.name}] الجودة: ${link.quality} -> ${link.url}")
-                    callback(link)
+            fun getBaseNString(num: Int, base: Int): String {
+                val chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                if (base <= 36) return num.toString(base)
+                var n = num
+                var res = ""
+                while (n > 0) {
+                    res = chars[n % base] + res
+                    n /= base
                 }
-            )
-            if (!isHandled) {
-                Log.w(
-                    tag,
-                    "[!] لا يوجد مستخرج (No Extractor) مسجل في التطبيق لهذا الرابط: $url " +
-                    "(هذا النطاق غير مدعوم في Cloudstream حالياً أو يحتاج تحديث للمستخرجات)"
-                )
+                return if (res.isEmpty()) "0" else res
             }
 
-        } catch (t: Throwable) {
-            val errorType = t::class.java.simpleName
-            val errorMsg = t.message ?: "لا توجد رسالة خطأ"
-            val causeMsg = t.cause?.let { " | السبب الداخلي: ${it::class.java.simpleName} (${it.message})" } ?: ""
+            val dict = mutableMapOf<String, String>()
+            for (i in 0 until c) {
+                val key = getBaseNString(i, a)
+                val value = if (i < k.size && k[i].isNotEmpty()) k[i] else key
+                dict[key] = value
+            }
 
-            Log.e(
-                tag,
-                "[✘] فشل loadExtractor مع السيرفر: $url\n" +
-                "    نوع الخطأ: $errorType\n" +
-                "    رسالة الخطأ: $errorMsg$causeMsg",
-                t // يطبع الـ StackTrace كاملاً في Logcat
-            )
+            val wordRegex = """\b\w+\b""".toRegex()
+            return wordRegex.replace(p) { matchResult ->
+                val word = matchResult.value
+                dict[word] ?: word
+            }
+        } catch (e: Exception) {
+            return ""
         }
     }
 
-    return true
-}
+    private fun extractLogic(htmlText: String): String {
+        try {
+            val startMarker = "eval(function(p,a,c,k,e,d)"
+            val startIdx = htmlText.indexOf(startMarker)
+            if (startIdx != -1) {
+                val endMarker = ".split('|')))"
+                val endIdx = htmlText.indexOf(endMarker, startIdx)
+                if (endIdx != -1) {
+                    val packedJs = htmlText.substring(startIdx, endIdx + endMarker.length)
+                    val unpacked = deobfuscatePacker(packedJs)
+                    if (unpacked.isNotEmpty()) {
+                        return unpacked
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(name, "Error in extractLogic: ${e.message}")
+        }
+        return htmlText
+    }
+
+    // 2. استخراج رابط m3u8 (يدعم ' و " تلقائياً)
+    private fun findM3u8(text: String): String? {
+        val fileRegex = """file\s*:\s*["']([^"']+)["']""".toRegex()
+        val fileMatch = fileRegex.find(text)
+        if (fileMatch != null) return fileMatch.groupValues[1]
+
+        val m3u8Regex = """(https?://[^\s"\'<>]+?\.m3u8[^\s"\'<>?]*(?:\?[^\s"\'<>]*)?)""".toRegex()
+        val m3u8Match = m3u8Regex.find(text)
+        return m3u8Match?.groupValues?.get(1)
+    }
+
+    // 3. دالة loadLinks المعدلة بالكامل مثل Elif
+    override suspend fun loadLinks(
+        data: String,
+        isCasting: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        // جلب رابط صفحة المشاهدة
+        val serverPageUrl = if (data.contains("/watching/")) {
+            data
+        } else {
+            val doc = app.get(data).document
+            doc.selectFirst("div.loop-episode a.current")?.attr("href") // للمسلسلات
+                ?: doc.selectFirst("a.watch_player")?.attr("href") // للأفلام
+                ?: return false
+        }
+
+        val resolvedServerPageUrl = fixUrl(serverPageUrl)
+        val serversPage = app.get(resolvedServerPageUrl).document
+        val servers = serversPage.select("ul.server-list-menu li")
+
+        // تنفيذ متوازي لجميع السيرفرات في الخلفية
+        coroutineScope {
+            servers.map { server ->
+                async {
+                    val embedSource = server.attr("data-server") ?: return@async
+                    if (embedSource.isBlank()) return@async
+
+                    val serverUrl = fixUrl(embedSource)
+
+                    // 1. المحاولة الأولى: تمرير الرابط لمستخرجات التطبيق الافتراضية
+                    try {
+                        loadExtractor(serverUrl, resolvedServerPageUrl, subtitleCallback, callback)
+                    } catch (e: Exception) {
+                        Log.w(name, "loadExtractor failed for $serverUrl: ${e.message}")
+                    }
+
+                    // 2. المحاولة الثانية: طلب السيرفر بنفسنا وفك تشفيره وفحص الرابط المباشر (مثل Elif)
+                    try {
+                        val uri = URL(serverUrl)
+                        val domain = "${uri.protocol}://${uri.host}/"
+                        val serverName = uri.host.replace("www.", "").lowercase()
+
+                        val serverResponse = app.get(
+                            serverUrl,
+                            headers = mapOf(
+                                "Referer" to resolvedServerPageUrl,
+                                "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                            )
+                        )
+
+                        if (serverResponse.code == 200) {
+                            val content = extractLogic(serverResponse.text)
+                            val videoLink = findM3u8(content)
+
+                            if (!videoLink.isNullOrEmpty()) {
+                                val finalVideoUrl = fixUrl(videoLink)
+
+                                val verifyHeaders = mapOf(
+                                    "Referer" to domain,
+                                    "Origin" to domain.removeSuffix("/"),
+                                    "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                                )
+
+                                // فحص الرابط المباشر للتأكد من أنه يعمل (200 OK)
+                                val check = app.get(
+                                    url = finalVideoUrl,
+                                    headers = verifyHeaders,
+                                    timeout = 10
+                                )
+
+                                if (check.code == 200) {
+                                    Log.i(name, "Direct stream link verified (200 OK) from $serverName -> $finalVideoUrl")
+                                    callback(
+                                        newExtractorLink(
+                                            source = name,
+                                            name = serverName,
+                                            url = finalVideoUrl,
+                                        ) {
+                                            this.referer = domain
+                                            this.quality = Qualities.Unknown.value
+                                            this.headers = verifyHeaders
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e(name, "Manual fetch failed for $serverUrl: ${e.message}")
+                    }
+                }
+            }.awaitAll()
+        }
+
+        return true
+    }
 }
