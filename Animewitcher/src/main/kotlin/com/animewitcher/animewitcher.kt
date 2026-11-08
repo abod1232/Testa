@@ -18,8 +18,6 @@ import java.net.URLDecoder
 import java.net.URLEncoder
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
-
-// استيرادات أندرويد والواجهات
 import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
