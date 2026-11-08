@@ -102,45 +102,89 @@ class Asia2tvProvider : MainAPI() {
         }
     }
 
-    override suspend fun loadLinks(
-        data: String,
-        isCasting: Boolean,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean {
-        val tag = "Asia2TV"
-        val serverPageUrl = if (data.contains("/watching/")) {
-            data
-        } else {
-            val doc = app.get(data).document
-            doc.selectFirst("div.loop-episode a.current")?.attr("href") // للمسلسلات
-                ?: doc.selectFirst("a.watch_player")?.attr("href") // للأفلام
-                ?: run {
-                    Log.w(tag, "Failed to find watch URL for: $data")
-                    return false
-                }
-        }
+    import android.util.Log
 
-        Log.d(tag, "Opening watching page: $serverPageUrl")
-        val serversPage = app.get(serverPageUrl).document
-        val serverElements = serversPage.select("ul.server-list-menu li")
-        val serverUrls = serverElements.mapNotNull { element ->
-            val url = element.attr("data-server").trim()
-            val name = element.text().trim()
+override suspend fun loadLinks(
+    data: String,
+    isCasting: Boolean,
+    subtitleCallback: (SubtitleFile) -> Unit,
+    callback: (ExtractorLink) -> Unit
+): Boolean {
+    val tag = "Asia2TV"
 
-            if (url.isNotBlank()) {
-                Log.d(tag, "Found Server: [$name] -> $url")
-                url
-            } else {
-                null
+    // 1. استخراج رابط صفحة المشاهدة
+    val serverPageUrl = if (data.contains("/watching/")) {
+        data
+    } else {
+        val doc = app.get(data).document
+        doc.selectFirst("div.loop-episode a.current")?.attr("href")
+            ?: doc.selectFirst("a.watch_player")?.attr("href")
+            ?: run {
+                Log.e(tag, "[-] تعذر إيجاد رابط صفحة المشاهدة في: $data")
+                return false
             }
-        }
-
-        Log.i(tag, "Total servers extracted: ${serverUrls.size}")
-        serverUrls.amap { url ->
-            loadExtractor(url, mainUrl, subtitleCallback, callback)
-        }
-
-        return true
     }
+
+    Log.d(tag, "[*] صفحة المشاهدة: $serverPageUrl")
+
+    // 2. جلب صفحة السيرفرات
+    val serversPage = app.get(serverPageUrl).document
+    val serverElements = serversPage.select("ul.server-list-menu li")
+
+    val serverUrls = serverElements.mapNotNull { element ->
+        val url = element.attr("data-server").trim()
+        val name = element.text().trim()
+        if (url.isNotBlank()) {
+            Log.d(tag, "[+] تم استخراج سيرفر: [$name] -> $url")
+            url
+        } else null
+    }
+
+    Log.i(tag, "[*] إجمالي السيرفرات المستخرجة: ${serverUrls.size}")
+
+    // 3. محاولة تشغيل المستخرجات مع فحص الأخطاء بدقة
+    serverUrls.amap { url ->
+        try {
+            Log.d(tag, "[>] بدء استخراج الرابط من: $url")
+
+            val isHandled = loadExtractor(
+                url = url,
+                referer = mainUrl,
+                subtitleCallback = { sub ->
+                    Log.i(tag, "[✔] تم جلب ترجمة من [$url]: [${sub.lang}] ${sub.url}")
+                    subtitleCallback(sub)
+                },
+                callback = { link ->
+                    Log.i(tag, "[✔] نجح الاستخراج! [${link.name}] الجودة: ${link.quality} -> ${link.url}")
+                    callback(link)
+                }
+            )
+
+            // إذا أرجعت loadExtractor القيمة false، فهذا يعني أن التطبيق لا يملك كود مستخرج لهذا النطاق
+            if (!isHandled) {
+                Log.w(
+                    tag,
+                    "[!] لا يوجد مستخرج (No Extractor) مسجل في التطبيق لهذا الرابط: $url " +
+                    "(هذا النطاق غير مدعوم في Cloudstream حالياً أو يحتاج تحديث للمستخرجات)"
+                )
+            }
+
+        } catch (t: Throwable) {
+            // تفصيل نوع الخطأ البرمجي أو خطأ الشبكة
+            val errorType = t::class.java.simpleName
+            val errorMsg = t.message ?: "لا توجد رسالة خطأ"
+            val causeMsg = t.cause?.let { " | السبب الداخلي: ${it::class.java.simpleName} (${it.message})" } ?: ""
+
+            Log.e(
+                tag,
+                "[✘] فشل loadExtractor مع السيرفر: $url\n" +
+                "    نوع الخطأ: $errorType\n" +
+                "    رسالة الخطأ: $errorMsg$causeMsg",
+                t // يطبع الـ StackTrace كاملاً في Logcat
+            )
+        }
+    }
+
+    return true
+}
 }
