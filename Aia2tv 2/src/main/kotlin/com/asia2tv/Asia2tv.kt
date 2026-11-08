@@ -117,10 +117,6 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import java.net.URL
-
-// أضف هذه الدوال داخل كلاس Asia2tvProvider:
-
-    // 1. فك تشفير سكربتات Packer (eval(function(p,a,c,k...)))
     private fun deobfuscatePacker(packed: String): String {
         try {
             val packerRegex = """eval\(function\(p,a,c,k,e,[rd]\)\{.*?\}\((['"])(.*?)\1\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])(.*?)\5\.split\(['"]\|['"]\)""".toRegex()
@@ -179,8 +175,6 @@ import java.net.URL
         }
         return htmlText
     }
-
-    // 2. استخراج رابط m3u8 (يدعم ' و " تلقائياً)
     private fun findM3u8(text: String): String? {
         val fileRegex = """file\s*:\s*["']([^"']+)["']""".toRegex()
         val fileMatch = fileRegex.find(text)
@@ -190,15 +184,12 @@ import java.net.URL
         val m3u8Match = m3u8Regex.find(text)
         return m3u8Match?.groupValues?.get(1)
     }
-
-    // 3. دالة loadLinks المعدلة بالكامل مثل Elif
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // جلب رابط صفحة المشاهدة
         val serverPageUrl = if (data.contains("/watching/")) {
             data
         } else {
@@ -211,8 +202,6 @@ import java.net.URL
         val resolvedServerPageUrl = fixUrl(serverPageUrl)
         val serversPage = app.get(resolvedServerPageUrl).document
         val servers = serversPage.select("ul.server-list-menu li")
-
-        // تنفيذ متوازي لجميع السيرفرات في الخلفية
         coroutineScope {
             servers.map { server ->
                 async {
@@ -220,15 +209,11 @@ import java.net.URL
                     if (embedSource.isBlank()) return@async
 
                     val serverUrl = fixUrl(embedSource)
-
-                    // 1. المحاولة الأولى: تمرير الرابط لمستخرجات التطبيق الافتراضية
                     try {
                         loadExtractor(serverUrl, resolvedServerPageUrl, subtitleCallback, callback)
                     } catch (e: Exception) {
                         Log.w(name, "loadExtractor failed for $serverUrl: ${e.message}")
                     }
-
-                    // 2. المحاولة الثانية: طلب السيرفر بنفسنا وفك تشفيره وفحص الرابط المباشر (مثل Elif)
                     try {
                         val uri = URL(serverUrl)
                         val domain = "${uri.protocol}://${uri.host}/"
@@ -254,8 +239,6 @@ import java.net.URL
                                     "Origin" to domain.removeSuffix("/"),
                                     "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                                 )
-
-                                // فحص الرابط المباشر للتأكد من أنه يعمل (200 OK)
                                 val check = app.get(
                                     url = finalVideoUrl,
                                     headers = verifyHeaders,
