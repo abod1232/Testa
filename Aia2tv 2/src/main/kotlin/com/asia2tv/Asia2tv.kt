@@ -102,7 +102,7 @@ class Asia2tvProvider : MainAPI() {
         }
     }
 
-    import android.util.Log
+    
 
 override suspend fun loadLinks(
     data: String,
