@@ -228,8 +228,6 @@ class Asia2tvProvider : MainAPI() {
         }.replace("\\/", "/")
 
         val commonHeaders = mapOf("User-Agent" to DEFAULT_UA, "Referer" to "$origin/", "Origin" to origin)
-
-        // 1. فحص كائنات JSON ومتغيرات الروابط (StreamWish / JWPlayer / Vidmoly)
         val jsonPattern = Regex("""var\s+links\s*=\s*(\{[^;]+\})""").find(unpackedHtml)?.groupValues?.get(1)
         if (jsonPattern != null) {
             runCatching {
@@ -242,8 +240,6 @@ class Asia2tvProvider : MainAPI() {
                 }
             }
         }
-
-        // 2. فحص نمط دمج السلاسل النصية (StreamTape)
         val concatRegex = Regex("""getElementById\(['"][^'"]+['"]\)\.innerHTML\s*=\s*['"]([^'"]+)['"]\s*\+\s*\(?['"]([^'"]+)['"]\)?""")
         concatRegex.find(unpackedHtml)?.let { m ->
             var direct = m.groupValues[1] + m.groupValues[2]
@@ -251,24 +247,18 @@ class Asia2tvProvider : MainAPI() {
             if (!direct.contains("&stream=")) direct += "&stream=1"
             emitMedia(serverName, direct, "$origin/", commonHeaders, callback)
         }
-
-        // 3. البحث المباشر عن أي رابط M3U8 أو master.txt
         val hlsRegex = Regex("""(?i)["']((?:https?:)?//[^\s"'<>\\]+?\.(?:m3u8|txt)(?:\?[^\s"'<>\\]*)?)["']""")
         hlsRegex.findAll(unpackedHtml).forEach { m ->
             val hlsLink = m.groupValues[1]
             val fullHls = if (hlsLink.startsWith("//")) "https:$hlsLink" else hlsLink
             emitMedia(serverName, fullHls, "$origin/", commonHeaders, callback)
         }
-
-        // 4. البحث عن روابط MP4 صريحة
         val mp4Regex = Regex("""(?i)["']((?:https?:)?//[^\s"'<>\\]+?\.mp4(?:\?[^\s"'<>\\]*)?)["']""")
         mp4Regex.findAll(unpackedHtml).forEach { m ->
             val mp4Link = m.groupValues[1]
             val fullMp4 = if (mp4Link.startsWith("//")) "https:$mp4Link" else mp4Link
             emitMedia(serverName, fullMp4, "$origin/", commonHeaders, callback)
         }
-
-        // 5. فحص وجود iframe متداخل والانتقال إليه
         val innerIframe = Regex("""<iframe[^>]+src=["']([^"']+)["']""").find(unpackedHtml)?.groupValues?.get(1)
         if (!innerIframe.isNullOrBlank() && !innerIframe.startsWith("javascript")) {
             val nextUrl = if (innerIframe.startsWith("//")) "https:$innerIframe" else if (innerIframe.startsWith("/")) "$origin$innerIframe" else innerIframe
