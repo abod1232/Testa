@@ -37,16 +37,12 @@ class WitAnime : MainAPI() {
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie)
 private val customUserAgent =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-
-    // ترويسات موحدة لمتصفح كمبيوتر مكتبي (Windows)
     private val baseHeaders = mapOf(
         "User-Agent" to customUserAgent,
         "Sec-Ch-Ua" to "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"",
         "Sec-Ch-Ua-Mobile" to "?0",
         "Sec-Ch-Ua-Platform" to "\"Windows\""
     )
-
-    // ترويسات البوابة بعد إزالة تناقض الأندرويد وإصدار 155 الوهمي
     private val exactGateHeaders = mapOf(
         "Host" to "witanime.site",
         "User-Agent" to customUserAgent,
@@ -538,8 +534,6 @@ private val customUserAgent =
 
                 suspend fun fetchServersAndToken(batchSession: BatchSession): Pair<Map<String, String>, List<ServerItem>>? {
     val cacheBusterUrl = "$data?t=${System.currentTimeMillis() / 1000}"
-
-    // استخدام الترويسات الأساسية الموحدة مباشرة
     val pageReq = Request.Builder()
         .url(cacheBusterUrl)
         .apply { 
@@ -555,7 +549,6 @@ private val customUserAgent =
     pageRes.close()
 
     if (pageRes.code != 200) return null
-    // ... باقي الكود
 
                     val csrfToken = Regex("""name=['"]csrf-token['"]\s+content=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                         ?: Regex("""data-csrf=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
