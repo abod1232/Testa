@@ -26,8 +26,6 @@ import org.jsoup.Jsoup
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
-
-// ── CookieJar متقدم لحفظ كوكيز الجلسة والـ CSRF تلقائياً ──────────────────────
 class SessionCookieJar : CookieJar {
     private val store = ConcurrentHashMap<String, Cookie>()
 
@@ -79,8 +77,6 @@ class WitAnime : MainAPI() {
     override var lang = "ar"
 
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie)
-
-    // ترويسات موحدة لمتصفح لابتوب/كمبيوتر مكتبي بنظام Windows
     private val customUserAgent =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
@@ -551,7 +547,6 @@ class WitAnime : MainAPI() {
     ): Boolean {
         return withContext(Dispatchers.IO) {
             try {
-                // مدير جلسات وكوكيز مستقل لكل عملية تشغيل
                 val sessionJar = SessionCookieJar()
 
                 val directClient = app.baseClient.newBuilder()
@@ -589,8 +584,6 @@ class WitAnime : MainAPI() {
                     val rawSources = sourcesPattern.find(pageHtml)?.groupValues?.get(1)?.replace("\\/", "/")
                         ?: "${data.trimEnd('/')}/sources"
                     val sourcesUrl = fixUrl(rawSources)
-
-                    // ترويسات طلب مصادر السيرفرات (الكوكيز تُحقن تلقائياً بواسطة SessionCookieJar)
                     val sourcesHeaders = baseHeaders.toMutableMap().apply {
                         put("X-Csrf-Token", csrfToken)
                         put("Accept", "application/json")
@@ -650,13 +643,9 @@ class WitAnime : MainAPI() {
                 if (allServers.isEmpty()) return@withContext false
 
                 var foundAny = false
-
-                // معالجة أفضل 16 سيرفر
                 for (s in allServers.take(16)) {
                     val sourceEndpoint = if (s.isStream) "stream-source" else "download-source"
                     val gateEndpoint = if (s.isStream) "stream-gate" else "download-gate"
-
-                    // تشفير التوكن لمنع تلف الرابط
                     val encodedToken = URLEncoder.encode(s.token, "UTF-8")
                     val sourceUrl = "https://witanime.site/watch/$sourceEndpoint/$encodedToken"
 
@@ -676,8 +665,6 @@ class WitAnime : MainAPI() {
                             delay(1150)
                             continue
                         }
-
-                        // استخراج رابط البوابة الفعلي من الـ JSON إن وجد أو الاعتماد على الرابط الافتراضي
                         val sJson = runCatching { JSONObject(sBody) }.getOrNull()
                         val rawGatePath = sJson?.optString("gateUrl")?.takeIf { it.isNotBlank() }
                             ?: "/watch/$gateEndpoint/$encodedToken"
@@ -751,8 +738,6 @@ class WitAnime : MainAPI() {
                                 }
                             }
                         }
-
-                        // فاصل زمني بسيط ومناسب لتفادي حظر 429
                         delay(1150)
                     } catch (e: Exception) {
                         logError(e)
