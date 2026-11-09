@@ -1,6 +1,5 @@
 package com.witanime
 
-
 import android.app.Activity
 import android.app.Dialog
 import android.content.Context
@@ -27,7 +26,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.jsoup.Jsoup
 import java.util.concurrent.TimeUnit
-import kotlin.random.Random
 
 class WitAnime : MainAPI() {
     override var mainUrl = "https://witanime.site"
@@ -46,6 +44,7 @@ class WitAnime : MainAPI() {
         "Sec-Ch-Ua-Mobile" to "?0",
         "Sec-Ch-Ua-Platform" to "\"Windows\""
     )
+
     private val exactGateHeaders = mapOf(
         "Host" to "witanime.site",
         "Sec-Ch-Ua" to "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"",
@@ -61,10 +60,6 @@ class WitAnime : MainAPI() {
         "Accept-Encoding" to "gzip, deflate, br",
         "Accept-Language" to "ar,en-US;q=0.9,en;q=0.8",
         "Priority" to "u=0, i"
-    )
-
-    private val rotatingUas = listOf(
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     )
 
     companion object {
@@ -539,14 +534,10 @@ class WitAnime : MainAPI() {
 
                 suspend fun fetchServersAndToken(batchSession: BatchSession): Pair, List<ServerItem>>? {
                     val cacheBusterUrl = "$data?t=${System.currentTimeMillis() / 1000}"
-                    val randomUa = rotatingUas.random()
-
-                    val tokenHeaders = baseHeaders.toMutableMap()
-                    tokenHeaders["User-Agent"] = randomUa
 
                     val pageReq = Request.Builder()
                         .url(cacheBusterUrl)
-                        .apply { tokenHeaders.forEach { (k, v) -> header(k, v) } }
+                        .apply { baseHeaders.forEach { (k, v) -> header(k, v) } }
                         .build()
 
                     val pageRes = directClient.newCall(pageReq).execute()
@@ -619,7 +610,7 @@ class WitAnime : MainAPI() {
                         }
                     }
 
-                    return Pair(sourcesHeaders, allServers)
+                    return sourcesHeaders to allServers
                 }
 
                 val batchSize = 9
