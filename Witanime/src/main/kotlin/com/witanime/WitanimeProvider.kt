@@ -26,6 +26,8 @@ import org.jsoup.Jsoup
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+
+// ── CookieJar عام ومستمر لحفظ كوكيز الجلسة والـ CSRF تلقائياً ────────────────
 class SharedSessionCookieJar : CookieJar {
     private val store = ConcurrentHashMap<String, Cookie>()
 
@@ -82,19 +84,32 @@ class WitAnime : MainAPI() {
     companion object {
         @Volatile var isWebViewOpen = false
         @Volatile var lastWebViewOpenTime = 0L
+
+        // كوكيز مشتركة لجميع الطلبات
         val sharedCookieJar = SharedSessionCookieJar()
 
-        val globalClient: OkHttpClient by lazy {
+        // عميل أساسي يتبع التوجيه (Redirects) لجميع الطلبات العادية وصفحات الحلقة والـ Sources
+        val directClient: OkHttpClient by lazy {
             app.baseClient.newBuilder()
                 .cookieJar(sharedCookieJar)
-                .followRedirects(false)
-                .followSslRedirects(false)
+                .followRedirects(true)
+                .followSslRedirects(true)
                 .connectTimeout(15, TimeUnit.SECONDS)
                 .readTimeout(15, TimeUnit.SECONDS)
                 .callTimeout(20, TimeUnit.SECONDS)
                 .build()
         }
+
+        // عميل بدون توجيه مخصص فقط للبوابات لالتقاط كود 302 وترويسة Location
+        val noRedirectClient: OkHttpClient by lazy {
+            directClient.newBuilder()
+                .followRedirects(false)
+                .followSslRedirects(false)
+                .build()
+        }
     }
+
+    // ترويسات متصفح كمبيوتر مكتبي موحدة ومتطابقة مع بصمة Chrome 131
     private val customUserAgent =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
@@ -376,6 +391,7 @@ class WitAnime : MainAPI() {
     init {
         PlayerAccess.startMonitoring()
     }
+
     private fun fetchDocument(url: String): org.jsoup.nodes.Document {
         val req = Request.Builder()
             .url(url)
@@ -385,7 +401,7 @@ class WitAnime : MainAPI() {
                 header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
             }
             .build()
-        val res = globalClient.newCall(req).execute()
+        val res = directClient.newCall(req).execute()
         val body = res.body?.string().orEmpty()
         res.close()
         return Jsoup.parse(body)
@@ -552,24 +568,17 @@ class WitAnime : MainAPI() {
     data class ServerItem(val quality: String, val label: String, val token: String, val isStream: Boolean)
 
     override suspend fun loadLinks(
-    data: String,
-    isCasting: Boolean,
-    subtitleCallback: (SubtitleFile) -> Unit,
-    callback: (ExtractorLink) -> Unit
-): Boolean {
-    return withContext(Dispatchers.IO) {
-        try {
-            val cleanWatchUrl = data.substringBefore('?').trimEnd('/')
-            if (!sharedCookieJar.hasCookie("witanime.site", "witanime-session")) {
-                val primeReq = Request.Builder()
-                    .url("$mainUrl/")
-                    .apply { baseHeaders.forEach { (k, v) -> header(k, v) } }
-                    .build()
-                globalClient.newCall(primeReq).execute().close()
-                delay(300)
-            }
+        data: String,
+        isCasting: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                // 1. تنظيف رابط المشاهدة تماماً
+                val cleanWatchUrl = fixUrl(data.substringBefore('?').trimEnd('/'))
 
-            suspend fun fetchServersAndToken(): Pair<Map<String, String>, List<ServerItem>>? {
+                // 2. طلب صفحة الحلقة بالعميل directClient (الذي يتبع التوجيه تلقائياً)
                 val pageReq = Request.Builder()
                     .url(cleanWatchUrl)
                     .apply {
@@ -577,46 +586,49 @@ class WitAnime : MainAPI() {
                         header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
                         header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
                         header("Referer", "$mainUrl/")
+                        header("Upgrade-Insecure-Requests", "1")
                     }
                     .build()
 
-                val pageRes = globalClient.newCall(pageReq).execute()
-                val pageHtml = pageRes.body?.string().orEmpty()
-                pageRes.close()
+                val pageHtml = directClient.newCall(pageReq).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withContext false
+                    resp.body?.string().orEmpty()
+                }
 
-                if (pageRes.code != 200) return null
-
+                // 3. استخراج CSRF Token
                 val csrfToken = Regex("""name=['"]csrf-token['"]\s+content=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: Regex("""data-csrf=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
-                    ?: return null
+                    ?: return@withContext false
 
-                delay(1100)
+                // 4. استخراج رابط sources بدقة
                 val sourcesPattern = Regex("""sourcesUrl\s*:\s*['"]([^'"]+)['"]""")
                 val rawSources = sourcesPattern.find(pageHtml)?.groupValues?.get(1)?.replace("\\/", "/")?.trim()
                     ?: "$cleanWatchUrl/sources"
                 val sourcesUrl = fixUrl(rawSources)
 
-                val sourcesHeaders = baseHeaders.toMutableMap().apply {
-                    put("X-Csrf-Token", csrfToken)
-                    put("Accept", "application/json")
-                    put("Origin", "https://witanime.site")
-                    put("Referer", cleanWatchUrl)
-                    put("Sec-Fetch-Dest", "empty")
-                    put("Sec-Fetch-Mode", "cors")
-                    put("Sec-Fetch-Site", "same-origin")
-                }
+                delay(600) // راحة طبيعية بين الطلبات
 
+                // 5. إرسال طلب POST /sources بنفس العميل directClient
+                val emptyBody = RequestBody.create(null, ByteArray(0))
                 val sourcesReq = Request.Builder()
                     .url(sourcesUrl)
-                    .apply { sourcesHeaders.forEach { (k, v) -> header(k, v) } }
-                    .post(RequestBody.create(null, ByteArray(0)))
+                    .post(emptyBody)
+                    .header("User-Agent", customUserAgent)
+                    .header("Accept", "application/json")
+                    .header("X-CSRF-TOKEN", csrfToken)
+                    .header("Origin", mainUrl)
+                    .header("Referer", cleanWatchUrl)
+                    .header("Sec-Fetch-Site", "same-origin")
+                    .header("Sec-Fetch-Mode", "cors")
+                    .header("Sec-Fetch-Dest", "empty")
                     .build()
 
-                val sourcesRes = globalClient.newCall(sourcesReq).execute()
-                val sourcesJsonStr = sourcesRes.body?.string().orEmpty()
-                sourcesRes.close()
+                val sourcesJsonStr = directClient.newCall(sourcesReq).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withContext false
+                    resp.body?.string().orEmpty()
+                }
 
-                if (sourcesRes.code != 200 || sourcesJsonStr.isBlank()) return null
+                if (sourcesJsonStr.isBlank()) return@withContext false
 
                 val json = JSONObject(sourcesJsonStr)
                 val players = json.optJSONObject("players")
@@ -646,126 +658,129 @@ class WitAnime : MainAPI() {
                     }
                 }
 
-                return Pair(sourcesHeaders, allServers)
-            }
+                if (allServers.isEmpty()) return@withContext false
 
-            val fetchResult = fetchServersAndToken() ?: return@withContext false
-            val sourcesHeaders = fetchResult.first
-            val allServers = fetchResult.second
-            if (allServers.isEmpty()) return@withContext false
+                var foundAny = false
 
-            var foundAny = false
+                // 6. استخراج روابط المشاهدة والتحميل من السيرفرات
+                for (s in allServers.take(16)) {
+                    val sourceEndpoint = if (s.isStream) "stream-source" else "download-source"
+                    val gateEndpoint = if (s.isStream) "stream-gate" else "download-gate"
 
-            for (s in allServers.take(16)) {
-                val sourceEndpoint = if (s.isStream) "stream-source" else "download-source"
-                val gateEndpoint = if (s.isStream) "stream-gate" else "download-gate"
+                    val encodedToken = URLEncoder.encode(s.token, "UTF-8")
+                    val sourceUrl = "$mainUrl/watch/$sourceEndpoint/$encodedToken"
 
-                val encodedToken = URLEncoder.encode(s.token, "UTF-8")
-                val sourceUrl = "https://witanime.site/watch/$sourceEndpoint/$encodedToken"
+                    try {
+                        val sReq = Request.Builder()
+                            .url(sourceUrl)
+                            .post(emptyBody)
+                            .header("User-Agent", customUserAgent)
+                            .header("Accept", "application/json")
+                            .header("X-CSRF-TOKEN", csrfToken)
+                            .header("Origin", mainUrl)
+                            .header("Referer", cleanWatchUrl)
+                            .header("Sec-Fetch-Site", "same-origin")
+                            .header("Sec-Fetch-Mode", "cors")
+                            .header("Sec-Fetch-Dest", "empty")
+                            .build()
 
-                try {
-                    val sReq = Request.Builder()
-                        .url(sourceUrl)
-                        .apply { sourcesHeaders.forEach { (k, v) -> header(k, v) } }
-                        .post(RequestBody.create(null, ByteArray(0)))
-                        .build()
+                        val sRes = directClient.newCall(sReq).execute()
+                        val sCode = sRes.code
+                        val sBody = sRes.body?.string().orEmpty()
+                        sRes.close()
 
-                    val sRes = globalClient.newCall(sReq).execute()
-                    val sCode = sRes.code
-                    val sBody = sRes.body?.string().orEmpty()
-                    sRes.close()
+                        if (sCode !in 200..299) {
+                            delay(1150)
+                            continue
+                        }
 
-                    if (sCode !in 200..299) {
-                        delay(1150)
-                        continue
-                    }
+                        val sJson = runCatching { JSONObject(sBody) }.getOrNull()
+                        val rawGatePath = sJson?.optString("gateUrl")?.takeIf { it.isNotBlank() }
+                            ?: "/watch/$gateEndpoint/$encodedToken"
+                        val fullGateUrl = fixUrl(rawGatePath)
 
-                    val sJson = runCatching { JSONObject(sBody) }.getOrNull()
-                    val rawGatePath = sJson?.optString("gateUrl")?.takeIf { it.isNotBlank() }
-                        ?: "/watch/$gateEndpoint/$encodedToken"
-                    val fullGateUrl = fixUrl(rawGatePath)
+                        val gReq = Request.Builder()
+                            .url(fullGateUrl)
+                            .apply { exactGateHeaders.forEach { (k, v) -> header(k, v) } }
+                            .get()
+                            .build()
 
-                    val gReq = Request.Builder()
-                        .url(fullGateUrl)
-                        .apply { exactGateHeaders.forEach { (k, v) -> header(k, v) } }
-                        .get()
-                        .build()
+                        // استخدام noRedirectClient هنا فقط لقراءة 302 Location
+                        val gRes = noRedirectClient.newCall(gReq).execute()
+                        var embedUrl = gRes.header("Location") ?: gRes.header("location")
 
-                    val gRes = globalClient.newCall(gReq).execute()
-                    var embedUrl = gRes.header("Location") ?: gRes.header("location")
+                        if (embedUrl.isNullOrBlank()) {
+                            val gBody = gRes.body?.string().orEmpty()
+                            val match = Regex("""url=['"]([^'"]+)['"]""").find(gBody)
+                                ?: Regex("""href=["'](https?://[^"']+)["']""").find(gBody)
+                                ?: Regex("""src=["'](https?://[^"']+)["']""").find(gBody)
+                            embedUrl = match?.groupValues?.get(1)
+                        }
+                        gRes.close()
 
-                    if (embedUrl.isNullOrBlank()) {
-                        val gBody = gRes.body?.string().orEmpty()
-                        val match = Regex("""url=['"]([^'"]+)['"]""").find(gBody)
-                            ?: Regex("""href=["'](https?://[^"']+)["']""").find(gBody)
-                            ?: Regex("""src=["'](https?://[^"']+)["']""").find(gBody)
-                        embedUrl = match?.groupValues?.get(1)
-                    }
-                    gRes.close()
+                        if (!embedUrl.isNullOrBlank() && embedUrl.startsWith("http")) {
+                            if (embedUrl.contains("mega.nz") || embedUrl.contains("mega.co.nz")) {
+                                val typeLabel = if (s.isStream) "مشاهدة" else "تنزيل"
+                                val displayName = "${s.label.uppercase()} (${s.quality}) [$typeLabel]"
 
-                    if (!embedUrl.isNullOrBlank() && embedUrl.startsWith("http")) {
-                        if (embedUrl.contains("mega.nz") || embedUrl.contains("mega.co.nz")) {
-                            val typeLabel = if (s.isStream) "مشاهدة" else "تنزيل"
-                            val displayName = "${s.label.uppercase()} (${s.quality}) [$typeLabel]"
+                                var megaSuccess = false
+                                try {
+                                    val localStreamUrl = WitAnimeMegaServer.registerMegaStream(embedUrl)
+                                    if (!localStreamUrl.isNullOrBlank()) {
+                                        val qVal = getQualityFromName(s.quality).takeIf { it > 0 } ?: Qualities.P1080.value
+                                        callback(
+                                            newExtractorLink(
+                                                name = "$displayName (Mega Direct)",
+                                                source = "Mega",
+                                                url = localStreamUrl
+                                            ) {
+                                                this.referer = embedUrl
+                                                this.quality = qVal
+                                                this.type = ExtractorLinkType.VIDEO
+                                            }
+                                        )
+                                        megaSuccess = true
+                                        foundAny = true
+                                    }
+                                } catch (e: Exception) {
+                                    logError(e)
+                                }
 
-                            var megaSuccess = false
-                            try {
-                                val localStreamUrl = WitAnimeMegaServer.registerMegaStream(embedUrl)
-                                if (!localStreamUrl.isNullOrBlank()) {
-                                    val qVal = getQualityFromName(s.quality).takeIf { it > 0 } ?: Qualities.P1080.value
+                                if (!megaSuccess) {
+                                    val dummyUrl = "https://raw.githubusercontent.com/Anarios/Cloudstream/master/app/src/main/res/raw/blank.mp4#mega-webview://$embedUrl"
                                     callback(
                                         newExtractorLink(
-                                            name = "$displayName (Mega Direct)",
-                                            source = "Mega",
-                                            url = localStreamUrl
+                                            name = "$displayName [WebView]",
+                                            source = "WitAnime",
+                                            url = dummyUrl
                                         ) {
                                             this.referer = embedUrl
-                                            this.quality = qVal
+                                            this.quality = Qualities.Unknown.value
                                             this.type = ExtractorLinkType.VIDEO
                                         }
                                     )
-                                    megaSuccess = true
                                     foundAny = true
                                 }
-                            } catch (e: Exception) {
-                                logError(e)
-                            }
-
-                            if (!megaSuccess) {
-                                val dummyUrl = "https://raw.githubusercontent.com/Anarios/Cloudstream/master/app/src/main/res/raw/blank.mp4#mega-webview://$embedUrl"
-                                callback(
-                                    newExtractorLink(
-                                        name = "$displayName [WebView]",
-                                        source = "WitAnime",
-                                        url = dummyUrl
-                                    ) {
-                                        this.referer = embedUrl
-                                        this.quality = Qualities.Unknown.value
-                                        this.type = ExtractorLinkType.VIDEO
-                                    }
-                                )
-                                foundAny = true
-                            }
-                        } else {
-                            loadExtractor(embedUrl, cleanWatchUrl, subtitleCallback) { link ->
-                                foundAny = true
-                                callback(link)
+                            } else {
+                                loadExtractor(embedUrl, cleanWatchUrl, subtitleCallback) { link ->
+                                    foundAny = true
+                                    callback(link)
+                                }
                             }
                         }
+
+                        delay(1150)
+                    } catch (e: Exception) {
+                        logError(e)
+                        delay(1150)
                     }
-
-                    delay(1150)
-                } catch (e: Exception) {
-                    logError(e)
-                    delay(1150)
                 }
-            }
 
-            foundAny
-        } catch (e: Exception) {
-            logError(e)
-            false
+                foundAny
+            } catch (e: Exception) {
+                logError(e)
+                false
+            }
         }
     }
-}
 }
