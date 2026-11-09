@@ -131,8 +131,6 @@ class Asia2tvProvider : MainAPI() {
 
         val resolvedWatchUrl = fixUrl(watchPageUrl)
         val serversPage = app.get(resolvedWatchUrl).document
-
-        // استخراج الرابط مع اسم السيرفر المكتوب في الموقع (مثل Upload, Vidmoly...)
         val serverList = serversPage.select("ul.server-list-menu li").mapNotNull { li ->
             val url = li.attr("data-server").trim()
             val name = li.text().trim()
@@ -186,7 +184,6 @@ class Asia2tvProvider : MainAPI() {
         if (depth > 2 || url.isBlank()) return
 
         coroutineScope {
-            // المسار 1: مستخرج CloudStream الرسمي
             val defaultExtractorJob = async {
                 try {
                     loadExtractor(url, referer, subtitleCallback, callback)
@@ -194,8 +191,6 @@ class Asia2tvProvider : MainAPI() {
                     Log.w(TAG, "loadExtractor error on $url: ${e.message}")
                 }
             }
-
-            // المسار 2: الفحص اليدوي وفك التشفير
             val manualExtractorJob = async {
                 try {
                     extractManually(url, displayName, referer, subtitleCallback, callback, depth)
@@ -221,8 +216,6 @@ class Asia2tvProvider : MainAPI() {
     ) {
         val hostUri = runCatching { URI(url) }.getOrNull() ?: return
         val origin = "${hostUri.scheme}://${hostUri.host}"
-
-        // لسيرفرات Uqload نفضل تمرير رابطها كـ Referer
         val fetchReferer = if (url.contains("uqload")) url else referer
 
         val rawHtml = runCatching {
@@ -232,8 +225,6 @@ class Asia2tvProvider : MainAPI() {
                 headers = mapOf("User-Agent" to DEFAULT_UA, "Accept" to "*/*")
             ).text
         }.getOrNull() ?: return
-
-        // فك تشفير سكربتات eval
         val unpackedHtml = buildString {
             append(rawHtml)
             val evalRegex = Regex("""eval\(function\(p,a,c,k,e,[dr]\).*?\)\)\s*;?""", RegexOption.DOT_MATCHES_ALL)
@@ -245,16 +236,12 @@ class Asia2tvProvider : MainAPI() {
         }.replace("\\/", "/")
 
         val commonHeaders = mapOf("User-Agent" to DEFAULT_UA, "Referer" to "$origin/", "Origin" to origin)
-
-        // 1. فحص مشغل Clappr (المشغل الأساسي لسيرفر Upload / Uqload)
         val clapprRegex = Regex("""(?:sources|file)\s*:\s*\[?["']([^"']+\.mp4[^"']*)["']\]?""")
         clapprRegex.find(unpackedHtml)?.groupValues?.get(1)?.let { mp4Url ->
             val fullMp4 = if (mp4Url.startsWith("//")) "https:$mp4Url" else mp4Url
             emitMedia(displayName, fullMp4, "$origin/", commonHeaders, callback)
             return
         }
-
-        // 2. كائنات JSON والمتغيرات (StreamWish / JWPlayer / Vidmoly)
         val jsonPattern = Regex("""var\s+links\s*=\s*(\{[^;]+\})""").find(unpackedHtml)?.groupValues?.get(1)
         if (jsonPattern != null) {
             runCatching {
@@ -267,8 +254,6 @@ class Asia2tvProvider : MainAPI() {
                 }
             }
         }
-
-        // 3. نمط دمج السلاسل النصية (StreamTape)
         val concatRegex = Regex("""getElementById\(['"][^'"]+['"]\)\.innerHTML\s*=\s*['"]([^'"]+)['"]\s*\+\s*\(?['"]([^'"]+)['"]\)?""")
         concatRegex.find(unpackedHtml)?.let { m ->
             var direct = m.groupValues[1] + m.groupValues[2]
@@ -276,24 +261,18 @@ class Asia2tvProvider : MainAPI() {
             if (!direct.contains("&stream=")) direct += "&stream=1"
             emitMedia(displayName, direct, "$origin/", commonHeaders, callback)
         }
-
-        // 4. روابط HLS المباشرة (M3U8 / txt)
         val hlsRegex = Regex("""(?i)["']((?:https?:)?//[^\s"'<>\\]+?\.(?:m3u8|txt)(?:\?[^\s"'<>\\]*)?)["']""")
         hlsRegex.findAll(unpackedHtml).forEach { m ->
             val hlsLink = m.groupValues[1]
             val fullHls = if (hlsLink.startsWith("//")) "https:$hlsLink" else hlsLink
             emitMedia(displayName, fullHls, "$origin/", commonHeaders, callback)
         }
-
-        // 5. روابط MP4 المباشرة العامة
         val mp4Regex = Regex("""(?i)["']((?:https?:)?//[^\s"'<>\\]+?\.mp4(?:\?[^\s"'<>\\]*)?)["']""")
         mp4Regex.findAll(unpackedHtml).forEach { m ->
             val mp4Link = m.groupValues[1]
             val fullMp4 = if (mp4Link.startsWith("//")) "https:$mp4Link" else mp4Link
             emitMedia(displayName, fullMp4, "$origin/", commonHeaders, callback)
         }
-
-        // 6. فحص وجود iframe داخلي متداخل
         val innerIframe = Regex("""<iframe[^>]+src=["']([^"']+)["']""").find(unpackedHtml)?.groupValues?.get(1)
         if (!innerIframe.isNullOrBlank() && !innerIframe.startsWith("javascript")) {
             val nextUrl = if (innerIframe.startsWith("//")) "https:$innerIframe" else if (innerIframe.startsWith("/")) "$origin$innerIframe" else innerIframe
