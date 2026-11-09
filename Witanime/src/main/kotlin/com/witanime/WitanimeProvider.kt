@@ -46,8 +46,6 @@ class WitAnime : MainAPI() {
         "Sec-Ch-Ua-Mobile" to "?0",
         "Sec-Ch-Ua-Platform" to "\"Windows\""
     )
-
-    // تم تعديل هذا الجزء بالكامل ليطابق Windows تماماً مثل baseHeaders وتجنب التعارض
     private val exactGateHeaders = mapOf(
         "Host" to "witanime.site",
         "Sec-Ch-Ua" to "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"",
