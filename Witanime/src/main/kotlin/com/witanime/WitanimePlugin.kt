@@ -8,10 +8,12 @@ import com.lagradost.cloudstream3.plugins.Plugin
 class WitAnimePlugin : Plugin() {
     override fun load(context: Context) {
         registerMainAPI(WitAnime())
+
         registerExtractorAPI(MegaExtractor())
         registerExtractorAPI(GoFileExtractor())
         registerExtractorAPI(VideaExtractor())
         registerExtractorAPI(MailruExtractor())
         registerExtractorAPI(FourSharedExtractor())
+        registerExtractorAPI(YonaPlayExtractor()) // <--- إضافة YonaPlay هنا
     }
 }
