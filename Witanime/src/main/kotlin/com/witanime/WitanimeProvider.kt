@@ -36,31 +36,30 @@ class WitAnime : MainAPI() {
 
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie)
 private val customUserAgent =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
-private val baseHeaders = mapOf(
-    "User-Agent" to customUserAgent,
-    "Sec-Ch-Ua" to "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"",
-    "Sec-Ch-Ua-Mobile" to "?0",
-    "Sec-Ch-Ua-Platform" to "\"Windows\""
-)
+    // ترويسات موحدة لمتصفح كمبيوتر مكتبي (Windows)
+    private val baseHeaders = mapOf(
+        "User-Agent" to customUserAgent,
+        "Sec-Ch-Ua" to "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"",
+        "Sec-Ch-Ua-Mobile" to "?0",
+        "Sec-Ch-Ua-Platform" to "\"Windows\""
+    )
 
-
+    // ترويسات البوابة بعد إزالة تناقض الأندرويد وإصدار 155 الوهمي
     private val exactGateHeaders = mapOf(
         "Host" to "witanime.site",
-        "Sec-Ch-Ua" to "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
-        "Sec-Ch-Ua-Mobile" to "?1",
-        "Sec-Ch-Ua-Platform" to "\"Android\"",
-        "Upgrade-Insecure-Requests" to "1",
         "User-Agent" to customUserAgent,
-        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "Sec-Ch-Ua" to "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"",
+        "Sec-Ch-Ua-Mobile" to "?0",
+        "Sec-Ch-Ua-Platform" to "\"Windows\"",
+        "Upgrade-Insecure-Requests" to "1",
+        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Sec-Fetch-Site" to "same-origin",
         "Sec-Fetch-Mode" to "navigate",
-        "Sec-Fetch-User" to "?1",
         "Sec-Fetch-Dest" to "iframe",
-        "Accept-Encoding" to "gzip, deflate, br, zstd",
-        "Accept-Language" to "ar-IQ,ar;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Priority" to "u=0, i"
+        "Sec-Fetch-User" to "?1",
+        "Accept-Language" to "ar,en-US;q=0.9,en;q=0.8"
     )
 
     private val rotatingUas = listOf(
@@ -538,23 +537,25 @@ private val baseHeaders = mapOf(
                     .build()
 
                 suspend fun fetchServersAndToken(batchSession: BatchSession): Pair<Map<String, String>, List<ServerItem>>? {
-                    val cacheBusterUrl = "$data?t=${System.currentTimeMillis() / 1000}"
-                    val randomUa = rotatingUas.random()
+    val cacheBusterUrl = "$data?t=${System.currentTimeMillis() / 1000}"
 
-                    val tokenHeaders = baseHeaders.toMutableMap()
-                    tokenHeaders["User-Agent"] = randomUa
+    // استخدام الترويسات الأساسية الموحدة مباشرة
+    val pageReq = Request.Builder()
+        .url(cacheBusterUrl)
+        .apply { 
+            baseHeaders.forEach { (k, v) -> header(k, v) } 
+            header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+            header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
+        }
+        .build()
 
-                    val pageReq = Request.Builder()
-                        .url(cacheBusterUrl)
-                        .apply { tokenHeaders.forEach { (k, v) -> header(k, v) } }
-                        .build()
+    val pageRes = directClient.newCall(pageReq).execute()
+    batchSession.saveCookies(pageRes)
+    val pageHtml = pageRes.body?.string().orEmpty()
+    pageRes.close()
 
-                    val pageRes = directClient.newCall(pageReq).execute()
-                    batchSession.saveCookies(pageRes)
-                    val pageHtml = pageRes.body?.string().orEmpty()
-                    pageRes.close()
-
-                    if (pageRes.code != 200) return null
+    if (pageRes.code != 200) return null
+    // ... باقي الكود
 
                     val csrfToken = Regex("""name=['"]csrf-token['"]\s+content=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                         ?: Regex("""data-csrf=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
