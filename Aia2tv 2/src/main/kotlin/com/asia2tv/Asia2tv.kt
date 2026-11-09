@@ -1,11 +1,14 @@
 package com.asia2tv
+
 import android.util.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.Qualities
 import org.jsoup.nodes.Element
+import org.json.JSONObject
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -17,6 +20,7 @@ class Asia2tvProvider : MainAPI() {
     override val hasMainPage = true
     override var lang = "ar"
     override val supportedTypes = setOf(TvType.AsianDrama, TvType.TvSeries, TvType.Movie)
+
     private fun getPosterFromElement(element: Element?): String? {
         return element?.selectFirst("div.image img")?.let {
             it.attr("src").ifBlank { it.attr("data-src") }
@@ -94,9 +98,9 @@ class Asia2tvProvider : MainAPI() {
             newEpisode(href) {
                 this.name = episodeName
                 this.episode = episodeNumber
-                this.posterUrl = poster // إضافة بوستر المسلسل لكل حلقة
+                this.posterUrl = poster
             }
-        }.reversed() // عكس الترتيب لأن المواقع غالبًا ما تعرض الحلقات من الأحدث للأقدم
+        }.reversed()
 
         return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
             this.posterUrl = poster
@@ -105,9 +109,6 @@ class Asia2tvProvider : MainAPI() {
             this.year = year
         }
     }
-
-    
-
 
     private fun deobfuscatePacker(packed: String): String {
         try {
@@ -167,15 +168,48 @@ class Asia2tvProvider : MainAPI() {
         }
         return htmlText
     }
-    private fun findM3u8(text: String): String? {
-        val fileRegex = """file\s*:\s*["']([^"']+)["']""".toRegex()
-        val fileMatch = fileRegex.find(text)
-        if (fileMatch != null) return fileMatch.groupValues[1]
 
+    /**
+     * استخراج كافة أنماط الروابط (m3u8, var links, clappr, StreamTape)
+     */
+    private fun findVideoLinks(text: String): List<String> {
+        val found = LinkedHashSet<String>()
+
+        // 1. نمط كائنات JSON مثل StreamWish / Vidhide
+        Regex("""var\s+links\s*=\s*(\{[^;]+\})""").find(text)?.groupValues?.get(1)?.let { rawJson ->
+            runCatching {
+                val obj = JSONObject(rawJson)
+                for (k in listOf("hls4", "hls2", "hls3", "hls", "file")) {
+                    val l = obj.optString(k).trim().replace("\\/", "/")
+                    if (l.startsWith("http")) found.add(l)
+                }
+            }
+        }
+
+        // 2. نمط تجميع السلاسل النصية لـ StreamTape
+        Regex("""getElementById\(['"][^'"]+['"]\)\.innerHTML\s*=\s*['"]([^'"]+)['"]\s*\+\s*\(?['"]([^'"]+)['"]\)?""").find(text)?.let { m ->
+            var direct = m.groupValues[1] + m.groupValues[2]
+            if (direct.startsWith("//")) direct = "https:$direct"
+            if (!direct.contains("&stream=")) direct += "&stream=1"
+            found.add(direct)
+        }
+
+        // 3. نمط مشغلات Clappr / JWPlayer (file / sources)
+        val fileRegex = """(?:file|sources)\s*[:=]\s*\[?["']([^"']+)["']\]?""".toRegex()
+        fileRegex.findAll(text).forEach { m ->
+            val l = m.groupValues[1].trim().replace("\\/", "/")
+            if (l.startsWith("http")) found.add(l)
+        }
+
+        // 4. نمط M3U8 المباشر
         val m3u8Regex = """(https?://[^\s"\'<>]+?\.m3u8[^\s"\'<>?]*(?:\?[^\s"\'<>]*)?)""".toRegex()
-        val m3u8Match = m3u8Regex.find(text)
-        return m3u8Match?.groupValues?.get(1)
+        m3u8Regex.findAll(text).forEach { m ->
+            found.add(m.groupValues[1].trim().replace("\\/", "/"))
+        }
+
+        return found.toList()
     }
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -194,6 +228,7 @@ class Asia2tvProvider : MainAPI() {
         val resolvedServerPageUrl = fixUrl(serverPageUrl)
         val serversPage = app.get(resolvedServerPageUrl).document
         val servers = serversPage.select("ul.server-list-menu li")
+
         coroutineScope {
             servers.map { server ->
                 async {
@@ -201,11 +236,15 @@ class Asia2tvProvider : MainAPI() {
                     if (embedSource.isBlank()) return@async
 
                     val serverUrl = fixUrl(embedSource)
+
+                    // 1. تشغيل loadExtractor الأصلي (هو المسؤول عن سيرفر Upload والعديد من السيرفرات الأخرى)
                     try {
                         loadExtractor(serverUrl, resolvedServerPageUrl, subtitleCallback, callback)
                     } catch (e: Exception) {
                         Log.w(name, "loadExtractor failed for $serverUrl: ${e.message}")
                     }
+
+                    // 2. الفحص اليدوي المطور (لحصد السيرفرات التي تفشل فيها المستخرجات المدمجة)
                     try {
                         val uri = URL(serverUrl)
                         val domain = "${uri.protocol}://${uri.host}/"
@@ -221,16 +260,18 @@ class Asia2tvProvider : MainAPI() {
 
                         if (serverResponse.code == 200) {
                             val content = extractLogic(serverResponse.text)
-                            val videoLink = findM3u8(content)
+                            val videoLinks = findVideoLinks(content)
 
-                            if (!videoLink.isNullOrEmpty()) {
+                            for (videoLink in videoLinks) {
                                 val finalVideoUrl = fixUrl(videoLink)
+                                val isHls = finalVideoUrl.contains(".m3u8") || finalVideoUrl.contains(".txt")
 
                                 val verifyHeaders = mapOf(
                                     "Referer" to domain,
                                     "Origin" to domain.removeSuffix("/"),
                                     "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                                 )
+
                                 val check = app.get(
                                     url = finalVideoUrl,
                                     headers = verifyHeaders,
@@ -244,12 +285,14 @@ class Asia2tvProvider : MainAPI() {
                                             source = name,
                                             name = serverName,
                                             url = finalVideoUrl,
+                                            type = if (isHls) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
                                         ) {
                                             this.referer = domain
                                             this.quality = Qualities.Unknown.value
                                             this.headers = verifyHeaders
                                         }
                                     )
+                                    break // تم بنجاح العثور على رابط صالح لهذا السيرفر
                                 }
                             }
                         }
