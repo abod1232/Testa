@@ -29,10 +29,6 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 import kotlin.random.Random
 
-// ════════════════════════════════════════════════════════════════════════════
-// 1. MEGA Extractor
-// ════════════════════════════════════════════════════════════════════════════
-
 class MegaExtractor : ExtractorApi() {
     override val name: String = "Mega"
     override val mainUrl: String = "https://mega.nz"
@@ -75,10 +71,6 @@ class MegaExtractor : ExtractorApi() {
         }
     }
 }
-
-// ════════════════════════════════════════════════════════════════════════════
-// 2. GoFile Extractor
-// ════════════════════════════════════════════════════════════════════════════
 
 class GoFileExtractor : ExtractorApi() {
     override val name: String = "GoFile"
@@ -197,10 +189,6 @@ class GoFileExtractor : ExtractorApi() {
         }
     }
 }
-
-// ════════════════════════════════════════════════════════════════════════════
-// 3. Videa Extractor
-// ════════════════════════════════════════════════════════════════════════════
 
 class VideaExtractor : ExtractorApi() {
     override val name: String = "Videa"
@@ -335,10 +323,6 @@ class VideaExtractor : ExtractorApi() {
     }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// 4. MailRu Extractor
-// ════════════════════════════════════════════════════════════════════════════
-
 class MailruExtractor : ExtractorApi() {
     override val name = "MailRu"
     override val mainUrl = "https://my.mail.ru"
@@ -399,10 +383,6 @@ class MailruExtractor : ExtractorApi() {
     )
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// 5. 4Shared Extractor
-// ════════════════════════════════════════════════════════════════════════════
-
 class FourSharedExtractor : ExtractorApi() {
     override val name = "4Shared"
     override val mainUrl = "https://www.4shared.com"
@@ -447,10 +427,6 @@ class FourSharedExtractor : ExtractorApi() {
         }
     }
 }
-
-// ════════════════════════════════════════════════════════════════════════════
-// 6. YonaPlay Extractor (AES-256-GCM + DotPlay Solver)
-// ════════════════════════════════════════════════════════════════════════════
 
 class YonaPlayExtractor : ExtractorApi() {
     override val name = "YonaPlay"
