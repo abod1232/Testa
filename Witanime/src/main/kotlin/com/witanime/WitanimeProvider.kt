@@ -559,10 +559,7 @@ class WitAnime : MainAPI() {
 ): Boolean {
     return withContext(Dispatchers.IO) {
         try {
-            // تنظيف الرابط وإزالة أي بارامترات أو زوائد
             val cleanWatchUrl = data.substringBefore('?').trimEnd('/')
-
-            // 1. فحص وتهيئة الجلسة
             if (!sharedCookieJar.hasCookie("witanime.site", "witanime-session")) {
                 val primeReq = Request.Builder()
                     .url("$mainUrl/")
@@ -573,7 +570,6 @@ class WitAnime : MainAPI() {
             }
 
             suspend fun fetchServersAndToken(): Pair<Map<String, String>, List<ServerItem>>? {
-                // طلب صفحة المشاهدة بالرابط النظيف تماماً
                 val pageReq = Request.Builder()
                     .url(cleanWatchUrl)
                     .apply {
@@ -595,8 +591,6 @@ class WitAnime : MainAPI() {
                     ?: return null
 
                 delay(1100)
-
-                // استخراج sourcesUrl بدقة مع تنظيف السلاش المائل
                 val sourcesPattern = Regex("""sourcesUrl\s*:\s*['"]([^'"]+)['"]""")
                 val rawSources = sourcesPattern.find(pageHtml)?.groupValues?.get(1)?.replace("\\/", "/")?.trim()
                     ?: "$cleanWatchUrl/sources"
