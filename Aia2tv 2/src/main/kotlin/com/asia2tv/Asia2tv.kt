@@ -1,7 +1,9 @@
 package com.asia2tv
+
 import android.util.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
+import org.jsoup.nodes.Element
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -16,11 +18,13 @@ class Asia2tvProvider : MainAPI() {
         private const val TAG = "Asia2TV_Extractor"
         private const val DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
     }
+
     override var mainUrl = "https://ww1.asia2tv.pw"
     override var name = "Asia2TV 2"
     override val hasMainPage = true
     override var lang = "ar"
     override val supportedTypes = setOf(TvType.AsianDrama, TvType.TvSeries, TvType.Movie)
+
     private fun getPosterFromElement(element: Element?): String? {
         return element?.selectFirst("div.image img")?.let {
             it.attr("src").ifBlank { it.attr("data-src") }
@@ -98,9 +102,9 @@ class Asia2tvProvider : MainAPI() {
             newEpisode(href) {
                 this.name = episodeName
                 this.episode = episodeNumber
-                this.posterUrl = poster // إضافة بوستر المسلسل لكل حلقة
+                this.posterUrl = poster
             }
-        }.reversed() // عكس الترتيب لأن المواقع غالبًا ما تعرض الحلقات من الأحدث للأقدم
+        }.reversed()
 
         return newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
             this.posterUrl = poster
@@ -109,82 +113,6 @@ class Asia2tvProvider : MainAPI() {
             this.year = year
         }
     }
-
-    
-
-
-    private fun deobfuscatePacker(packed: String): String {
-        try {
-            val packerRegex = """eval\(function\(p,a,c,k,e,[rd]\)\{.*?\}\((['"])(.*?)\1\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])(.*?)\5\.split\(['"]\|['"]\)""".toRegex()
-            val match = packerRegex.find(packed) ?: return ""
-            val (_, p, aStr, cStr, _, kStr) = match.destructured
-            val a = aStr.toIntOrNull() ?: return ""
-            val c = cStr.toIntOrNull() ?: return ""
-            val k = kStr.split('|')
-
-            fun getBaseNString(num: Int, base: Int): String {
-                val chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                if (base <= 36) return num.toString(base)
-                var n = num
-                var res = ""
-                while (n > 0) {
-                    res = chars[n % base] + res
-                    n /= base
-                }
-                return if (res.isEmpty()) "0" else res
-            }
-
-            val dict = mutableMapOf<String, String>()
-            for (i in 0 until c) {
-                val key = getBaseNString(i, a)
-                val value = if (i < k.size && k[i].isNotEmpty()) k[i] else key
-                dict[key] = value
-            }
-
-            val wordRegex = """\b\w+\b""".toRegex()
-            return wordRegex.replace(p) { matchResult ->
-                val word = matchResult.value
-                dict[word] ?: word
-            }
-        } catch (e: Exception) {
-            return ""
-        }
-    }
-
-    private fun extractLogic(htmlText: String): String {
-        try {
-            val startMarker = "eval(function(p,a,c,k,e,d)"
-            val startIdx = htmlText.indexOf(startMarker)
-            if (startIdx != -1) {
-                val endMarker = ".split('|')))"
-                val endIdx = htmlText.indexOf(endMarker, startIdx)
-                if (endIdx != -1) {
-                    val packedJs = htmlText.substring(startIdx, endIdx + endMarker.length)
-                    val unpacked = deobfuscatePacker(packedJs)
-                    if (unpacked.isNotEmpty()) {
-                        return unpacked
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(name, "Error in extractLogic: ${e.message}")
-        }
-        return htmlText
-    }
-    private fun findM3u8(text: String): String? {
-        val fileRegex = """file\s*:\s*["']([^"']+)["']""".toRegex()
-        val fileMatch = fileRegex.find(text)
-        if (fileMatch != null) return fileMatch.groupValues[1]
-
-        val m3u8Regex = """(https?://[^\s"\'<>]+?\.m3u8[^\s"\'<>?]*(?:\?[^\s"\'<>]*)?)""".toRegex()
-        val m3u8Match = m3u8Regex.find(text)
-        return m3u8Match?.groupValues?.get(1)
-    }
-    package com.asia2tv
-
-
-
-
 
     override suspend fun loadLinks(
         data: String,
@@ -218,6 +146,7 @@ class Asia2tvProvider : MainAPI() {
                 callback(link)
             }
         }
+
         coroutineScope {
             serverUrls.map { rawUrl ->
                 async {
@@ -279,6 +208,7 @@ class Asia2tvProvider : MainAPI() {
         val hostUri = runCatching { URI(url) }.getOrNull() ?: return
         val origin = "${hostUri.scheme}://${hostUri.host}"
         val serverName = hostUri.host.removePrefix("www.").substringBefore(".")
+        
         val rawHtml = runCatching {
             app.get(
                 url,
@@ -286,6 +216,7 @@ class Asia2tvProvider : MainAPI() {
                 headers = mapOf("User-Agent" to DEFAULT_UA, "Accept" to "*/*")
             ).text
         }.getOrNull() ?: return
+
         val unpackedHtml = buildString {
             append(rawHtml)
             val evalRegex = Regex("""eval\(function\(p,a,c,k,e,[dr]\).*?\)\)\s*;?""", RegexOption.DOT_MATCHES_ALL)
@@ -297,6 +228,8 @@ class Asia2tvProvider : MainAPI() {
         }.replace("\\/", "/")
 
         val commonHeaders = mapOf("User-Agent" to DEFAULT_UA, "Referer" to "$origin/", "Origin" to origin)
+
+        // 1. فحص كائنات JSON ومتغيرات الروابط (StreamWish / JWPlayer / Vidmoly)
         val jsonPattern = Regex("""var\s+links\s*=\s*(\{[^;]+\})""").find(unpackedHtml)?.groupValues?.get(1)
         if (jsonPattern != null) {
             runCatching {
@@ -309,6 +242,8 @@ class Asia2tvProvider : MainAPI() {
                 }
             }
         }
+
+        // 2. فحص نمط دمج السلاسل النصية (StreamTape)
         val concatRegex = Regex("""getElementById\(['"][^'"]+['"]\)\.innerHTML\s*=\s*['"]([^'"]+)['"]\s*\+\s*\(?['"]([^'"]+)['"]\)?""")
         concatRegex.find(unpackedHtml)?.let { m ->
             var direct = m.groupValues[1] + m.groupValues[2]
@@ -316,18 +251,24 @@ class Asia2tvProvider : MainAPI() {
             if (!direct.contains("&stream=")) direct += "&stream=1"
             emitMedia(serverName, direct, "$origin/", commonHeaders, callback)
         }
+
+        // 3. البحث المباشر عن أي رابط M3U8 أو master.txt
         val hlsRegex = Regex("""(?i)["']((?:https?:)?//[^\s"'<>\\]+?\.(?:m3u8|txt)(?:\?[^\s"'<>\\]*)?)["']""")
         hlsRegex.findAll(unpackedHtml).forEach { m ->
             val hlsLink = m.groupValues[1]
             val fullHls = if (hlsLink.startsWith("//")) "https:$hlsLink" else hlsLink
             emitMedia(serverName, fullHls, "$origin/", commonHeaders, callback)
         }
+
+        // 4. البحث عن روابط MP4 صريحة
         val mp4Regex = Regex("""(?i)["']((?:https?:)?//[^\s"'<>\\]+?\.mp4(?:\?[^\s"'<>\\]*)?)["']""")
         mp4Regex.findAll(unpackedHtml).forEach { m ->
             val mp4Link = m.groupValues[1]
             val fullMp4 = if (mp4Link.startsWith("//")) "https:$mp4Link" else mp4Link
             emitMedia(serverName, fullMp4, "$origin/", commonHeaders, callback)
         }
+
+        // 5. فحص وجود iframe متداخل والانتقال إليه
         val innerIframe = Regex("""<iframe[^>]+src=["']([^"']+)["']""").find(unpackedHtml)?.groupValues?.get(1)
         if (!innerIframe.isNullOrBlank() && !innerIframe.startsWith("javascript")) {
             val nextUrl = if (innerIframe.startsWith("//")) "https:$innerIframe" else if (innerIframe.startsWith("/")) "$origin$innerIframe" else innerIframe
