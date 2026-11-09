@@ -26,8 +26,6 @@ import org.jsoup.Jsoup
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
-
-// ── CookieJar عام ومستمر طوال فترة تشغيل التطبيق (مثل الكود الأول) ───────────
 class SharedSessionCookieJar : CookieJar {
     private val store = ConcurrentHashMap<String, Cookie>()
 
@@ -84,8 +82,6 @@ class WitAnime : MainAPI() {
     companion object {
         @Volatile var isWebViewOpen = false
         @Volatile var lastWebViewOpenTime = 0L
-
-        // كوكيز وعميل موحدين على مستوى الإضافة بالكامل لتشارك الجلسة
         val sharedCookieJar = SharedSessionCookieJar()
 
         val globalClient: OkHttpClient by lazy {
@@ -99,8 +95,6 @@ class WitAnime : MainAPI() {
                 .build()
         }
     }
-
-    // ترويسات موحدة لمتصفح لابتوب Chrome 131 بدون أي تناقض
     private val customUserAgent =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
@@ -382,8 +376,6 @@ class WitAnime : MainAPI() {
     init {
         PlayerAccess.startMonitoring()
     }
-
-    // تستخدم الآن العميل الموحد لحفظ كوكيز الجلسة من التصفح والبحث تلقائياً
     private fun fetchDocument(url: String): org.jsoup.nodes.Document {
         val req = Request.Builder()
             .url(url)
@@ -567,8 +559,6 @@ class WitAnime : MainAPI() {
     ): Boolean {
         return withContext(Dispatchers.IO) {
             try {
-                // 1. فحص وتهيئة الجلسة (Session Priming) تماماً كالكود الأول:
-                // إذا لم يكن كوكي witanime-session موجوداً، نطلب الصفحة الرئيسية لتثبيته
                 if (!sharedCookieJar.hasCookie("witanime.site", "witanime-session")) {
                     val primeReq = Request.Builder()
                         .url("$mainUrl/")
@@ -667,8 +657,6 @@ class WitAnime : MainAPI() {
                 if (allServers.isEmpty()) return@withContext false
 
                 var foundAny = false
-
-                // استخراج الروابط من السيرفرات بالترتيب
                 for (s in allServers.take(16)) {
                     val sourceEndpoint = if (s.isStream) "stream-source" else "download-source"
                     val gateEndpoint = if (s.isStream) "stream-gate" else "download-gate"
