@@ -174,8 +174,6 @@ class Asia2tvProvider : MainAPI() {
      */
     private fun findVideoLinks(text: String): List<String> {
         val found = LinkedHashSet<String>()
-
-        // 1. نمط كائنات JSON مثل StreamWish / Vidhide
         Regex("""var\s+links\s*=\s*(\{[^;]+\})""").find(text)?.groupValues?.get(1)?.let { rawJson ->
             runCatching {
                 val obj = JSONObject(rawJson)
@@ -185,23 +183,17 @@ class Asia2tvProvider : MainAPI() {
                 }
             }
         }
-
-        // 2. نمط تجميع السلاسل النصية لـ StreamTape
         Regex("""getElementById\(['"][^'"]+['"]\)\.innerHTML\s*=\s*['"]([^'"]+)['"]\s*\+\s*\(?['"]([^'"]+)['"]\)?""").find(text)?.let { m ->
             var direct = m.groupValues[1] + m.groupValues[2]
             if (direct.startsWith("//")) direct = "https:$direct"
             if (!direct.contains("&stream=")) direct += "&stream=1"
             found.add(direct)
         }
-
-        // 3. نمط مشغلات Clappr / JWPlayer (file / sources)
         val fileRegex = """(?:file|sources)\s*[:=]\s*\[?["']([^"']+)["']\]?""".toRegex()
         fileRegex.findAll(text).forEach { m ->
             val l = m.groupValues[1].trim().replace("\\/", "/")
             if (l.startsWith("http")) found.add(l)
         }
-
-        // 4. نمط M3U8 المباشر
         val m3u8Regex = """(https?://[^\s"\'<>]+?\.m3u8[^\s"\'<>?]*(?:\?[^\s"\'<>]*)?)""".toRegex()
         m3u8Regex.findAll(text).forEach { m ->
             found.add(m.groupValues[1].trim().replace("\\/", "/"))
@@ -236,15 +228,11 @@ class Asia2tvProvider : MainAPI() {
                     if (embedSource.isBlank()) return@async
 
                     val serverUrl = fixUrl(embedSource)
-
-                    // 1. تشغيل loadExtractor الأصلي (هو المسؤول عن سيرفر Upload والعديد من السيرفرات الأخرى)
                     try {
                         loadExtractor(serverUrl, resolvedServerPageUrl, subtitleCallback, callback)
                     } catch (e: Exception) {
                         Log.w(name, "loadExtractor failed for $serverUrl: ${e.message}")
                     }
-
-                    // 2. الفحص اليدوي المطور (لحصد السيرفرات التي تفشل فيها المستخرجات المدمجة)
                     try {
                         val uri = URL(serverUrl)
                         val domain = "${uri.protocol}://${uri.host}/"
