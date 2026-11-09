@@ -26,8 +26,6 @@ import org.jsoup.Jsoup
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
-
-// ── CookieJar عام ومستمر لحفظ كوكيز الجلسة والـ CSRF تلقائياً ────────────────
 class SharedSessionCookieJar : CookieJar {
     private val store = ConcurrentHashMap<String, Cookie>()
 
@@ -84,11 +82,7 @@ class WitAnime : MainAPI() {
     companion object {
         @Volatile var isWebViewOpen = false
         @Volatile var lastWebViewOpenTime = 0L
-
-        // كوكيز مشتركة لجميع الطلبات
         val sharedCookieJar = SharedSessionCookieJar()
-
-        // عميل أساسي يتبع التوجيه (Redirects) لجميع الطلبات العادية وصفحات الحلقة والـ Sources
         val directClient: OkHttpClient by lazy {
             app.baseClient.newBuilder()
                 .cookieJar(sharedCookieJar)
@@ -99,8 +93,6 @@ class WitAnime : MainAPI() {
                 .callTimeout(20, TimeUnit.SECONDS)
                 .build()
         }
-
-        // عميل بدون توجيه مخصص فقط للبوابات لالتقاط كود 302 وترويسة Location
         val noRedirectClient: OkHttpClient by lazy {
             directClient.newBuilder()
                 .followRedirects(false)
@@ -108,8 +100,6 @@ class WitAnime : MainAPI() {
                 .build()
         }
     }
-
-    // ترويسات متصفح كمبيوتر مكتبي موحدة ومتطابقة مع بصمة Chrome 131
     private val customUserAgent =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
@@ -575,10 +565,7 @@ class WitAnime : MainAPI() {
     ): Boolean {
         return withContext(Dispatchers.IO) {
             try {
-                // 1. تنظيف رابط المشاهدة تماماً
                 val cleanWatchUrl = fixUrl(data.substringBefore('?').trimEnd('/'))
-
-                // 2. طلب صفحة الحلقة بالعميل directClient (الذي يتبع التوجيه تلقائياً)
                 val pageReq = Request.Builder()
                     .url(cleanWatchUrl)
                     .apply {
@@ -594,21 +581,15 @@ class WitAnime : MainAPI() {
                     if (!resp.isSuccessful) return@withContext false
                     resp.body?.string().orEmpty()
                 }
-
-                // 3. استخراج CSRF Token
                 val csrfToken = Regex("""name=['"]csrf-token['"]\s+content=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: Regex("""data-csrf=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: return@withContext false
-
-                // 4. استخراج رابط sources بدقة
                 val sourcesPattern = Regex("""sourcesUrl\s*:\s*['"]([^'"]+)['"]""")
                 val rawSources = sourcesPattern.find(pageHtml)?.groupValues?.get(1)?.replace("\\/", "/")?.trim()
                     ?: "$cleanWatchUrl/sources"
                 val sourcesUrl = fixUrl(rawSources)
 
                 delay(600) // راحة طبيعية بين الطلبات
-
-                // 5. إرسال طلب POST /sources بنفس العميل directClient
                 val emptyBody = RequestBody.create(null, ByteArray(0))
                 val sourcesReq = Request.Builder()
                     .url(sourcesUrl)
@@ -661,8 +642,6 @@ class WitAnime : MainAPI() {
                 if (allServers.isEmpty()) return@withContext false
 
                 var foundAny = false
-
-                // 6. استخراج روابط المشاهدة والتحميل من السيرفرات
                 for (s in allServers.take(16)) {
                     val sourceEndpoint = if (s.isStream) "stream-source" else "download-source"
                     val gateEndpoint = if (s.isStream) "stream-gate" else "download-gate"
@@ -704,8 +683,6 @@ class WitAnime : MainAPI() {
                             .apply { exactGateHeaders.forEach { (k, v) -> header(k, v) } }
                             .get()
                             .build()
-
-                        // استخدام noRedirectClient هنا فقط لقراءة 302 Location
                         val gRes = noRedirectClient.newCall(gReq).execute()
                         var embedUrl = gRes.header("Location") ?: gRes.header("location")
 
