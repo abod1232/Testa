@@ -1,4 +1,231 @@
-    if (value is Uri && value.toString().contains("mega-webview://")) return value.toString()
+package com.witanime
+
+import android.app.Activity
+import android.app.Dialog
+import android.content.Context
+import android.content.Intent
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import android.net.Uri
+import android.util.Base64
+import android.util.Log
+import android.view.Gravity
+import android.view.ViewGroup
+import android.webkit.WebChromeClient
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.widget.FrameLayout
+import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.mvvm.logError
+import com.lagradost.cloudstream3.utils.*
+import kotlinx.coroutines.*
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody
+import org.json.JSONArray
+import org.json.JSONObject
+import org.jsoup.Jsoup
+import java.util.concurrent.TimeUnit
+import kotlin.random.Random
+
+class WitAnime : MainAPI() {
+    override var mainUrl = "https://witanime.site"
+    override var name = "WitAnime"
+    override val hasMainPage = true
+    override var lang = "ar"
+
+    override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie)
+private val customUserAgent =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
+private val baseHeaders = mapOf(
+    "User-Agent" to customUserAgent,
+    "Sec-Ch-Ua" to "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"",
+    "Sec-Ch-Ua-Mobile" to "?0",
+    "Sec-Ch-Ua-Platform" to "\"Windows\""
+)
+
+
+    private val exactGateHeaders = mapOf(
+        "Host" to "witanime.site",
+        "Sec-Ch-Ua" to "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
+        "Sec-Ch-Ua-Mobile" to "?1",
+        "Sec-Ch-Ua-Platform" to "\"Android\"",
+        "Upgrade-Insecure-Requests" to "1",
+        "User-Agent" to customUserAgent,
+        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "Sec-Fetch-Site" to "same-origin",
+        "Sec-Fetch-Mode" to "navigate",
+        "Sec-Fetch-User" to "?1",
+        "Sec-Fetch-Dest" to "iframe",
+        "Accept-Encoding" to "gzip, deflate, br, zstd",
+        "Accept-Language" to "ar-IQ,ar;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Priority" to "u=0, i"
+    )
+
+    private val rotatingUas = listOf(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    )
+
+    companion object {
+        @Volatile var isWebViewOpen = false
+        @Volatile var lastWebViewOpenTime = 0L
+    }
+
+    object PlayerAccess {
+        private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        private var isMonitoring = false
+        private var lastHookedPlayer: Any? = null
+        private var activeDialog: Dialog? = null
+        private var isLoopStarted = false
+
+        fun startMonitoring() {
+            if (isLoopStarted) return
+            isLoopStarted = true
+            isMonitoring = true
+            handler.post(monitorRunnable)
+        }
+
+        private val monitorRunnable = object : Runnable {
+            override fun run() {
+                if (!isMonitoring) return
+                hookPlayerListener()
+                handler.postDelayed(this, 1000L)
+            }
+        }
+
+        private fun findFragmentRecursive(fragment: androidx.fragment.app.Fragment, packageName: String): androidx.fragment.app.Fragment? {
+            if (fragment.javaClass.name.startsWith(packageName)) return fragment
+            try {
+                for (child in fragment.childFragmentManager.fragments) {
+                    if (child != null) {
+                        val found = findFragmentRecursive(child, packageName)
+                        if (found != null) return found
+                    }
+                }
+            } catch (e: Exception) {}
+            return null
+        }
+
+        fun getActiveActivity(): Activity? {
+            return try {
+                val activityThreadClass = Class.forName("android.app.ActivityThread")
+                val activityThread = activityThreadClass.getMethod("currentActivityThread").invoke(null)
+                val activitiesField = activityThreadClass.getDeclaredField("mActivities").apply { isAccessible = true }
+                val activities = activitiesField.get(activityThread) as Map<*, *>
+                for (activityRecord in activities.values) {
+                    if (activityRecord == null) continue
+                    val act = activityRecord.javaClass.getDeclaredField("activity").apply { isAccessible = true }.get(activityRecord) as? Activity
+                    if (act != null && !act.isFinishing && !act.isDestroyed) return act
+                }
+                null
+            } catch (e: Exception) { null }
+        }
+
+        fun getPlayerFragment(): Any? {
+            val activity = getActiveActivity() ?: return null
+            return try {
+                val fragments = (activity as? androidx.fragment.app.FragmentActivity)?.supportFragmentManager?.fragments ?: return null
+                for (f in fragments) {
+                    if (f != null) {
+                        val found = findFragmentRecursive(f, "com.lagradost.cloudstream3.ui.player")
+                        if (found != null) return found
+                    }
+                }
+                null
+            } catch (e: Exception) { null }
+        }
+
+        fun currentPlayer(): Any? {
+            val fragment = getPlayerFragment() as? androidx.fragment.app.Fragment ?: return null
+            return try {
+                val playerField = fragment.javaClass.getDeclaredField("player").apply { isAccessible = true }
+                playerField.get(fragment)
+            } catch (e: Exception) {
+                try {
+                    fragment.javaClass.getMethod("getPlayer").invoke(fragment)
+                } catch (ex: Exception) { null }
+            }
+        }
+
+        fun pausePlayer() {
+            val player = currentPlayer() ?: return
+            try {
+                val handleEventMethod = player.javaClass.methods.firstOrNull { it.name == "handleEvent" }
+                if (handleEventMethod != null) {
+                    val parameterTypes = handleEventMethod.parameterTypes
+                    if (parameterTypes.isNotEmpty()) {
+                        val eventEnumClass = parameterTypes[0]
+                        val pauseEnumConstant = eventEnumClass.enumConstants?.firstOrNull { it.toString().contains("Pause", ignoreCase = true) }
+                        if (parameterTypes.size == 2) {
+                            val sourceEnumClass = parameterTypes[1]
+                            val syncEnumConstant = sourceEnumClass.enumConstants?.firstOrNull {
+                                it.toString().contains("Sync", ignoreCase = true) || it.toString().contains("UI", ignoreCase = true)
+                            }
+                            handleEventMethod.invoke(player, pauseEnumConstant, syncEnumConstant)
+                        } else {
+                            handleEventMethod.invoke(player, pauseEnumConstant)
+                        }
+                    }
+                }
+            } catch (e: Exception) { e.printStackTrace() }
+        }
+
+        fun getRealExoPlayer(player: Any): Any? {
+            val rootClassName = player.javaClass.name
+            if (rootClassName.contains("Player", ignoreCase = true) && !rootClassName.contains("Cache", ignoreCase = true)) {
+                if (player.javaClass.methods.any { it.name == "addListener" }) return player
+            }
+            try {
+                for (f in player.javaClass.declaredFields) {
+                    f.isAccessible = true
+                    val value = f.get(player) ?: continue
+                    if (value.javaClass.name.contains("Player", ignoreCase = true) && !value.javaClass.name.contains("Cache", ignoreCase = true)) {
+                        if (value.javaClass.methods.any { it.name == "addListener" }) return value
+                    }
+                }
+            } catch (e: Exception) {}
+            return null
+        }
+
+        private fun hookPlayerListener() {
+            val rawPlayer = currentPlayer() ?: return
+            val player = getRealExoPlayer(rawPlayer) ?: return
+            if (player === lastHookedPlayer) return
+            lastHookedPlayer = player
+
+            try {
+                val listenerClass = try {
+                    Class.forName("androidx.media3.common.Player\$Listener")
+                } catch (e: Exception) {
+                    Class.forName("com.google.android.exoplayer2.Player\$Listener")
+                }
+                val addListenerMethod = player.javaClass.getMethod("addListener", listenerClass)
+                val proxyListener = java.lang.reflect.Proxy.newProxyInstance(
+                    listenerClass.classLoader,
+                    arrayOf(listenerClass)
+                ) { proxy, method, args ->
+                    if (method.name == "equals") return@newProxyInstance proxy === (args?.get(0))
+                    if (method.name == "hashCode") return@newProxyInstance System.identityHashCode(proxy)
+                    if (method.name == "toString") return@newProxyInstance "ExoPlayerProxyListener"
+                    handler.post { checkMegaPlayback(player) }
+                    val returnType = method.returnType
+                    if (returnType == Boolean::class.javaPrimitiveType || returnType == Boolean::class.java) false
+                    else if (returnType?.isPrimitive == true) 0
+                    else null
+                }
+                addListenerMethod.invoke(player, proxyListener)
+            } catch (e: Exception) {}
+        }
+
+        private fun findUrlInObject(obj: Any, depth: Int = 0): String? {
+            if (depth > 3) return null
+            try {
+                for (f in obj.javaClass.declaredFields) {
+                    f.isAccessible = true
+                    val value = f.get(obj) ?: continue
+                    if (value is String && value.contains("mega-webview://")) return value
+                    if (value is Uri && value.toString().contains("mega-webview://")) return value.toString()
                     val pkg = value.javaClass.`package`?.name ?: ""
                     if (pkg.contains("lagradost") || pkg.contains("media3") || pkg.contains("exoplayer") || pkg.contains("google")) {
                         val found = findUrlInObject(value, depth + 1)
@@ -64,7 +291,7 @@
                             settings.javaScriptEnabled = true
                             settings.domStorageEnabled = true
                             settings.mediaPlaybackRequiresUserGesture = false
-                            settings.userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+                            settings.userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
                             webViewClient = WebViewClient()
                             webChromeClient = WebChromeClient()
                             loadUrl(megaUrl)
@@ -108,7 +335,7 @@
             .apply {
                 baseHeaders.forEach { (k, v) -> header(k, v) }
                 header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
-                header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
+                header("Accept-Language", "ar-IQ,ar;q=0.9,en-US;q=0.8,en;q=0.7")
             }
             .build()
         val res = app.baseClient.newCall(req).execute()
@@ -310,12 +537,16 @@
                     .callTimeout(20, TimeUnit.SECONDS)
                     .build()
 
-                suspend fun fetchServersAndToken(batchSession: BatchSession): Pair, List<ServerItem>>? {
+                suspend fun fetchServersAndToken(batchSession: BatchSession): Pair<Map<String, String>, List<ServerItem>>? {
                     val cacheBusterUrl = "$data?t=${System.currentTimeMillis() / 1000}"
+                    val randomUa = rotatingUas.random()
+
+                    val tokenHeaders = baseHeaders.toMutableMap()
+                    tokenHeaders["User-Agent"] = randomUa
 
                     val pageReq = Request.Builder()
                         .url(cacheBusterUrl)
-                        .apply { baseHeaders.forEach { (k, v) -> header(k, v) } }
+                        .apply { tokenHeaders.forEach { (k, v) -> header(k, v) } }
                         .build()
 
                     val pageRes = directClient.newCall(pageReq).execute()
@@ -388,7 +619,7 @@
                         }
                     }
 
-                    return sourcesHeaders to allServers
+                    return Pair(sourcesHeaders, allServers)
                 }
 
                 val batchSize = 9
