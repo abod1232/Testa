@@ -175,8 +175,6 @@ class Asia2tvProvider : MainAPI() {
 
     private fun findVideoLinks(text: String): List<String> {
         val found = LinkedHashSet<String>()
-
-        // 1. نمط كائنات JSON مثل StreamWish / Vidhide
         Regex("""var\s+links\s*=\s*(\{[^;]+\})""").find(text)?.groupValues?.get(1)?.let { rawJson ->
             runCatching {
                 val obj = JSONObject(rawJson)
@@ -186,23 +184,17 @@ class Asia2tvProvider : MainAPI() {
                 }
             }
         }
-
-        // 2. نمط تجميع السلاسل النصية لـ StreamTape
         Regex("""getElementById\(['"][^'"]+['"]\)\.innerHTML\s*=\s*['"]([^'"]+)['"]\s*\+\s*\(?['"]([^'"]+)['"]\)?""").find(text)?.let { m ->
             var direct = m.groupValues[1] + m.groupValues[2]
             if (direct.startsWith("//")) direct = "https:$direct"
             if (!direct.contains("&stream=")) direct += "&stream=1"
             found.add(direct)
         }
-
-        // 3. نمط مشغلات Clappr / JWPlayer (file / sources)
         val fileRegex = """(?:file|sources)\s*[:=]\s*\[?["']([^"']+)["']\]?""".toRegex()
         fileRegex.findAll(text).forEach { m ->
             val l = m.groupValues[1].trim().replace("\\/", "/")
             if (l.startsWith("http")) found.add(l)
         }
-
-        // 4. نمط M3U8 المباشر
         val m3u8Regex = """(https?://[^\s"\'<>]+?\.m3u8[^\s"\'<>?]*(?:\?[^\s"\'<>]*)?)""".toRegex()
         m3u8Regex.findAll(text).forEach { m ->
             found.add(m.groupValues[1].trim().replace("\\/", "/"))
@@ -248,8 +240,6 @@ class Asia2tvProvider : MainAPI() {
         val resolvedServerPageUrl = fixUrl(serverPageUrl)
         val serversPage = app.get(resolvedServerPageUrl).document
         val servers = serversPage.select("ul.server-list-menu li")
-
-        // مخزن لمنع تكرار الروابط بين loadExtractor والفحص اليدوي
         val emittedUrls = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
 
         val deduplicatedCallback: (ExtractorLink) -> Unit = { link ->
@@ -266,15 +256,11 @@ class Asia2tvProvider : MainAPI() {
                     if (embedSource.isBlank()) return@async
 
                     val serverUrl = fixUrl(embedSource)
-
-                    // 1. تشغيل loadExtractor مع منع التكرار
                     try {
                         loadExtractor(serverUrl, resolvedServerPageUrl, subtitleCallback, deduplicatedCallback)
                     } catch (e: Exception) {
                         Log.w(name, "loadExtractor failed for $serverUrl: ${e.message}")
                     }
-
-                    // 2. الفحص اليدوي الاحتياطي
                     try {
                         val uri = URL(serverUrl)
                         val domain = "${uri.protocol}://${uri.host}/"
@@ -294,8 +280,6 @@ class Asia2tvProvider : MainAPI() {
 
                             for (videoLink in videoLinks) {
                                 val finalVideoUrl = fixUrl(videoLink)
-
-                                // إذا تم إرسال هذا الرابط مسبقاً نتخطاه فوراً
                                 if (emittedUrls.contains(finalVideoUrl.trim())) continue
 
                                 val isHls = finalVideoUrl.contains(".m3u8") || finalVideoUrl.contains(".txt")
@@ -313,7 +297,6 @@ class Asia2tvProvider : MainAPI() {
 
                                 if (check.code == 200) {
                                     if (isHls) {
-                                        // تحليل ملفات الماستر لتوليد كل الجودات المتاحة تلقائياً
                                         val m3u8Links = runCatching {
                                             M3u8Helper.generateM3u8(
                                                 source = name,
@@ -344,7 +327,6 @@ class Asia2tvProvider : MainAPI() {
                                             )
                                         }
                                     } else {
-                                        // روابط MP4
                                         val (qualityVal, qualityName) = parseQualityFromUrl(finalVideoUrl)
                                         deduplicatedCallback(
                                             newExtractorLink(
