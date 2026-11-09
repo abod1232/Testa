@@ -35,31 +35,32 @@ class WitAnime : MainAPI() {
     override var lang = "ar"
 
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie)
-private val customUserAgent =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
-private val baseHeaders = mapOf(
-    "User-Agent" to customUserAgent,
-    "Sec-Ch-Ua" to "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"",
-    "Sec-Ch-Ua-Mobile" to "?0",
-    "Sec-Ch-Ua-Platform" to "\"Windows\""
-)
+    private val customUserAgent =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
+    private val baseHeaders = mapOf(
+        "User-Agent" to customUserAgent,
+        "Sec-Ch-Ua" to "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"",
+        "Sec-Ch-Ua-Mobile" to "?0",
+        "Sec-Ch-Ua-Platform" to "\"Windows\""
+    )
 
+    // تم تعديل هذا الجزء بالكامل ليطابق Windows تماماً مثل baseHeaders وتجنب التعارض
     private val exactGateHeaders = mapOf(
         "Host" to "witanime.site",
-        "Sec-Ch-Ua" to "\"Google Chrome\";v=\"155\", \"Chromium\";v=\"155\", \"Not(A:Brand\";v=\"24\"",
-        "Sec-Ch-Ua-Mobile" to "?1",
-        "Sec-Ch-Ua-Platform" to "\"Android\"",
+        "Sec-Ch-Ua" to "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"",
+        "Sec-Ch-Ua-Mobile" to "?0",
+        "Sec-Ch-Ua-Platform" to "\"Windows\"",
         "Upgrade-Insecure-Requests" to "1",
         "User-Agent" to customUserAgent,
-        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/jxl,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
         "Sec-Fetch-Site" to "same-origin",
         "Sec-Fetch-Mode" to "navigate",
         "Sec-Fetch-User" to "?1",
         "Sec-Fetch-Dest" to "iframe",
-        "Accept-Encoding" to "gzip, deflate, br, zstd",
-        "Accept-Language" to "ar-IQ,ar;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Accept-Encoding" to "gzip, deflate, br",
+        "Accept-Language" to "ar,en-US;q=0.9,en;q=0.8",
         "Priority" to "u=0, i"
     )
 
@@ -291,7 +292,7 @@ private val baseHeaders = mapOf(
                             settings.javaScriptEnabled = true
                             settings.domStorageEnabled = true
                             settings.mediaPlaybackRequiresUserGesture = false
-                            settings.userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+                            settings.userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
                             webViewClient = WebViewClient()
                             webChromeClient = WebChromeClient()
                             loadUrl(megaUrl)
@@ -335,7 +336,7 @@ private val baseHeaders = mapOf(
             .apply {
                 baseHeaders.forEach { (k, v) -> header(k, v) }
                 header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
-                header("Accept-Language", "ar-IQ,ar;q=0.9,en-US;q=0.8,en;q=0.7")
+                header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
             }
             .build()
         val res = app.baseClient.newCall(req).execute()
@@ -537,7 +538,7 @@ private val baseHeaders = mapOf(
                     .callTimeout(20, TimeUnit.SECONDS)
                     .build()
 
-                suspend fun fetchServersAndToken(batchSession: BatchSession): Pair<Map<String, String>, List<ServerItem>>? {
+                suspend fun fetchServersAndToken(batchSession: BatchSession): Pair, List<ServerItem>>? {
                     val cacheBusterUrl = "$data?t=${System.currentTimeMillis() / 1000}"
                     val randomUa = rotatingUas.random()
 
