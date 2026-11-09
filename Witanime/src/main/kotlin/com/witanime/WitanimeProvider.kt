@@ -26,7 +26,9 @@ import org.jsoup.Jsoup
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
-class SessionCookieJar : CookieJar {
+
+// ── CookieJar عام ومستمر طوال فترة تشغيل التطبيق (مثل الكود الأول) ───────────
+class SharedSessionCookieJar : CookieJar {
     private val store = ConcurrentHashMap<String, Cookie>()
 
     private fun baseDomain(host: String): String {
@@ -65,8 +67,9 @@ class SessionCookieJar : CookieJar {
         return result
     }
 
-    fun clear() {
-        store.clear()
+    fun hasCookie(domain: String, cookieName: String): Boolean {
+        val base = baseDomain(domain)
+        return store.containsKey("$base|$cookieName")
     }
 }
 
@@ -77,6 +80,27 @@ class WitAnime : MainAPI() {
     override var lang = "ar"
 
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie)
+
+    companion object {
+        @Volatile var isWebViewOpen = false
+        @Volatile var lastWebViewOpenTime = 0L
+
+        // كوكيز وعميل موحدين على مستوى الإضافة بالكامل لتشارك الجلسة
+        val sharedCookieJar = SharedSessionCookieJar()
+
+        val globalClient: OkHttpClient by lazy {
+            app.baseClient.newBuilder()
+                .cookieJar(sharedCookieJar)
+                .followRedirects(false)
+                .followSslRedirects(false)
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(15, TimeUnit.SECONDS)
+                .callTimeout(20, TimeUnit.SECONDS)
+                .build()
+        }
+    }
+
+    // ترويسات موحدة لمتصفح لابتوب Chrome 131 بدون أي تناقض
     private val customUserAgent =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
@@ -101,11 +125,6 @@ class WitAnime : MainAPI() {
         "Sec-Fetch-User" to "?1",
         "Accept-Language" to "ar,en-US;q=0.9,en;q=0.8"
     )
-
-    companion object {
-        @Volatile var isWebViewOpen = false
-        @Volatile var lastWebViewOpenTime = 0L
-    }
 
     object PlayerAccess {
         private val handler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -364,6 +383,7 @@ class WitAnime : MainAPI() {
         PlayerAccess.startMonitoring()
     }
 
+    // تستخدم الآن العميل الموحد لحفظ كوكيز الجلسة من التصفح والبحث تلقائياً
     private fun fetchDocument(url: String): org.jsoup.nodes.Document {
         val req = Request.Builder()
             .url(url)
@@ -373,7 +393,7 @@ class WitAnime : MainAPI() {
                 header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
             }
             .build()
-        val res = app.baseClient.newCall(req).execute()
+        val res = globalClient.newCall(req).execute()
         val body = res.body?.string().orEmpty()
         res.close()
         return Jsoup.parse(body)
@@ -547,14 +567,16 @@ class WitAnime : MainAPI() {
     ): Boolean {
         return withContext(Dispatchers.IO) {
             try {
-                val sessionJar = SessionCookieJar()
-
-                val directClient = app.baseClient.newBuilder()
-                    .cookieJar(sessionJar) // تفعيل الحفظ والمزامنة التلقائية للكوكيز
-                    .followRedirects(false)
-                    .followSslRedirects(false)
-                    .callTimeout(20, TimeUnit.SECONDS)
-                    .build()
+                // 1. فحص وتهيئة الجلسة (Session Priming) تماماً كالكود الأول:
+                // إذا لم يكن كوكي witanime-session موجوداً، نطلب الصفحة الرئيسية لتثبيته
+                if (!sharedCookieJar.hasCookie("witanime.site", "witanime-session")) {
+                    val primeReq = Request.Builder()
+                        .url("$mainUrl/")
+                        .apply { baseHeaders.forEach { (k, v) -> header(k, v) } }
+                        .build()
+                    globalClient.newCall(primeReq).execute().close()
+                    delay(300)
+                }
 
                 suspend fun fetchServersAndToken(): Pair<Map<String, String>, List<ServerItem>>? {
                     val cacheBusterUrl = "$data?t=${System.currentTimeMillis() / 1000}"
@@ -565,10 +587,11 @@ class WitAnime : MainAPI() {
                             baseHeaders.forEach { (k, v) -> header(k, v) }
                             header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
                             header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
+                            header("Referer", "$mainUrl/")
                         }
                         .build()
 
-                    val pageRes = directClient.newCall(pageReq).execute()
+                    val pageRes = globalClient.newCall(pageReq).execute()
                     val pageHtml = pageRes.body?.string().orEmpty()
                     pageRes.close()
 
@@ -578,12 +601,13 @@ class WitAnime : MainAPI() {
                         ?: Regex("""data-csrf=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                         ?: return null
 
-                    delay(1200) // فترة راحة لتجنب تقييد المعدل
+                    delay(1100) // فاصل أمان لمنع حظر الـ Rate Limit
 
                     val sourcesPattern = Regex("""sourcesUrl:\s*['"]([^'"]+)['"]""")
                     val rawSources = sourcesPattern.find(pageHtml)?.groupValues?.get(1)?.replace("\\/", "/")
                         ?: "${data.trimEnd('/')}/sources"
                     val sourcesUrl = fixUrl(rawSources)
+
                     val sourcesHeaders = baseHeaders.toMutableMap().apply {
                         put("X-Csrf-Token", csrfToken)
                         put("Accept", "application/json")
@@ -600,7 +624,7 @@ class WitAnime : MainAPI() {
                         .post(RequestBody.create(null, ByteArray(0)))
                         .build()
 
-                    val sourcesRes = directClient.newCall(sourcesReq).execute()
+                    val sourcesRes = globalClient.newCall(sourcesReq).execute()
                     val sourcesJsonStr = sourcesRes.body?.string().orEmpty()
                     sourcesRes.close()
 
@@ -643,9 +667,12 @@ class WitAnime : MainAPI() {
                 if (allServers.isEmpty()) return@withContext false
 
                 var foundAny = false
+
+                // استخراج الروابط من السيرفرات بالترتيب
                 for (s in allServers.take(16)) {
                     val sourceEndpoint = if (s.isStream) "stream-source" else "download-source"
                     val gateEndpoint = if (s.isStream) "stream-gate" else "download-gate"
+
                     val encodedToken = URLEncoder.encode(s.token, "UTF-8")
                     val sourceUrl = "https://witanime.site/watch/$sourceEndpoint/$encodedToken"
 
@@ -656,7 +683,7 @@ class WitAnime : MainAPI() {
                             .post(RequestBody.create(null, ByteArray(0)))
                             .build()
 
-                        val sRes = directClient.newCall(sReq).execute()
+                        val sRes = globalClient.newCall(sReq).execute()
                         val sCode = sRes.code
                         val sBody = sRes.body?.string().orEmpty()
                         sRes.close()
@@ -665,6 +692,7 @@ class WitAnime : MainAPI() {
                             delay(1150)
                             continue
                         }
+
                         val sJson = runCatching { JSONObject(sBody) }.getOrNull()
                         val rawGatePath = sJson?.optString("gateUrl")?.takeIf { it.isNotBlank() }
                             ?: "/watch/$gateEndpoint/$encodedToken"
@@ -676,7 +704,7 @@ class WitAnime : MainAPI() {
                             .get()
                             .build()
 
-                        val gRes = directClient.newCall(gReq).execute()
+                        val gRes = globalClient.newCall(gReq).execute()
                         var embedUrl = gRes.header("Location") ?: gRes.header("location")
 
                         if (embedUrl.isNullOrBlank()) {
@@ -738,6 +766,7 @@ class WitAnime : MainAPI() {
                                 }
                             }
                         }
+
                         delay(1150)
                     } catch (e: Exception) {
                         logError(e)
