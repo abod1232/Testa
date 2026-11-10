@@ -474,8 +474,6 @@ class YonaPlayExtractor : ExtractorApi() {
         private const val TAG = "YONAPLAY_EXTRACTOR"
         private const val USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-
-        // وعاء كوكيز خاص بـ YonaPlay لحفظ PHPSESSID بين الطلبات المتتالية
         private class YonaCookieJar : CookieJar {
             private val store = ConcurrentHashMap<String, Cookie>()
 
@@ -489,8 +487,6 @@ class YonaPlayExtractor : ExtractorApi() {
                 return store.values.filter { it.matches(url) }
             }
         }
-
-        // إنشاء عميل OkHttp يحتفظ بالجلسة تلقائياً
         private fun buildClient(): OkHttpClient {
             return OkHttpClient.Builder()
                 .cookieJar(YonaCookieJar())
@@ -501,8 +497,6 @@ class YonaPlayExtractor : ExtractorApi() {
                 .build()
         }
     }
-
-    // فك تشفير AES-256-GCM المطابق للـ Python والـ Java
     private fun decryptAesGcm(b64Data: String, pageKey: String): String? {
         return try {
             val keyBytes = MessageDigest.getInstance("SHA-256")
@@ -526,8 +520,6 @@ class YonaPlayExtractor : ExtractorApi() {
             null
         }
     }
-
-    // حل وفك روابط DotPlay التابعة لـ YonaPlay
     private fun resolveDotPlay(
         client: OkHttpClient,
         dotPlayUrl: String,
@@ -598,8 +590,6 @@ class YonaPlayExtractor : ExtractorApi() {
             try {
                 val client = buildClient()
                 val origin = if (url.startsWith("http")) Uri.parse(url).let { "${it.scheme}://${it.host}" } else "https://mid.yonaplay.net"
-
-                // 1. فتح صفحة الـ embed للاحتفاظ بـ PHPSESSID واستخراج التوكن
                 val pageReq = Request.Builder()
                     .url(url)
                     .header("User-Agent", USER_AGENT)
@@ -628,8 +618,6 @@ class YonaPlayExtractor : ExtractorApi() {
                     "User-Agent" to USER_AGENT,
                     "Accept" to "application/json"
                 )
-
-                // 2. إذا لم تكن البيانات في الـ HTML نطلب /api/init-session.php
                 if (code.isEmpty() || pageKey.isEmpty()) {
                     val initReq = Request.Builder()
                         .url("$origin/api/init-session.php")
@@ -648,8 +636,6 @@ class YonaPlayExtractor : ExtractorApi() {
                 if (embedToken.isNotEmpty()) {
                     apiHeaders["X-Embed-Token"] = embedToken
                 }
-
-                // 3. طلب sources.php للحصول على الجودات والسيرفرات
                 val srcPayload = JSONObject().put("code", code).toString()
                 val srcReq = Request.Builder()
                     .url("$origin/api/sources.php")
@@ -659,8 +645,6 @@ class YonaPlayExtractor : ExtractorApi() {
 
                 val srcRaw = client.newCall(srcReq).execute().use { it.body?.string().orEmpty() }
                 val qualitiesObj = JSONObject(srcRaw).optJSONObject("qualities") ?: return@withContext
-
-                // 4. المرور على السيرفرات وفك تشفير الروابط
                 for (qKey in listOf("4k", "fhd", "hd", "sd")) {
                     val qGroup = qualitiesObj.optJSONObject(qKey) ?: continue
                     val servers = qGroup.optJSONArray("servers") ?: continue
@@ -690,8 +674,6 @@ class YonaPlayExtractor : ExtractorApi() {
                         if (encD.isEmpty()) continue
 
                         val subUrl = decryptAesGcm(encD, pageKey)?.takeIf { it.startsWith("http") } ?: continue
-
-                        // 5. فك رابط DotPlay أو إرجاع الرابط المباشر
                         if (subUrl.contains("dotplay.", ignoreCase = true)) {
                             resolveDotPlay(
                                 client = client,
