@@ -602,8 +602,6 @@ class WitAnime : MainAPI() {
         val remainingQuota: Int,
         val embedUrl: String? = null
     )
-
-    // كائن نتيجة فك البوابة مع رصيد الـ Rate Limit
     private data class GateResult(
         val success: Boolean,
         val isRateLimited: Boolean,
@@ -621,7 +619,6 @@ class WitAnime : MainAPI() {
 
         return try {
             if (s.isStream) {
-                // ─── 1. مسار سيرفرات المشاهدة (Stream) ───
                 val sourceUrl = "$mainUrl/watch/stream-source/$encodedToken"
                 val sReq = Request.Builder()
                     .url(sourceUrl)
@@ -685,7 +682,6 @@ class WitAnime : MainAPI() {
                     }
                 }
             } else {
-                // ─── 2. مسار سيرفرات التحميل (Download) بتصحيح Referer و Document ───
                 val sourceUrl = "$mainUrl/watch/download-source/$encodedToken"
                 val sReq = Request.Builder()
                     .url(sourceUrl)
@@ -707,8 +703,6 @@ class WitAnime : MainAPI() {
                 }
 
                 val fullGateUrl = "$mainUrl/watch/download-gate/$encodedToken"
-
-                // إرسال Referer إجباري وضبط Dest على document لحل الـ 404
                 val gateReq = Request.Builder()
                     .url(fullGateUrl)
                     .get()
@@ -751,8 +745,6 @@ class WitAnime : MainAPI() {
                 Log.i(TAG, "1. البدء برابط المشاهدة: $cleanWatchUrl")
 
                 var finalWatchUrl = cleanWatchUrl
-
-                // 1. طلب صفحة الحلقة
                 val pageReq = buildDocumentRequest(cleanWatchUrl, "$mainUrl/")
                 val pageHtml = engineClient.newCall(pageReq).execute().use { resp ->
                     finalWatchUrl = resp.request.url.toString()
@@ -760,8 +752,6 @@ class WitAnime : MainAPI() {
                     if (!resp.isSuccessful) return@withContext false
                     resp.body?.string().orEmpty()
                 }
-
-                // 2. استخراج CSRF Token
                 val csrfToken = Regex("""name=['"]csrf-token['"]\s+content=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: Regex("""data-csrf=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: run {
@@ -769,8 +759,6 @@ class WitAnime : MainAPI() {
                         return@withContext false
                     }
                 Log.i(TAG, "3. تم العثور على CSRF Token: $csrfToken")
-
-                // 3. استخراج رابط sources
                 val sourcesPattern = Regex("""sourcesUrl\s*:\s*['"]([^'"]+)['"]""")
                 val rawSources = sourcesPattern.find(pageHtml)?.groupValues?.get(1)?.replace("\\/", "/")?.trim()
                     ?: "${finalWatchUrl.substringBefore('?').trimEnd('/')}/sources"
@@ -778,8 +766,6 @@ class WitAnime : MainAPI() {
                 Log.i(TAG, "4. رابط Sources المستخرج: $sourcesUrl")
 
                 delay(300)
-
-                // 4. طلب قائمة السيرفرات (POST /sources)
                 val emptyBody = ByteArray(0).toRequestBody(null)
                 val sourcesReq = Request.Builder()
                     .url(sourcesUrl)
@@ -805,8 +791,6 @@ class WitAnime : MainAPI() {
                 }
 
                 if (sourcesJsonStr.isBlank()) return@withContext false
-
-                // 5. استخراج السيرفرات
                 val rootJson = JSONObject(sourcesJsonStr)
                 val allServers = mutableListOf<ServerItem>()
 
@@ -850,13 +834,9 @@ class WitAnime : MainAPI() {
 
                 Log.i(TAG, "6. تم استخراج ${allServers.size} سيرفر!")
                 if (allServers.isEmpty()) return@withContext false
-
-                // تقديم سيرفرات المشاهدة أولاً قبل التحميل
                 val sortedServers = allServers.sortedByDescending { if (it.isStream) 1 else 0 }
                 val limitedServers = sortedServers.take(10)
                 var foundAny = false
-
-                // 6. طلب السيرفرات بالترتيب مع انتظار ثانيتين (2000ms)
                 for ((idx, server) in limitedServers.withIndex()) {
                     try {
                         val gateResult = unlockGate(server, csrfToken, finalWatchUrl)
@@ -889,8 +869,6 @@ class WitAnime : MainAPI() {
                                 }
                             }
                         }
-
-                        // فاصل زمني ثانيتين بين كل سيرفر والذي يليه
                         if (idx < limitedServers.size - 1) {
                             delay(2000)
                         }
