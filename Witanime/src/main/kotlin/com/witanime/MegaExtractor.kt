@@ -435,6 +435,36 @@ class FourSharedExtractor : ExtractorApi() {
 
 
 
+package com.witanime
+
+import android.net.Uri
+import android.util.Base64
+import android.util.Log
+import com.lagradost.cloudstream3.SubtitleFile
+import com.lagradost.cloudstream3.utils.ExtractorApi
+import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.ExtractorLinkType
+import com.lagradost.cloudstream3.utils.Qualities
+import com.lagradost.cloudstream3.utils.getQualityFromName
+import com.lagradost.cloudstream3.utils.newExtractorLink
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.Cookie
+import okhttp3.CookieJar
+import okhttp3.HttpUrl
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
+import javax.crypto.Cipher
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.SecretKeySpec
+
 class YonaPlayExtractor : ExtractorApi() {
     override val name = "YonaPlay"
     override val mainUrl = "https://mid.yonaplay.net"
@@ -444,30 +474,35 @@ class YonaPlayExtractor : ExtractorApi() {
         private const val TAG = "YONAPLAY_EXTRACTOR"
         private const val USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
+        // وعاء كوكيز خاص بـ YonaPlay لحفظ PHPSESSID بين الطلبات المتتالية
         private class YonaCookieJar : CookieJar {
-            private val cookieStore = ConcurrentHashMap<String, Cookie>()
+            private val store = ConcurrentHashMap<String, Cookie>()
 
             override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
                 for (cookie in cookies) {
-                    cookieStore["${url.host}|${cookie.name}"] = cookie
+                    store["${url.host}|${cookie.name}"] = cookie
                 }
             }
 
             override fun loadForRequest(url: HttpUrl): List<Cookie> {
-                return cookieStore.values.filter { it.matches(url) }
+                return store.values.filter { it.matches(url) }
             }
         }
-        private fun createYonaClient(): OkHttpClient {
+
+        // إنشاء عميل OkHttp يحتفظ بالجلسة تلقائياً
+        private fun buildClient(): OkHttpClient {
             return OkHttpClient.Builder()
                 .cookieJar(YonaCookieJar())
                 .followRedirects(true)
                 .followSslRedirects(true)
-                .connectTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(10, TimeUnit.SECONDS)
+                .connectTimeout(12, TimeUnit.SECONDS)
+                .readTimeout(12, TimeUnit.SECONDS)
                 .build()
         }
     }
 
+    // فك تشفير AES-256-GCM المطابق للـ Python والـ Java
     private fun decryptAesGcm(b64Data: String, pageKey: String): String? {
         return try {
             val keyBytes = MessageDigest.getInstance("SHA-256")
@@ -492,6 +527,7 @@ class YonaPlayExtractor : ExtractorApi() {
         }
     }
 
+    // حل وفك روابط DotPlay التابعة لـ YonaPlay
     private fun resolveDotPlay(
         client: OkHttpClient,
         dotPlayUrl: String,
@@ -505,6 +541,7 @@ class YonaPlayExtractor : ExtractorApi() {
                 .url(dotPlayUrl)
                 .header("User-Agent", USER_AGENT)
                 .header("Referer", referer)
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 .build()
 
             val pageResp = client.newCall(req).execute().use { it.body?.string().orEmpty() }
@@ -559,12 +596,16 @@ class YonaPlayExtractor : ExtractorApi() {
         Log.d(TAG, "▶️ getUrl start for: $url")
         withContext(Dispatchers.IO) {
             try {
-                val client = createYonaClient()
+                val client = buildClient()
                 val origin = if (url.startsWith("http")) Uri.parse(url).let { "${it.scheme}://${it.host}" } else "https://mid.yonaplay.net"
+
+                // 1. فتح صفحة الـ embed للاحتفاظ بـ PHPSESSID واستخراج التوكن
                 val pageReq = Request.Builder()
                     .url(url)
                     .header("User-Agent", USER_AGENT)
                     .header("Referer", referer ?: "https://witanime.site/")
+                    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                    .header("Upgrade-Insecure-Requests", "1")
                     .build()
 
                 val pageHtml = client.newCall(pageReq).execute().use { it.body?.string().orEmpty() }
@@ -580,13 +621,20 @@ class YonaPlayExtractor : ExtractorApi() {
                         pageKey = obj.optString("k").trim()
                     }
                 }
+
+                val apiHeaders = mutableMapOf(
+                    "Origin" to origin,
+                    "Referer" to url,
+                    "User-Agent" to USER_AGENT,
+                    "Accept" to "application/json"
+                )
+
+                // 2. إذا لم تكن البيانات في الـ HTML نطلب /api/init-session.php
                 if (code.isEmpty() || pageKey.isEmpty()) {
                     val initReq = Request.Builder()
                         .url("$origin/api/init-session.php")
                         .post("{}".toRequestBody("application/json".toMediaType()))
-                        .header("Origin", origin)
-                        .header("Referer", url)
-                        .header("User-Agent", USER_AGENT)
+                        .apply { apiHeaders.forEach { (k, v) -> header(k, v) } }
                         .build()
 
                     val initRaw = client.newCall(initReq).execute().use { it.body?.string().orEmpty() }
@@ -597,20 +645,22 @@ class YonaPlayExtractor : ExtractorApi() {
                 }
 
                 if (code.isEmpty() || pageKey.isEmpty()) return@withContext
-                val srcPayload = JSONObject().put("code", code).toString()
-                val srcReqBuilder = Request.Builder()
-                    .url("$origin/api/sources.php")
-                    .post(srcPayload.toRequestBody("application/json".toMediaType()))
-                    .header("Origin", origin)
-                    .header("Referer", url)
-                    .header("User-Agent", USER_AGENT)
-
                 if (embedToken.isNotEmpty()) {
-                    srcReqBuilder.header("X-Embed-Token", embedToken)
+                    apiHeaders["X-Embed-Token"] = embedToken
                 }
 
-                val srcRaw = client.newCall(srcReqBuilder.build()).execute().use { it.body?.string().orEmpty() }
+                // 3. طلب sources.php للحصول على الجودات والسيرفرات
+                val srcPayload = JSONObject().put("code", code).toString()
+                val srcReq = Request.Builder()
+                    .url("$origin/api/sources.php")
+                    .post(srcPayload.toRequestBody("application/json".toMediaType()))
+                    .apply { apiHeaders.forEach { (k, v) -> header(k, v) } }
+                    .build()
+
+                val srcRaw = client.newCall(srcReq).execute().use { it.body?.string().orEmpty() }
                 val qualitiesObj = JSONObject(srcRaw).optJSONObject("qualities") ?: return@withContext
+
+                // 4. المرور على السيرفرات وفك تشفير الروابط
                 for (qKey in listOf("4k", "fhd", "hd", "sd")) {
                     val qGroup = qualitiesObj.optJSONObject(qKey) ?: continue
                     val servers = qGroup.optJSONArray("servers") ?: continue
@@ -628,23 +678,20 @@ class YonaPlayExtractor : ExtractorApi() {
                             .put("key", pageKey)
                             .toString()
 
-                        val aReqBuilder = Request.Builder()
+                        val aReq = Request.Builder()
                             .url("$origin/api/api.php")
                             .post(apiPayload.toRequestBody("application/json".toMediaType()))
-                            .header("Origin", origin)
-                            .header("Referer", url)
-                            .header("User-Agent", USER_AGENT)
+                            .apply { apiHeaders.forEach { (k, v) -> header(k, v) } }
+                            .build()
 
-                        if (embedToken.isNotEmpty()) {
-                            aReqBuilder.header("X-Embed-Token", embedToken)
-                        }
-
-                        val aRaw = client.newCall(aReqBuilder.build()).execute().use { it.body?.string().orEmpty() }
+                        val aRaw = client.newCall(aReq).execute().use { it.body?.string().orEmpty() }
                         val aObj = runCatching { JSONObject(aRaw) }.getOrNull() ?: continue
                         val encD = aObj.optString("d").trim()
                         if (encD.isEmpty()) continue
 
                         val subUrl = decryptAesGcm(encD, pageKey)?.takeIf { it.startsWith("http") } ?: continue
+
+                        // 5. فك رابط DotPlay أو إرجاع الرابط المباشر
                         if (subUrl.contains("dotplay.", ignoreCase = true)) {
                             resolveDotPlay(
                                 client = client,
