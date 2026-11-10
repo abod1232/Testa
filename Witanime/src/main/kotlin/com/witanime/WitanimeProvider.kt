@@ -34,8 +34,6 @@ import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
-
-// ── CookieJar عام ومستمر ─────────────────────────────────────────────────────
 class EngineSessionCookieJar : CookieJar {
     private val store = ConcurrentHashMap<String, Cookie>()
 
@@ -87,8 +85,6 @@ class WitAnime : MainAPI() {
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
         val engineCookieJar = EngineSessionCookieJar()
-
-        // ── تخطي فحص الشهادات بالكامل لتسهيل المراقبة بـ Reqable ─────────────────
         val trustAllManager: X509TrustManager = @SuppressLint("CustomX509TrustManager") object : X509TrustManager {
             @SuppressLint("TrustAllX509TrustManager")
             override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) = Unit
@@ -102,8 +98,6 @@ class WitAnime : MainAPI() {
         val trustAllSslSocketFactory = SSLContext.getInstance("TLS").apply {
             init(null, arrayOf<TrustManager>(trustAllManager), SecureRandom())
         }.socketFactory
-
-        // معترض ترويسات متصفح Chrome
         private val clientHintsInterceptor = okhttp3.Interceptor { chain ->
             val orig = chain.request()
             val ua = orig.header("User-Agent") ?: DEFAULT_UA
@@ -118,8 +112,6 @@ class WitAnime : MainAPI() {
                 chain.proceed(orig)
             }
         }
-
-        // عميل الشبكة النقي مع Trust-All SSL لمراقبة Reqable
         val engineClient: OkHttpClient by lazy {
             OkHttpClient.Builder()
                 .cookieJar(engineCookieJar)
@@ -595,8 +587,6 @@ class WitAnime : MainAPI() {
                 Log.i(TAG, "1. البدء برابط المشاهدة: $cleanWatchUrl")
 
                 var finalWatchUrl = cleanWatchUrl
-
-                // 1. جلب صفحة المشاهدة
                 val pageReq = buildDocumentRequest(cleanWatchUrl, "$mainUrl/")
                 val pageHtml = engineClient.newCall(pageReq).execute().use { resp ->
                     finalWatchUrl = resp.request.url.toString()
@@ -604,8 +594,6 @@ class WitAnime : MainAPI() {
                     if (!resp.isSuccessful) return@withContext false
                     resp.body?.string().orEmpty()
                 }
-
-                // 2. استخراج CSRF Token
                 val csrfToken = Regex("""name=['"]csrf-token['"]\s+content=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: Regex("""data-csrf=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: run {
@@ -613,8 +601,6 @@ class WitAnime : MainAPI() {
                         return@withContext false
                     }
                 Log.i(TAG, "3. تم العثور على CSRF Token: $csrfToken")
-
-                // 3. استخراج رابط sources
                 val sourcesPattern = Regex("""sourcesUrl\s*:\s*['"]([^'"]+)['"]""")
                 val rawSources = sourcesPattern.find(pageHtml)?.groupValues?.get(1)?.replace("\\/", "/")?.trim()
                     ?: "${finalWatchUrl.substringBefore('?').trimEnd('/')}/sources"
@@ -622,8 +608,6 @@ class WitAnime : MainAPI() {
                 Log.i(TAG, "4. رابط Sources المستخرج: $sourcesUrl")
 
                 delay(200)
-
-                // 4. طلب POST /sources
                 val emptyBody = ByteArray(0).toRequestBody(null)
                 val sourcesReq = Request.Builder()
                     .url(sourcesUrl)
@@ -652,8 +636,6 @@ class WitAnime : MainAPI() {
                     Log.e(TAG, "استجابة sources فارغة!")
                     return@withContext false
                 }
-
-                // 5. استخراج السيرفرات
                 val rootJson = JSONObject(sourcesJsonStr)
                 val allServers = mutableListOf<ServerItem>()
 
@@ -699,8 +681,6 @@ class WitAnime : MainAPI() {
                 if (allServers.isEmpty()) return@withContext false
 
                 var foundAny = false
-
-                // 6. فك بوابات السيرفرات
                 for (s in allServers.take(16)) {
                     val sourceEndpoint = if (s.isStream) "stream-source" else "download-source"
                     val gateEndpoint = if (s.isStream) "stream-gate" else "download-gate"
