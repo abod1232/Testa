@@ -5,6 +5,7 @@ import android.app.Dialog
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
+import android.util.Log
 import android.view.Gravity
 import android.view.ViewGroup
 import android.webkit.WebChromeClient
@@ -26,6 +27,7 @@ import org.jsoup.Jsoup
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+
 class SharedSessionCookieJar : CookieJar {
     private val store = ConcurrentHashMap<String, Cookie>()
 
@@ -80,9 +82,13 @@ class WitAnime : MainAPI() {
     override val supportedTypes = setOf(TvType.Anime, TvType.AnimeMovie)
 
     companion object {
+        private const val TAG = "WitAnimeDebug"
+
         @Volatile var isWebViewOpen = false
         @Volatile var lastWebViewOpenTime = 0L
+
         val sharedCookieJar = SharedSessionCookieJar()
+
         val directClient: OkHttpClient by lazy {
             app.baseClient.newBuilder()
                 .cookieJar(sharedCookieJar)
@@ -93,6 +99,7 @@ class WitAnime : MainAPI() {
                 .callTimeout(20, TimeUnit.SECONDS)
                 .build()
         }
+
         val noRedirectClient: OkHttpClient by lazy {
             directClient.newBuilder()
                 .followRedirects(false)
@@ -100,6 +107,7 @@ class WitAnime : MainAPI() {
                 .build()
         }
     }
+
     private val customUserAgent =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
@@ -566,6 +574,9 @@ class WitAnime : MainAPI() {
         return withContext(Dispatchers.IO) {
             try {
                 val cleanWatchUrl = fixUrl(data.substringBefore('?').trimEnd('/'))
+                Log.i(TAG, "1. البدء برابط المشاهدة النظيف: $cleanWatchUrl")
+
+                // طلب صفحة الحلقة
                 val pageReq = Request.Builder()
                     .url(cleanWatchUrl)
                     .apply {
@@ -578,25 +589,41 @@ class WitAnime : MainAPI() {
                     .build()
 
                 val pageHtml = directClient.newCall(pageReq).execute().use { resp ->
+                    Log.i(TAG, "2. استجابة صفحة الحلقة كود: ${resp.code}")
                     if (!resp.isSuccessful) return@withContext false
                     resp.body?.string().orEmpty()
                 }
+
+                // استخراج CSRF Token
                 val csrfToken = Regex("""name=['"]csrf-token['"]\s+content=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: Regex("""data-csrf=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
-                    ?: return@withContext false
+                    ?: run {
+                        Log.e(TAG, "فشل استخراج CSRF Token!")
+                        return@withContext false
+                    }
+                Log.i(TAG, "3. تم العثور على CSRF Token: $csrfToken")
+
+                // استخراج رابط sources
                 val sourcesPattern = Regex("""sourcesUrl\s*:\s*['"]([^'"]+)['"]""")
                 val rawSources = sourcesPattern.find(pageHtml)?.groupValues?.get(1)?.replace("\\/", "/")?.trim()
                     ?: "$cleanWatchUrl/sources"
                 val sourcesUrl = fixUrl(rawSources)
+                Log.i(TAG, "4. رابط Sources المستخرج: $sourcesUrl")
 
-                delay(600) // راحة طبيعية بين الطلبات
+                delay(400)
+
+                // طلب POST /sources مع كامل ترويسات Sec-Ch-Ua
                 val emptyBody = RequestBody.create(null, ByteArray(0))
                 val sourcesReq = Request.Builder()
                     .url(sourcesUrl)
                     .post(emptyBody)
+                    .header("Host", "witanime.site")
                     .header("User-Agent", customUserAgent)
-                    .header("Accept", "application/json")
+                    .header("Sec-Ch-Ua", "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"")
+                    .header("Sec-Ch-Ua-Mobile", "?0")
+                    .header("Sec-Ch-Ua-Platform", "\"Windows\"")
                     .header("X-CSRF-TOKEN", csrfToken)
+                    .header("Accept", "application/json")
                     .header("Origin", mainUrl)
                     .header("Referer", cleanWatchUrl)
                     .header("Sec-Fetch-Site", "same-origin")
@@ -605,43 +632,69 @@ class WitAnime : MainAPI() {
                     .build()
 
                 val sourcesJsonStr = directClient.newCall(sourcesReq).execute().use { resp ->
+                    Log.i(TAG, "5. استجابة /sources كود: ${resp.code}")
                     if (!resp.isSuccessful) return@withContext false
                     resp.body?.string().orEmpty()
                 }
 
-                if (sourcesJsonStr.isBlank()) return@withContext false
+                if (sourcesJsonStr.isBlank()) {
+                    Log.e(TAG, "استجابة sources فارغة!")
+                    return@withContext false
+                }
 
-                val json = JSONObject(sourcesJsonStr)
-                val players = json.optJSONObject("players")
-                val downloads = json.optJSONObject("downloads")
-
+                // ── معالجة الـ JSON الذكية لدعم الجذر المباشر أو كائن versions ──
+                val rootJson = JSONObject(sourcesJsonStr)
                 val allServers = mutableListOf<ServerItem>()
-                players?.let { p ->
-                    for (q in p.keys()) {
-                        val arr = p.optJSONArray(q) ?: continue
-                        for (i in 0 until arr.length()) {
-                            val obj = arr.optJSONObject(i) ?: continue
-                            val token = obj.optString("token")
-                            val label = obj.optString("label", "server")
-                            if (token.isNotBlank()) allServers.add(ServerItem(q, label, token, true))
+
+                fun extractGroup(playersObj: JSONObject?, downloadsObj: JSONObject?) {
+                    playersObj?.let { p ->
+                        for (q in p.keys()) {
+                            val arr = p.optJSONArray(q) ?: continue
+                            for (i in 0 until arr.length()) {
+                                val obj = arr.optJSONObject(i) ?: continue
+                                val token = obj.optString("token")
+                                val label = obj.optString("label").ifBlank { obj.optString("name", "server") }
+                                if (token.isNotBlank()) allServers.add(ServerItem(q, label, token, true))
+                            }
                         }
                     }
-                }
-                downloads?.let { d ->
-                    for (q in d.keys()) {
-                        val arr = d.optJSONArray(q) ?: continue
-                        for (i in 0 until arr.length()) {
-                            val obj = arr.optJSONObject(i) ?: continue
-                            val token = obj.optString("token")
-                            val label = obj.optString("label", "download")
-                            if (token.isNotBlank()) allServers.add(ServerItem(q, label, token, false))
+                    downloadsObj?.let { d ->
+                        for (q in d.keys()) {
+                            val arr = d.optJSONArray(q) ?: continue
+                            for (i in 0 until arr.length()) {
+                                val obj = arr.optJSONObject(i) ?: continue
+                                val token = obj.optString("token")
+                                val label = obj.optString("label").ifBlank { obj.optString("name", "download") }
+                                if (token.isNotBlank()) allServers.add(ServerItem(q, label, token, false))
+                            }
                         }
                     }
                 }
 
-                if (allServers.isEmpty()) return@withContext false
+                // 1. فحص وجود السيرفرات في الجذر
+                if (rootJson.has("players") || rootJson.has("downloads")) {
+                    extractGroup(rootJson.optJSONObject("players"), rootJson.optJSONObject("downloads"))
+                }
+
+                // 2. فحص وجود السيرفرات داخل كائن versions (مثل sub أو dub)
+                rootJson.optJSONObject("versions")?.let { vObj ->
+                    val keys = vObj.keys()
+                    while (keys.hasNext()) {
+                        val ver = keys.next()
+                        val subGroup = vObj.optJSONObject(ver) ?: continue
+                        extractGroup(subGroup.optJSONObject("players"), subGroup.optJSONObject("downloads"))
+                    }
+                }
+
+                Log.i(TAG, "6. تم استخراج ${allServers.size} سيرفر بنجاح!")
+                if (allServers.isEmpty()) {
+                    Log.e(TAG, "لم يتم العثور على أي سيرفرات في ملف JSON!")
+                    return@withContext false
+                }
 
                 var foundAny = false
+
+                // استخراج روابط الفيديو
                 for (s in allServers.take(16)) {
                     val sourceEndpoint = if (s.isStream) "stream-source" else "download-source"
                     val gateEndpoint = if (s.isStream) "stream-gate" else "download-gate"
@@ -653,9 +706,13 @@ class WitAnime : MainAPI() {
                         val sReq = Request.Builder()
                             .url(sourceUrl)
                             .post(emptyBody)
+                            .header("Host", "witanime.site")
                             .header("User-Agent", customUserAgent)
-                            .header("Accept", "application/json")
+                            .header("Sec-Ch-Ua", "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"")
+                            .header("Sec-Ch-Ua-Mobile", "?0")
+                            .header("Sec-Ch-Ua-Platform", "\"Windows\"")
                             .header("X-CSRF-TOKEN", csrfToken)
+                            .header("Accept", "application/json")
                             .header("Origin", mainUrl)
                             .header("Referer", cleanWatchUrl)
                             .header("Sec-Fetch-Site", "same-origin")
@@ -683,6 +740,8 @@ class WitAnime : MainAPI() {
                             .apply { exactGateHeaders.forEach { (k, v) -> header(k, v) } }
                             .get()
                             .build()
+
+                        // فتح البوابة بالعميل noRedirectClient لقراءة 302 Location
                         val gRes = noRedirectClient.newCall(gReq).execute()
                         var embedUrl = gRes.header("Location") ?: gRes.header("location")
 
@@ -694,6 +753,8 @@ class WitAnime : MainAPI() {
                             embedUrl = match?.groupValues?.get(1)
                         }
                         gRes.close()
+
+                        Log.i(TAG, "سيرفر [${s.label}] رابط التضمين: $embedUrl")
 
                         if (!embedUrl.isNullOrBlank() && embedUrl.startsWith("http")) {
                             if (embedUrl.contains("mega.nz") || embedUrl.contains("mega.co.nz")) {
@@ -753,6 +814,7 @@ class WitAnime : MainAPI() {
                     }
                 }
 
+                Log.i(TAG, "انتهى استخراج الروابط، النتيجة الإجمالية: $foundAny")
                 foundAny
             } catch (e: Exception) {
                 logError(e)
