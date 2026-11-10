@@ -28,6 +28,7 @@ import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
+// ── CookieJar عام ومستمر (لا يحذف الكوكيز بسبب فارق توقيت الجهاز) ────────────
 class SharedSessionCookieJar : CookieJar {
     private val store = ConcurrentHashMap<String, Cookie>()
 
@@ -40,7 +41,8 @@ class SharedSessionCookieJar : CookieJar {
         val base = baseDomain(url.host)
         for (cookie in cookies) {
             val key = "$base|${cookie.name}"
-            if (cookie.expiresAt <= System.currentTimeMillis() && cookie.value.isEmpty()) {
+            // لا نحذف الكوكي إلا إذا أرسل السيرفر قيمة فارغة عمداً
+            if (cookie.value.isEmpty()) {
                 store.remove(key)
             } else {
                 store[key] = cookie
@@ -49,17 +51,11 @@ class SharedSessionCookieJar : CookieJar {
     }
 
     override fun loadForRequest(url: HttpUrl): List<Cookie> {
-        val now = System.currentTimeMillis()
         val base = baseDomain(url.host)
         val result = mutableListOf<Cookie>()
-        val iter = store.entries.iterator()
-        while (iter.hasNext()) {
-            val entry = iter.next()
+        // إرسال الكوكيز دائماً بدون فحص تاريخ الانتهاء لتفادي اختلاف توقيت الجهاز
+        for (entry in store.entries) {
             val cookie = entry.value
-            if (cookie.expiresAt < now) {
-                iter.remove()
-                continue
-            }
             if (entry.key.startsWith("$base|") || cookie.matches(url)) {
                 result.add(cookie)
             }
@@ -89,6 +85,7 @@ class WitAnime : MainAPI() {
 
         val sharedCookieJar = SharedSessionCookieJar()
 
+        // عميل يتبع التوجيه تلقائياً لصفحات HTML وطلب Sources
         val directClient: OkHttpClient by lazy {
             app.baseClient.newBuilder()
                 .cookieJar(sharedCookieJar)
@@ -100,6 +97,7 @@ class WitAnime : MainAPI() {
                 .build()
         }
 
+        // عميل مخصص للبوابات فقط لالتقاط كود 302 وترويسة Location
         val noRedirectClient: OkHttpClient by lazy {
             directClient.newBuilder()
                 .followRedirects(false)
@@ -108,6 +106,7 @@ class WitAnime : MainAPI() {
         }
     }
 
+    // ترويسات موحدة لمتصفح Chrome 131 لابتوب (Windows)
     private val customUserAgent =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
@@ -119,7 +118,6 @@ class WitAnime : MainAPI() {
     )
 
     private val exactGateHeaders = mapOf(
-        "Host" to "witanime.site",
         "User-Agent" to customUserAgent,
         "Sec-Ch-Ua" to "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"",
         "Sec-Ch-Ua-Mobile" to "?0",
@@ -575,6 +573,10 @@ class WitAnime : MainAPI() {
             try {
                 val cleanWatchUrl = fixUrl(data.substringBefore('?').trimEnd('/'))
                 Log.i(TAG, "1. البدء برابط المشاهدة النظيف: $cleanWatchUrl")
+
+                var finalWatchUrl = cleanWatchUrl
+
+                // طلب صفحة الحلقة
                 val pageReq = Request.Builder()
                     .url(cleanWatchUrl)
                     .apply {
@@ -587,10 +589,13 @@ class WitAnime : MainAPI() {
                     .build()
 
                 val pageHtml = directClient.newCall(pageReq).execute().use { resp ->
-                    Log.i(TAG, "2. استجابة صفحة الحلقة كود: ${resp.code}")
+                    finalWatchUrl = resp.request.url.toString()
+                    Log.i(TAG, "2. استجابة صفحة الحلقة كود: ${resp.code} (الرابط الفعلي: $finalWatchUrl)")
                     if (!resp.isSuccessful) return@withContext false
                     resp.body?.string().orEmpty()
                 }
+
+                // استخراج CSRF Token
                 val csrfToken = Regex("""name=['"]csrf-token['"]\s+content=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: Regex("""data-csrf=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: run {
@@ -598,26 +603,26 @@ class WitAnime : MainAPI() {
                         return@withContext false
                     }
                 Log.i(TAG, "3. تم العثور على CSRF Token: $csrfToken")
+
+                // استخراج رابط sources
                 val sourcesPattern = Regex("""sourcesUrl\s*:\s*['"]([^'"]+)['"]""")
                 val rawSources = sourcesPattern.find(pageHtml)?.groupValues?.get(1)?.replace("\\/", "/")?.trim()
-                    ?: "$cleanWatchUrl/sources"
+                    ?: "${finalWatchUrl.substringBefore('?').trimEnd('/')}/sources"
                 val sourcesUrl = fixUrl(rawSources)
                 Log.i(TAG, "4. رابط Sources المستخرج: $sourcesUrl")
 
-                delay(400)
+                delay(300)
+
+                // طلب POST /sources بدون ترويسة Host اليدوية
                 val emptyBody = RequestBody.create(null, ByteArray(0))
                 val sourcesReq = Request.Builder()
                     .url(sourcesUrl)
                     .post(emptyBody)
-                    .header("Host", "witanime.site")
                     .header("User-Agent", customUserAgent)
-                    .header("Sec-Ch-Ua", "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"")
-                    .header("Sec-Ch-Ua-Mobile", "?0")
-                    .header("Sec-Ch-Ua-Platform", "\"Windows\"")
-                    .header("X-CSRF-TOKEN", csrfToken)
                     .header("Accept", "application/json")
+                    .header("X-CSRF-TOKEN", csrfToken)
                     .header("Origin", mainUrl)
-                    .header("Referer", cleanWatchUrl)
+                    .header("Referer", finalWatchUrl)
                     .header("Sec-Fetch-Site", "same-origin")
                     .header("Sec-Fetch-Mode", "cors")
                     .header("Sec-Fetch-Dest", "empty")
@@ -625,14 +630,20 @@ class WitAnime : MainAPI() {
 
                 val sourcesJsonStr = directClient.newCall(sourcesReq).execute().use { resp ->
                     Log.i(TAG, "5. استجابة /sources كود: ${resp.code}")
-                    if (!resp.isSuccessful) return@withContext false
-                    resp.body?.string().orEmpty()
+                    val body = resp.body?.string().orEmpty()
+                    if (!resp.isSuccessful) {
+                        Log.e(TAG, "تفاصيل خطأ sources: $body")
+                        return@withContext false
+                    }
+                    body
                 }
 
                 if (sourcesJsonStr.isBlank()) {
                     Log.e(TAG, "استجابة sources فارغة!")
                     return@withContext false
                 }
+
+                // استخراج كائنات السيرفرات (الجذر أو داخل versions)
                 val rootJson = JSONObject(sourcesJsonStr)
                 val allServers = mutableListOf<ServerItem>()
 
@@ -660,9 +671,11 @@ class WitAnime : MainAPI() {
                         }
                     }
                 }
+
                 if (rootJson.has("players") || rootJson.has("downloads")) {
                     extractGroup(rootJson.optJSONObject("players"), rootJson.optJSONObject("downloads"))
                 }
+
                 rootJson.optJSONObject("versions")?.let { vObj ->
                     val keys = vObj.keys()
                     while (keys.hasNext()) {
@@ -673,12 +686,11 @@ class WitAnime : MainAPI() {
                 }
 
                 Log.i(TAG, "6. تم استخراج ${allServers.size} سيرفر بنجاح!")
-                if (allServers.isEmpty()) {
-                    Log.e(TAG, "لم يتم العثور على أي سيرفرات في ملف JSON!")
-                    return@withContext false
-                }
+                if (allServers.isEmpty()) return@withContext false
 
                 var foundAny = false
+
+                // فك بوابات السيرفرات
                 for (s in allServers.take(16)) {
                     val sourceEndpoint = if (s.isStream) "stream-source" else "download-source"
                     val gateEndpoint = if (s.isStream) "stream-gate" else "download-gate"
@@ -690,15 +702,11 @@ class WitAnime : MainAPI() {
                         val sReq = Request.Builder()
                             .url(sourceUrl)
                             .post(emptyBody)
-                            .header("Host", "witanime.site")
                             .header("User-Agent", customUserAgent)
-                            .header("Sec-Ch-Ua", "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"")
-                            .header("Sec-Ch-Ua-Mobile", "?0")
-                            .header("Sec-Ch-Ua-Platform", "\"Windows\"")
-                            .header("X-CSRF-TOKEN", csrfToken)
                             .header("Accept", "application/json")
+                            .header("X-CSRF-TOKEN", csrfToken)
                             .header("Origin", mainUrl)
-                            .header("Referer", cleanWatchUrl)
+                            .header("Referer", finalWatchUrl)
                             .header("Sec-Fetch-Site", "same-origin")
                             .header("Sec-Fetch-Mode", "cors")
                             .header("Sec-Fetch-Dest", "empty")
@@ -724,6 +732,8 @@ class WitAnime : MainAPI() {
                             .apply { exactGateHeaders.forEach { (k, v) -> header(k, v) } }
                             .get()
                             .build()
+
+                        // استخدام noRedirectClient لقراءة كود 302
                         val gRes = noRedirectClient.newCall(gReq).execute()
                         var embedUrl = gRes.header("Location") ?: gRes.header("location")
 
@@ -782,7 +792,7 @@ class WitAnime : MainAPI() {
                                     foundAny = true
                                 }
                             } else {
-                                loadExtractor(embedUrl, cleanWatchUrl, subtitleCallback) { link ->
+                                loadExtractor(embedUrl, finalWatchUrl, subtitleCallback) { link ->
                                     foundAny = true
                                     callback(link)
                                 }
@@ -796,7 +806,7 @@ class WitAnime : MainAPI() {
                     }
                 }
 
-                Log.i(TAG, "انتهى استخراج الروابط، النتيجة الإجمالية: $foundAny")
+                Log.i(TAG, "انتهت العملية، هل تم العثور على روابط: $foundAny")
                 foundAny
             } catch (e: Exception) {
                 logError(e)
