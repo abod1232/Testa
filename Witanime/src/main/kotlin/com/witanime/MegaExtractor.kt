@@ -438,8 +438,6 @@ class YonaPlayExtractor : ExtractorApi() {
         private const val TAG = "YONAPLAY_EXTRACTOR"
         private const val USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-
-        // فئة لحفظ كوكيز الجلسة بين طلبات YonaPlay المتتالية
         private class YonaCookieJar : CookieJar {
             private val cookieStore = ConcurrentHashMap<String, Cookie>()
 
@@ -453,8 +451,6 @@ class YonaPlayExtractor : ExtractorApi() {
                 return cookieStore.values.filter { it.matches(url) }
             }
         }
-
-        // إنشاء عميل خاص بسيرفر YonaPlay يحتفظ بالجلسة تلقائياً
         private fun createYonaClient(): OkHttpClient {
             return OkHttpClient.Builder()
                 .cookieJar(YonaCookieJar())
@@ -559,8 +555,6 @@ class YonaPlayExtractor : ExtractorApi() {
             try {
                 val client = createYonaClient()
                 val origin = if (url.startsWith("http")) Uri.parse(url).let { "${it.scheme}://${it.host}" } else "https://mid.yonaplay.net"
-
-                // 1. جلب صفحة المشغل مع حفظ كوكيز الجلسة
                 val pageReq = Request.Builder()
                     .url(url)
                     .header("User-Agent", USER_AGENT)
@@ -580,8 +574,6 @@ class YonaPlayExtractor : ExtractorApi() {
                         pageKey = obj.optString("k").trim()
                     }
                 }
-
-                // 2. إذا لم تكن البيانات في الصفحة، نطلب init-session بنفس العميل
                 if (code.isEmpty() || pageKey.isEmpty()) {
                     val initReq = Request.Builder()
                         .url("$origin/api/init-session.php")
@@ -599,8 +591,6 @@ class YonaPlayExtractor : ExtractorApi() {
                 }
 
                 if (code.isEmpty() || pageKey.isEmpty()) return@withContext
-
-                // 3. طلب sources.php
                 val srcPayload = JSONObject().put("code", code).toString()
                 val srcReqBuilder = Request.Builder()
                     .url("$origin/api/sources.php")
@@ -615,8 +605,6 @@ class YonaPlayExtractor : ExtractorApi() {
 
                 val srcRaw = client.newCall(srcReqBuilder.build()).execute().use { it.body?.string().orEmpty() }
                 val qualitiesObj = JSONObject(srcRaw).optJSONObject("qualities") ?: return@withContext
-
-                // 4. استخراج وفك تشفير كل جودة
                 for (qKey in listOf("4k", "fhd", "hd", "sd")) {
                     val qGroup = qualitiesObj.optJSONObject(qKey) ?: continue
                     val servers = qGroup.optJSONArray("servers") ?: continue
@@ -651,8 +639,6 @@ class YonaPlayExtractor : ExtractorApi() {
                         if (encD.isEmpty()) continue
 
                         val subUrl = decryptAesGcm(encD, pageKey)?.takeIf { it.startsWith("http") } ?: continue
-
-                        // 5. إذا كان السيرفر هو dotplay نفك شفرته بنفس الجلسة
                         if (subUrl.contains("dotplay.", ignoreCase = true)) {
                             resolveDotPlay(
                                 client = client,
