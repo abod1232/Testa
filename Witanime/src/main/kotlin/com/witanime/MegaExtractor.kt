@@ -492,7 +492,7 @@ class YonaPlayExtractor : ExtractorApi() {
             null
         }
     }
-    private fun resolveDotPlay(
+    private suspend fun resolveDotPlay(
         client: OkHttpClient,
         dotPlayUrl: String,
         referer: String,
