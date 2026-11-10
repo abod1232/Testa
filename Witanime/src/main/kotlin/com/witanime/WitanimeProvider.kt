@@ -22,12 +22,15 @@ import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import org.jsoup.Jsoup
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
-class SharedSessionCookieJar : CookieJar {
+
+// ── CookieJar المأخوذ من الكود الأول الناجح بالكامل ──────────────────────────
+class EngineSessionCookieJar : CookieJar {
     private val store = ConcurrentHashMap<String, Cookie>()
 
     private fun baseDomain(host: String): String {
@@ -39,7 +42,7 @@ class SharedSessionCookieJar : CookieJar {
         val base = baseDomain(url.host)
         for (cookie in cookies) {
             val key = "$base|${cookie.name}"
-            if (cookie.value.isEmpty()) {
+            if (cookie.expiresAt <= System.currentTimeMillis() && cookie.value.isEmpty()) {
                 store.remove(key)
             } else {
                 store[key] = cookie
@@ -58,11 +61,6 @@ class SharedSessionCookieJar : CookieJar {
         }
         return result
     }
-
-    fun hasCookie(domain: String, cookieName: String): Boolean {
-        val base = baseDomain(domain)
-        return store.containsKey("$base|$cookieName")
-    }
 }
 
 class WitAnime : MainAPI() {
@@ -79,10 +77,32 @@ class WitAnime : MainAPI() {
         @Volatile var isWebViewOpen = false
         @Volatile var lastWebViewOpenTime = 0L
 
-        val sharedCookieJar = SharedSessionCookieJar()
-        val directClient: OkHttpClient by lazy {
-            app.baseClient.newBuilder()
-                .cookieJar(sharedCookieJar)
+        const val DEFAULT_UA =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
+        val engineCookieJar = EngineSessionCookieJar()
+
+        // معترض ترويسات Chrome الحقيقي المطابق للكود الأول
+        private val clientHintsInterceptor = okhttp3.Interceptor { chain ->
+            val orig = chain.request()
+            val ua = orig.header("User-Agent") ?: DEFAULT_UA
+            if (ua.contains("Chrome/", ignoreCase = true) && orig.header("sec-ch-ua") == null) {
+                val updated = orig.newBuilder()
+                    .header("sec-ch-ua", "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"")
+                    .header("sec-ch-ua-mobile", "?0")
+                    .header("sec-ch-ua-platform", "\"Windows\"")
+                    .build()
+                chain.proceed(updated)
+            } else {
+                chain.proceed(orig)
+            }
+        }
+
+        // عميل مستقل تماماً (بدون app.baseClient) لتفادي أي كشف للبوت
+        val engineClient: OkHttpClient by lazy {
+            OkHttpClient.Builder()
+                .cookieJar(engineCookieJar)
+                .addInterceptor(clientHintsInterceptor)
                 .followRedirects(true)
                 .followSslRedirects(true)
                 .connectTimeout(15, TimeUnit.SECONDS)
@@ -90,36 +110,15 @@ class WitAnime : MainAPI() {
                 .callTimeout(20, TimeUnit.SECONDS)
                 .build()
         }
+
+        // عميل البوابات بدون تتبع توجيه
         val noRedirectClient: OkHttpClient by lazy {
-            directClient.newBuilder()
+            engineClient.newBuilder()
                 .followRedirects(false)
                 .followSslRedirects(false)
                 .build()
         }
     }
-    private val customUserAgent =
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-
-    private val baseHeaders = mapOf(
-        "User-Agent" to customUserAgent,
-        "Sec-Ch-Ua" to "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"",
-        "Sec-Ch-Ua-Mobile" to "?0",
-        "Sec-Ch-Ua-Platform" to "\"Windows\""
-    )
-
-    private val exactGateHeaders = mapOf(
-        "User-Agent" to customUserAgent,
-        "Sec-Ch-Ua" to "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"",
-        "Sec-Ch-Ua-Mobile" to "?0",
-        "Sec-Ch-Ua-Platform" to "\"Windows\"",
-        "Upgrade-Insecure-Requests" to "1",
-        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Sec-Fetch-Site" to "same-origin",
-        "Sec-Fetch-Mode" to "navigate",
-        "Sec-Fetch-Dest" to "iframe",
-        "Sec-Fetch-User" to "?1",
-        "Accept-Language" to "ar,en-US;q=0.9,en;q=0.8"
-    )
 
     object PlayerAccess {
         private val handler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -378,16 +377,25 @@ class WitAnime : MainAPI() {
         PlayerAccess.startMonitoring()
     }
 
-    private fun fetchDocument(url: String): org.jsoup.nodes.Document {
-        val req = Request.Builder()
+    private fun buildDocumentRequest(url: String, referer: String? = "$mainUrl/"): Request {
+        val builder = Request.Builder()
             .url(url)
-            .apply {
-                baseHeaders.forEach { (k, v) -> header(k, v) }
-                header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
-                header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
-            }
-            .build()
-        val res = directClient.newCall(req).execute()
+            .header("User-Agent", DEFAULT_UA)
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+            .header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
+            .header("Upgrade-Insecure-Requests", "1")
+            .header("Sec-Fetch-Dest", "document")
+            .header("Sec-Fetch-Mode", "navigate")
+            .header("Sec-Fetch-User", "?1")
+            .header("Sec-Fetch-Site", if (referer != null) "same-origin" else "none")
+        if (!referer.isNullOrBlank()) {
+            builder.header("Referer", referer)
+        }
+        return builder.build()
+    }
+
+    private fun fetchDocument(url: String): org.jsoup.nodes.Document {
+        val res = engineClient.newCall(buildDocumentRequest(url)).execute()
         val body = res.body?.string().orEmpty()
         res.close()
         return Jsoup.parse(body)
@@ -562,26 +570,20 @@ class WitAnime : MainAPI() {
         return withContext(Dispatchers.IO) {
             try {
                 val cleanWatchUrl = fixUrl(data.substringBefore('?').trimEnd('/'))
-                Log.i(TAG, "1. البدء برابط المشاهدة النظيف: $cleanWatchUrl")
+                Log.i(TAG, "1. البدء برابط المشاهدة: $cleanWatchUrl")
 
                 var finalWatchUrl = cleanWatchUrl
-                val pageReq = Request.Builder()
-                    .url(cleanWatchUrl)
-                    .apply {
-                        baseHeaders.forEach { (k, v) -> header(k, v) }
-                        header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
-                        header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
-                        header("Referer", "$mainUrl/")
-                        header("Upgrade-Insecure-Requests", "1")
-                    }
-                    .build()
 
-                val pageHtml = directClient.newCall(pageReq).execute().use { resp ->
+                // 1. جلب صفحة المشاهدة بواسطة engineClient النقي
+                val pageReq = buildDocumentRequest(cleanWatchUrl, "$mainUrl/")
+                val pageHtml = engineClient.newCall(pageReq).execute().use { resp ->
                     finalWatchUrl = resp.request.url.toString()
-                    Log.i(TAG, "2. استجابة صفحة الحلقة كود: ${resp.code} (الرابط الفعلي: $finalWatchUrl)")
+                    Log.i(TAG, "2. استجابة صفحة الحلقة كود: ${resp.code} (الرابط: $finalWatchUrl)")
                     if (!resp.isSuccessful) return@withContext false
                     resp.body?.string().orEmpty()
                 }
+
+                // 2. استخراج CSRF Token
                 val csrfToken = Regex("""name=['"]csrf-token['"]\s+content=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: Regex("""data-csrf=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: run {
@@ -589,18 +591,22 @@ class WitAnime : MainAPI() {
                         return@withContext false
                     }
                 Log.i(TAG, "3. تم العثور على CSRF Token: $csrfToken")
+
+                // 3. استخراج رابط sources
                 val sourcesPattern = Regex("""sourcesUrl\s*:\s*['"]([^'"]+)['"]""")
                 val rawSources = sourcesPattern.find(pageHtml)?.groupValues?.get(1)?.replace("\\/", "/")?.trim()
                     ?: "${finalWatchUrl.substringBefore('?').trimEnd('/')}/sources"
                 val sourcesUrl = fixUrl(rawSources)
                 Log.i(TAG, "4. رابط Sources المستخرج: $sourcesUrl")
 
-                delay(300)
-                val emptyBody = RequestBody.create(null, ByteArray(0))
+                delay(200)
+
+                // 4. طلب POST /sources المطابق تماماً للكود الأول (بدون ترويسة Host وبواسطة engineClient)
+                val emptyBody = ByteArray(0).toRequestBody(null)
                 val sourcesReq = Request.Builder()
                     .url(sourcesUrl)
                     .post(emptyBody)
-                    .header("User-Agent", customUserAgent)
+                    .header("User-Agent", DEFAULT_UA)
                     .header("Accept", "application/json")
                     .header("X-CSRF-TOKEN", csrfToken)
                     .header("Origin", mainUrl)
@@ -610,7 +616,7 @@ class WitAnime : MainAPI() {
                     .header("Sec-Fetch-Dest", "empty")
                     .build()
 
-                val sourcesJsonStr = directClient.newCall(sourcesReq).execute().use { resp ->
+                val sourcesJsonStr = engineClient.newCall(sourcesReq).execute().use { resp ->
                     Log.i(TAG, "5. استجابة /sources كود: ${resp.code}")
                     val body = resp.body?.string().orEmpty()
                     if (!resp.isSuccessful) {
@@ -624,6 +630,8 @@ class WitAnime : MainAPI() {
                     Log.e(TAG, "استجابة sources فارغة!")
                     return@withContext false
                 }
+
+                // 5. استخراج السيرفرات بذكاء
                 val rootJson = JSONObject(sourcesJsonStr)
                 val allServers = mutableListOf<ServerItem>()
 
@@ -669,6 +677,8 @@ class WitAnime : MainAPI() {
                 if (allServers.isEmpty()) return@withContext false
 
                 var foundAny = false
+
+                // 6. فك بوابات السيرفرات
                 for (s in allServers.take(16)) {
                     val sourceEndpoint = if (s.isStream) "stream-source" else "download-source"
                     val gateEndpoint = if (s.isStream) "stream-gate" else "download-gate"
@@ -680,7 +690,7 @@ class WitAnime : MainAPI() {
                         val sReq = Request.Builder()
                             .url(sourceUrl)
                             .post(emptyBody)
-                            .header("User-Agent", customUserAgent)
+                            .header("User-Agent", DEFAULT_UA)
                             .header("Accept", "application/json")
                             .header("X-CSRF-TOKEN", csrfToken)
                             .header("Origin", mainUrl)
@@ -690,35 +700,45 @@ class WitAnime : MainAPI() {
                             .header("Sec-Fetch-Dest", "empty")
                             .build()
 
-                        val sRes = directClient.newCall(sReq).execute()
-                        val sCode = sRes.code
-                        val sBody = sRes.body?.string().orEmpty()
-                        sRes.close()
+                        var gatePath = "/watch/$gateEndpoint/$encodedToken"
+                        var refPolicy = "no-referrer"
 
-                        if (sCode !in 200..299) {
-                            delay(1150)
-                            continue
+                        engineClient.newCall(sReq).execute().use { resp ->
+                            val body = resp.body?.string().orEmpty()
+                            if (resp.isSuccessful) {
+                                runCatching { JSONObject(body) }.getOrNull()?.let { j ->
+                                    j.optString("gateUrl").takeIf { it.isNotBlank() }?.let { gatePath = it }
+                                    j.optString("referrerPolicy").takeIf { it.isNotBlank() }?.let { refPolicy = it }
+                                }
+                            }
                         }
 
-                        val sJson = runCatching { JSONObject(sBody) }.getOrNull()
-                        val rawGatePath = sJson?.optString("gateUrl")?.takeIf { it.isNotBlank() }
-                            ?: "/watch/$gateEndpoint/$encodedToken"
-                        val fullGateUrl = fixUrl(rawGatePath)
-
-                        val gReq = Request.Builder()
+                        val fullGateUrl = fixUrl(gatePath)
+                        val gateReqBuilder = Request.Builder()
                             .url(fullGateUrl)
-                            .apply { exactGateHeaders.forEach { (k, v) -> header(k, v) } }
                             .get()
-                            .build()
-                        val gRes = noRedirectClient.newCall(gReq).execute()
+                            .header("User-Agent", DEFAULT_UA)
+                            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+                            .header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
+                            .header("Sec-Fetch-Site", "same-origin")
+                            .header("Sec-Fetch-Mode", "navigate")
+                            .header("Sec-Fetch-Dest", "iframe")
+                            .header("Upgrade-Insecure-Requests", "1")
+
+                        if (refPolicy.equals("origin", ignoreCase = true)) {
+                            gateReqBuilder.header("Referer", "$mainUrl/")
+                        }
+
+                        // استخدام noRedirectClient لقراءة 302 Location
+                        val gRes = noRedirectClient.newCall(gateReqBuilder.build()).execute()
                         var embedUrl = gRes.header("Location") ?: gRes.header("location")
 
                         if (embedUrl.isNullOrBlank()) {
                             val gBody = gRes.body?.string().orEmpty()
-                            val match = Regex("""url=['"]([^'"]+)['"]""").find(gBody)
-                                ?: Regex("""href=["'](https?://[^"']+)["']""").find(gBody)
-                                ?: Regex("""src=["'](https?://[^"']+)["']""").find(gBody)
-                            embedUrl = match?.groupValues?.get(1)
+                            val doc = Jsoup.parse(gBody, fullGateUrl)
+                            embedUrl = doc.selectFirst("iframe[src]")?.attr("src")
+                                ?: Regex("""url=['"]([^'"]+)['"]""").find(gBody)?.groupValues?.get(1)
+                                ?: Regex("""href=["'](https?://[^"']+)["']""").find(gBody)?.groupValues?.get(1)
                         }
                         gRes.close()
 
