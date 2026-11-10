@@ -35,8 +35,6 @@ import java.util.concurrent.atomic.AtomicInteger
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
-
-// ── CookieJar عام ومستمر ─────────────────────────────────────────────────────
 class EngineSessionCookieJar : CookieJar {
     private val store = ConcurrentHashMap<String, Cookie>()
 
@@ -88,8 +86,6 @@ class WitAnime : MainAPI() {
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
         val engineCookieJar = EngineSessionCookieJar()
-
-        // تخطي فحص الشهادات لمراقبة حركة المرور في Reqable
         val trustAllManager: X509TrustManager = @SuppressLint("CustomX509TrustManager") object : X509TrustManager {
             @SuppressLint("TrustAllX509TrustManager")
             override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) = Unit
@@ -137,8 +133,6 @@ class WitAnime : MainAPI() {
                 .followSslRedirects(false)
                 .build()
         }
-
-        // ترتيب أولويات السيرفرات لضمان أفضل السيرفرات أولاً
         fun hostPriority(name: String): Int {
             val n = name.lowercase().trim()
             return when {
@@ -602,8 +596,6 @@ class WitAnime : MainAPI() {
     }
 
     data class ServerItem(val quality: String, val label: String, val token: String, val isStream: Boolean)
-
-    // كائن نتيجة فك البوابة مع رصيد الـ Rate Limit
     private data class GateResult(
         val success: Boolean,
         val isRateLimited: Boolean,
@@ -701,8 +693,6 @@ class WitAnime : MainAPI() {
                 Log.i(TAG, "1. البدء برابط المشاهدة: $cleanWatchUrl")
 
                 var finalWatchUrl = cleanWatchUrl
-
-                // 1. جلب صفحة المشاهدة
                 val pageReq = buildDocumentRequest(cleanWatchUrl, "$mainUrl/")
                 val pageHtml = engineClient.newCall(pageReq).execute().use { resp ->
                     finalWatchUrl = resp.request.url.toString()
@@ -710,8 +700,6 @@ class WitAnime : MainAPI() {
                     if (!resp.isSuccessful) return@withContext false
                     resp.body?.string().orEmpty()
                 }
-
-                // 2. استخراج CSRF Token
                 val csrfToken = Regex("""name=['"]csrf-token['"]\s+content=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: Regex("""data-csrf=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: run {
@@ -719,8 +707,6 @@ class WitAnime : MainAPI() {
                         return@withContext false
                     }
                 Log.i(TAG, "3. تم العثور على CSRF Token: $csrfToken")
-
-                // 3. استخراج رابط sources
                 val sourcesPattern = Regex("""sourcesUrl\s*:\s*['"]([^'"]+)['"]""")
                 val rawSources = sourcesPattern.find(pageHtml)?.groupValues?.get(1)?.replace("\\/", "/")?.trim()
                     ?: "${finalWatchUrl.substringBefore('?').trimEnd('/')}/sources"
@@ -728,8 +714,6 @@ class WitAnime : MainAPI() {
                 Log.i(TAG, "4. رابط Sources المستخرج: $sourcesUrl")
 
                 delay(200)
-
-                // 4. طلب POST /sources
                 val emptyBody = ByteArray(0).toRequestBody(null)
                 val sourcesReq = Request.Builder()
                     .url(sourcesUrl)
@@ -797,9 +781,6 @@ class WitAnime : MainAPI() {
 
                 Log.i(TAG, "6. تم استخراج ${rawServers.size} سيرفر!")
                 if (rawServers.isEmpty()) return@withContext false
-
-                // ── فرز وتوزيع ذكي للسيرفرات (مثل الكود الأول تماماً) ──────────
-                // نجلب أفضل جودة لكل سيرفر مختلف أولاً لضمان تنوع السيرفرات
                 val bestPerHost = mutableListOf<ServerItem>()
                 val remainingServers = mutableListOf<ServerItem>()
                 val seenHosts = HashSet<String>()
@@ -822,16 +803,11 @@ class WitAnime : MainAPI() {
 
                 val emittedCount = AtomicInteger(0)
                 var lastGateStartMs = 0L
-
-                // ── فك بوابات السيرفرات مع الحساب الدقيق للمهلة الزمنية ────────
                 for (s in prioritizedServers.take(16)) {
-                    // التوقف الذكي: إذا استخرجنا 5 روابط صالحة للتشغيل نكتفي بذلك لبدء العرض فوراً
                     if (emittedCount.get() >= 5) {
                         Log.i(TAG, "تم الاكتفاء بـ ${emittedCount.get()} روابط صالحة للبدء السريع.")
                         break
                     }
-
-                    // حساب فاصل الأمان الدقيق (~1.15 ثانية) لمنع حظر النقر السريع
                     if (lastGateStartMs > 0L) {
                         val sincePrev = System.currentTimeMillis() - lastGateStartMs
                         val waitMs = (1_150L - sincePrev).coerceAtLeast(180L)
@@ -840,15 +816,11 @@ class WitAnime : MainAPI() {
                     lastGateStartMs = System.currentTimeMillis()
 
                     var result = unlockGate(s, csrfToken, finalWatchUrl)
-
-                    // إذا وصلنا 429 بسبب تلاصق الطلبات، ننتظر 1.45 ثانية ونعيد المحاولة
                     if (result.isRateLimited) {
                         Log.w(TAG, "تم لمس الـ Rate Limit، جاري الانتظار 1.45 ثانية وإعادة المحاولة...")
                         delay(1_450L)
                         lastGateStartMs = System.currentTimeMillis()
                         result = unlockGate(s, csrfToken, finalWatchUrl)
-
-                        // إذا تكرر 429 ونفد الرصيد بالكامل وكان لدينا روابط بالفعل نتوقف بنجاح
                         if (result.isRateLimited && emittedCount.get() > 0) {
                             Log.i(TAG, "نفد رصيد الدقيقة، الاكتفاء بما تم استخراجه.")
                             break
