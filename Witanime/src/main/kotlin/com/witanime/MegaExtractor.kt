@@ -537,7 +537,6 @@ class YonaPlayExtractor : ExtractorApi() {
 
             if (decoded.startsWith("http")) {
                 val isHls = decoded.contains(".m3u8", ignoreCase = true)
-                // إرسال الرابط المباشر المستخرج
                 callback.invoke(
                     newExtractorLink(
                         source = this@YonaPlayExtractor.name,
@@ -549,8 +548,6 @@ class YonaPlayExtractor : ExtractorApi() {
                         this.quality = quality
                     }
                 )
-
-                // تمرير الرابط أيضاً إلى loadExtractor لفك أي إكستراكتورز متطابقة معه
                 loadExtractor(decoded, "https://dotplay.net/", subtitleCallback, callback)
             }
         } catch (e: Exception) {
@@ -661,7 +658,6 @@ class YonaPlayExtractor : ExtractorApi() {
                         val sourceLabel = "${this@YonaPlayExtractor.name} ($srvName - ${qKey.uppercase()})"
 
                         if (subUrl.contains("dotplay.", ignoreCase = true)) {
-                            // فك رابط DotPlay
                             resolveDotPlay(
                                 client = client,
                                 dotPlayUrl = subUrl,
@@ -672,7 +668,6 @@ class YonaPlayExtractor : ExtractorApi() {
                                 callback = callback
                             )
                         } else {
-                            // 1. إذا كان رابط بث أو فيديو مباشر نرسله للمشغل
                             if (subUrl.contains(".m3u8", ignoreCase = true) || subUrl.contains(".mp4", ignoreCase = true)) {
                                 val isHls = subUrl.contains(".m3u8", ignoreCase = true)
                                 callback.invoke(
@@ -687,8 +682,6 @@ class YonaPlayExtractor : ExtractorApi() {
                                     }
                                 )
                             }
-
-                            // 2. تمريره لـ loadExtractor لاستخراج أي سيرفرات فرعية أخرى مدعومة
                             loadExtractor(subUrl, "$origin/", subtitleCallback, callback)
                         }
                     }
