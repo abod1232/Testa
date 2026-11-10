@@ -596,12 +596,7 @@ class WitAnime : MainAPI() {
     }
 
     data class ServerItem(val quality: String, val label: String, val token: String, val isStream: Boolean)
-    private data class GateResult(
-        val success: Boolean,
-        val isRateLimited: Boolean,
-        val remainingQuota: Int,
-        val embedUrl: String? = null
-    )
+    
     private data class GateResult(
         val success: Boolean,
         val isRateLimited: Boolean,
