@@ -435,8 +435,6 @@ class FourSharedExtractor : ExtractorApi() {
 }
 
 
-
-
 class YonaPlayExtractor : ExtractorApi() {
     override val name = "YonaPlay"
     override val mainUrl = "https://mid.yonaplay.net"
@@ -446,6 +444,7 @@ class YonaPlayExtractor : ExtractorApi() {
         private const val TAG = "YONAPLAY_EXTRACTOR"
         private const val USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
         private class YonaCookieJar : CookieJar {
             private val store = ConcurrentHashMap<String, Cookie>()
 
@@ -459,6 +458,7 @@ class YonaPlayExtractor : ExtractorApi() {
                 return store.values.filter { it.matches(url) }
             }
         }
+
         private fun buildClient(): OkHttpClient {
             return OkHttpClient.Builder()
                 .cookieJar(YonaCookieJar())
@@ -469,6 +469,7 @@ class YonaPlayExtractor : ExtractorApi() {
                 .build()
         }
     }
+
     private fun decryptAesGcm(b64Data: String, pageKey: String): String? {
         return try {
             val keyBytes = MessageDigest.getInstance("SHA-256")
@@ -492,12 +493,14 @@ class YonaPlayExtractor : ExtractorApi() {
             null
         }
     }
+
     private suspend fun resolveDotPlay(
         client: OkHttpClient,
         dotPlayUrl: String,
         referer: String,
         label: String,
         quality: Int,
+        subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ) {
         try {
@@ -534,6 +537,7 @@ class YonaPlayExtractor : ExtractorApi() {
 
             if (decoded.startsWith("http")) {
                 val isHls = decoded.contains(".m3u8", ignoreCase = true)
+                // إرسال الرابط المباشر المستخرج
                 callback.invoke(
                     newExtractorLink(
                         source = this@YonaPlayExtractor.name,
@@ -545,6 +549,9 @@ class YonaPlayExtractor : ExtractorApi() {
                         this.quality = quality
                     }
                 )
+
+                // تمرير الرابط أيضاً إلى loadExtractor لفك أي إكستراكتورز متطابقة معه
+                loadExtractor(decoded, "https://dotplay.net/", subtitleCallback, callback)
             }
         } catch (e: Exception) {
             Log.e(TAG, "DotPlay resolve error: ${e.message}")
@@ -562,6 +569,7 @@ class YonaPlayExtractor : ExtractorApi() {
             try {
                 val client = buildClient()
                 val origin = if (url.startsWith("http")) Uri.parse(url).let { "${it.scheme}://${it.host}" } else "https://mid.yonaplay.net"
+
                 val pageReq = Request.Builder()
                     .url(url)
                     .header("User-Agent", USER_AGENT)
@@ -590,6 +598,7 @@ class YonaPlayExtractor : ExtractorApi() {
                     "User-Agent" to USER_AGENT,
                     "Accept" to "application/json"
                 )
+
                 if (code.isEmpty() || pageKey.isEmpty()) {
                     val initReq = Request.Builder()
                         .url("$origin/api/init-session.php")
@@ -608,6 +617,7 @@ class YonaPlayExtractor : ExtractorApi() {
                 if (embedToken.isNotEmpty()) {
                     apiHeaders["X-Embed-Token"] = embedToken
                 }
+
                 val srcPayload = JSONObject().put("code", code).toString()
                 val srcReq = Request.Builder()
                     .url("$origin/api/sources.php")
@@ -617,6 +627,7 @@ class YonaPlayExtractor : ExtractorApi() {
 
                 val srcRaw = client.newCall(srcReq).execute().use { it.body?.string().orEmpty() }
                 val qualitiesObj = JSONObject(srcRaw).optJSONObject("qualities") ?: return@withContext
+
                 for (qKey in listOf("4k", "fhd", "hd", "sd")) {
                     val qGroup = qualitiesObj.optJSONObject(qKey) ?: continue
                     val servers = qGroup.optJSONArray("servers") ?: continue
@@ -646,28 +657,39 @@ class YonaPlayExtractor : ExtractorApi() {
                         if (encD.isEmpty()) continue
 
                         val subUrl = decryptAesGcm(encD, pageKey)?.takeIf { it.startsWith("http") } ?: continue
+
+                        val sourceLabel = "${this@YonaPlayExtractor.name} ($srvName - ${qKey.uppercase()})"
+
                         if (subUrl.contains("dotplay.", ignoreCase = true)) {
+                            // فك رابط DotPlay
                             resolveDotPlay(
                                 client = client,
                                 dotPlayUrl = subUrl,
                                 referer = "$origin/",
-                                label = "${this@YonaPlayExtractor.name} ($srvName - ${qKey.uppercase()})",
+                                label = sourceLabel,
                                 quality = qVal,
+                                subtitleCallback = subtitleCallback,
                                 callback = callback
                             )
                         } else {
-                            val isHls = subUrl.contains(".m3u8", ignoreCase = true)
-                            callback.invoke(
-                                newExtractorLink(
-                                    source = this@YonaPlayExtractor.name,
-                                    name = "${this@YonaPlayExtractor.name} ($srvName - ${qKey.uppercase()})",
-                                    url = subUrl,
-                                    type = if (isHls) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
-                                ) {
-                                    this.referer = "$origin/"
-                                    this.quality = qVal
-                                }
-                            )
+                            // 1. إذا كان رابط بث أو فيديو مباشر نرسله للمشغل
+                            if (subUrl.contains(".m3u8", ignoreCase = true) || subUrl.contains(".mp4", ignoreCase = true)) {
+                                val isHls = subUrl.contains(".m3u8", ignoreCase = true)
+                                callback.invoke(
+                                    newExtractorLink(
+                                        source = this@YonaPlayExtractor.name,
+                                        name = sourceLabel,
+                                        url = subUrl,
+                                        type = if (isHls) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                                    ) {
+                                        this.referer = "$origin/"
+                                        this.quality = qVal
+                                    }
+                                )
+                            }
+
+                            // 2. تمريره لـ loadExtractor لاستخراج أي سيرفرات فرعية أخرى مدعومة
+                            loadExtractor(subUrl, "$origin/", subtitleCallback, callback)
                         }
                     }
                 }
