@@ -689,32 +689,23 @@ class WitAnime : MainAPI() {
     ): Boolean {
         return withContext(Dispatchers.IO) {
             try {
-                // تنظيف رابط المشاهدة
                 val cleanWatchUrl = fixUrl(data.substringBefore('?').trimEnd('/'))
                 var finalWatchUrl = cleanWatchUrl
-
-                // 1. طلب صفحة الحلقة
                 val pageReq = buildDocumentRequest(cleanWatchUrl, "$mainUrl/")
                 val pageHtml = engineClient.newCall(pageReq).execute().use { resp ->
                     finalWatchUrl = resp.request.url.toString()
                     if (!resp.isSuccessful) return@withContext false
                     resp.body?.string().orEmpty()
                 }
-
-                // 2. استخراج CSRF Token
                 val csrfToken = Regex("""name=['"]csrf-token['"]\s+content=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: Regex("""data-csrf=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: return@withContext false
-
-                // 3. استخراج رابط sources
                 val sourcesPattern = Regex("""sourcesUrl\s*:\s*['"]([^'"]+)['"]""")
                 val rawSources = sourcesPattern.find(pageHtml)?.groupValues?.get(1)?.replace("\\/", "/")?.trim()
                     ?: "${finalWatchUrl.substringBefore('?').trimEnd('/')}/sources"
                 val sourcesUrl = fixUrl(rawSources)
 
                 delay(500)
-
-                // 4. طلب قائمة السيرفرات (sources)
                 val emptyBody = ByteArray(0).toRequestBody(null)
                 val sourcesReq = Request.Builder()
                     .url(sourcesUrl)
@@ -735,8 +726,6 @@ class WitAnime : MainAPI() {
                 }
 
                 if (sourcesJsonStr.isBlank()) return@withContext false
-
-                // 5. استخراج السيرفرات
                 val rootJson = JSONObject(sourcesJsonStr)
                 data class ServerItem(val quality: String, val label: String, val token: String, val isStream: Boolean)
                 val allServers = mutableListOf<ServerItem>()
@@ -779,8 +768,6 @@ class WitAnime : MainAPI() {
                 }
 
                 if (allServers.isEmpty()) return@withContext false
-
-                // 6. نفس طريقتك: أخذ أول 10 سيرفرات والمرور عليها بالترتيب مع انتظار ثانيتين
                 val limitedServers = allServers.take(10)
                 var foundAny = false
 
@@ -788,12 +775,8 @@ class WitAnime : MainAPI() {
                     try {
                         val sourceEndpoint = if (server.isStream) "stream-source" else "download-source"
                         val gateEndpoint = if (server.isStream) "stream-gate" else "download-gate"
-
-                        // تشفير التوكن لمنع تلف الرابط
                         val encodedToken = URLEncoder.encode(server.token, "UTF-8")
                         val sourceUrl = "$mainUrl/watch/$sourceEndpoint/$encodedToken"
-
-                        // طلب تفعيل السيرفر (POST)
                         val sReq = Request.Builder()
                             .url(sourceUrl)
                             .post(emptyBody)
@@ -821,8 +804,6 @@ class WitAnime : MainAPI() {
                         }
 
                         val fullGateUrl = fixUrl(gatePath)
-
-                        // طلب فتح البوابة (GET) بترويسات صحيحة وبدون Host يدوي
                         val gateReqBuilder = Request.Builder()
                             .url(fullGateUrl)
                             .get()
@@ -837,8 +818,6 @@ class WitAnime : MainAPI() {
                         if (refPolicy.equals("origin", ignoreCase = true)) {
                             gateReqBuilder.header("Referer", "$mainUrl/")
                         }
-
-                        // قراءة رابط التضمين بواسطة عميل noRedirectClient لالتقاط كود 302
                         val gRes = noRedirectClient.newCall(gateReqBuilder.build()).execute()
                         var embedUrl = gRes.header("Location") ?: gRes.header("location")
 
@@ -850,8 +829,6 @@ class WitAnime : MainAPI() {
                                 ?: Regex("""href=["'](https?://[^"']+)["']""").find(gBody)?.groupValues?.get(1)
                         }
                         gRes.close()
-
-                        // إرسال الرابط إلى المشغل
                         if (!embedUrl.isNullOrBlank() && embedUrl.startsWith("http")) {
                             val typeLabel = if (server.isStream) "مشاهدة" else "تنزيل"
                             val displayName = "${server.label} (${server.quality}) [$typeLabel]"
@@ -877,8 +854,6 @@ class WitAnime : MainAPI() {
                                 }
                             }
                         }
-
-                        // نفس طريقتك: الانتظار ثانيتين بين كل سيرفر والذي يليه
                         if (idx < limitedServers.size - 1) {
                             delay(2000)
                         }
