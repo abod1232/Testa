@@ -31,9 +31,12 @@ import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
+
+// ── CookieJar عام ومستمر ─────────────────────────────────────────────────────
 class EngineSessionCookieJar : CookieJar {
     private val store = ConcurrentHashMap<String, Cookie>()
 
@@ -85,19 +88,20 @@ class WitAnime : MainAPI() {
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
         val engineCookieJar = EngineSessionCookieJar()
+
+        // تخطي فحص الشهادات لمراقبة حركة المرور في Reqable
         val trustAllManager: X509TrustManager = @SuppressLint("CustomX509TrustManager") object : X509TrustManager {
             @SuppressLint("TrustAllX509TrustManager")
             override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) = Unit
-
             @SuppressLint("TrustAllX509TrustManager")
             override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) = Unit
-
             override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
         }
 
         val trustAllSslSocketFactory = SSLContext.getInstance("TLS").apply {
             init(null, arrayOf<TrustManager>(trustAllManager), SecureRandom())
         }.socketFactory
+
         private val clientHintsInterceptor = okhttp3.Interceptor { chain ->
             val orig = chain.request()
             val ua = orig.header("User-Agent") ?: DEFAULT_UA
@@ -112,6 +116,7 @@ class WitAnime : MainAPI() {
                 chain.proceed(orig)
             }
         }
+
         val engineClient: OkHttpClient by lazy {
             OkHttpClient.Builder()
                 .cookieJar(engineCookieJar)
@@ -131,6 +136,29 @@ class WitAnime : MainAPI() {
                 .followRedirects(false)
                 .followSslRedirects(false)
                 .build()
+        }
+
+        // ترتيب أولويات السيرفرات لضمان أفضل السيرفرات أولاً
+        fun hostPriority(name: String): Int {
+            val n = name.lowercase().trim()
+            return when {
+                n.contains("videas") || n == "svidea" -> 100
+                n == "videa" -> 95
+                n == "ok" || n.contains("okru") -> 90
+                n.contains("mp4upload") -> 85
+                n.contains("mega") -> 80
+                n.contains("4shared") -> 75
+                n.contains("yonaplay") -> 70
+                else -> 50
+            }
+        }
+
+        fun qualityRank(q: String): Int = when (q.uppercase().trim()) {
+            "4K", "2160P" -> 400
+            "FHD", "1080P" -> 300
+            "HD", "720P" -> 200
+            "SD", "480P" -> 100
+            else -> 50
         }
     }
 
@@ -575,6 +603,92 @@ class WitAnime : MainAPI() {
 
     data class ServerItem(val quality: String, val label: String, val token: String, val isStream: Boolean)
 
+    // كائن نتيجة فك البوابة مع رصيد الـ Rate Limit
+    private data class GateResult(
+        val success: Boolean,
+        val isRateLimited: Boolean,
+        val remainingQuota: Int,
+        val embedUrl: String? = null
+    )
+
+    private fun unlockGate(
+        s: ServerItem,
+        csrfToken: String,
+        watchUrl: String
+    ): GateResult {
+        val sourceEndpoint = if (s.isStream) "stream-source" else "download-source"
+        val gateEndpoint = if (s.isStream) "stream-gate" else "download-gate"
+        val encodedToken = URLEncoder.encode(s.token, "UTF-8")
+        val sourceUrl = "$mainUrl/watch/$sourceEndpoint/$encodedToken"
+        val emptyBody = ByteArray(0).toRequestBody(null)
+
+        val sReq = Request.Builder()
+            .url(sourceUrl)
+            .post(emptyBody)
+            .header("User-Agent", DEFAULT_UA)
+            .header("Accept", "application/json")
+            .header("X-CSRF-TOKEN", csrfToken)
+            .header("Origin", mainUrl)
+            .header("Referer", watchUrl)
+            .header("Sec-Fetch-Site", "same-origin")
+            .header("Sec-Fetch-Mode", "cors")
+            .header("Sec-Fetch-Dest", "empty")
+            .build()
+
+        var gatePath = "/watch/$gateEndpoint/$encodedToken"
+        var refPolicy = "no-referrer"
+
+        try {
+            engineClient.newCall(sReq).execute().use { resp ->
+                val rem = resp.header("x-ratelimit-remaining")?.toIntOrNull() ?: 0
+                if (resp.code == 429) return GateResult(false, isRateLimited = true, remainingQuota = rem)
+                val body = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful) return GateResult(false, isRateLimited = false, remainingQuota = rem)
+
+                runCatching { JSONObject(body) }.getOrNull()?.let { j ->
+                    j.optString("gateUrl").takeIf { it.isNotBlank() }?.let { gatePath = it }
+                    j.optString("referrerPolicy").takeIf { it.isNotBlank() }?.let { refPolicy = it }
+                }
+            }
+
+            val fullGateUrl = fixUrl(gatePath)
+            val gateReqBuilder = Request.Builder()
+                .url(fullGateUrl)
+                .get()
+                .header("User-Agent", DEFAULT_UA)
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+                .header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
+                .header("Sec-Fetch-Site", "same-origin")
+                .header("Sec-Fetch-Mode", "navigate")
+                .header("Sec-Fetch-Dest", "iframe")
+                .header("Upgrade-Insecure-Requests", "1")
+
+            if (refPolicy.equals("origin", ignoreCase = true)) {
+                gateReqBuilder.header("Referer", "$mainUrl/")
+            }
+
+            noRedirectClient.newCall(gateReqBuilder.build()).execute().use { resp ->
+                val rem = resp.header("x-ratelimit-remaining")?.toIntOrNull() ?: 0
+                if (resp.code == 429) return GateResult(false, isRateLimited = true, remainingQuota = rem)
+
+                var embedUrl = resp.header("Location") ?: resp.header("location")
+                if (embedUrl.isNullOrBlank()) {
+                    val gBody = resp.body?.string().orEmpty()
+                    val doc = Jsoup.parse(gBody, fullGateUrl)
+                    embedUrl = doc.selectFirst("iframe[src]")?.attr("src")
+                        ?: Regex("""url=['"]([^'"]+)['"]""").find(gBody)?.groupValues?.get(1)
+                        ?: Regex("""href=["'](https?://[^"']+)["']""").find(gBody)?.groupValues?.get(1)
+                }
+
+                if (!embedUrl.isNullOrBlank() && embedUrl.startsWith("http")) {
+                    return GateResult(true, isRateLimited = false, remainingQuota = rem, embedUrl = embedUrl)
+                }
+            }
+        } catch (_: Exception) {}
+
+        return GateResult(false, isRateLimited = false, remainingQuota = 0)
+    }
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -587,6 +701,8 @@ class WitAnime : MainAPI() {
                 Log.i(TAG, "1. البدء برابط المشاهدة: $cleanWatchUrl")
 
                 var finalWatchUrl = cleanWatchUrl
+
+                // 1. جلب صفحة المشاهدة
                 val pageReq = buildDocumentRequest(cleanWatchUrl, "$mainUrl/")
                 val pageHtml = engineClient.newCall(pageReq).execute().use { resp ->
                     finalWatchUrl = resp.request.url.toString()
@@ -594,6 +710,8 @@ class WitAnime : MainAPI() {
                     if (!resp.isSuccessful) return@withContext false
                     resp.body?.string().orEmpty()
                 }
+
+                // 2. استخراج CSRF Token
                 val csrfToken = Regex("""name=['"]csrf-token['"]\s+content=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: Regex("""data-csrf=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: run {
@@ -601,6 +719,8 @@ class WitAnime : MainAPI() {
                         return@withContext false
                     }
                 Log.i(TAG, "3. تم العثور على CSRF Token: $csrfToken")
+
+                // 3. استخراج رابط sources
                 val sourcesPattern = Regex("""sourcesUrl\s*:\s*['"]([^'"]+)['"]""")
                 val rawSources = sourcesPattern.find(pageHtml)?.groupValues?.get(1)?.replace("\\/", "/")?.trim()
                     ?: "${finalWatchUrl.substringBefore('?').trimEnd('/')}/sources"
@@ -608,6 +728,8 @@ class WitAnime : MainAPI() {
                 Log.i(TAG, "4. رابط Sources المستخرج: $sourcesUrl")
 
                 delay(200)
+
+                // 4. طلب POST /sources
                 val emptyBody = ByteArray(0).toRequestBody(null)
                 val sourcesReq = Request.Builder()
                     .url(sourcesUrl)
@@ -632,12 +754,8 @@ class WitAnime : MainAPI() {
                     body
                 }
 
-                if (sourcesJsonStr.isBlank()) {
-                    Log.e(TAG, "استجابة sources فارغة!")
-                    return@withContext false
-                }
                 val rootJson = JSONObject(sourcesJsonStr)
-                val allServers = mutableListOf<ServerItem>()
+                val rawServers = mutableListOf<ServerItem>()
 
                 fun extractGroup(playersObj: JSONObject?, downloadsObj: JSONObject?) {
                     playersObj?.let { p ->
@@ -647,7 +765,7 @@ class WitAnime : MainAPI() {
                                 val obj = arr.optJSONObject(i) ?: continue
                                 val token = obj.optString("token")
                                 val label = obj.optString("label").ifBlank { obj.optString("name", "server") }
-                                if (token.isNotBlank()) allServers.add(ServerItem(q, label, token, true))
+                                if (token.isNotBlank()) rawServers.add(ServerItem(q, label, token, true))
                             }
                         }
                     }
@@ -658,7 +776,7 @@ class WitAnime : MainAPI() {
                                 val obj = arr.optJSONObject(i) ?: continue
                                 val token = obj.optString("token")
                                 val label = obj.optString("label").ifBlank { obj.optString("name", "download") }
-                                if (token.isNotBlank()) allServers.add(ServerItem(q, label, token, false))
+                                if (token.isNotBlank()) rawServers.add(ServerItem(q, label, token, false))
                             }
                         }
                     }
@@ -677,134 +795,123 @@ class WitAnime : MainAPI() {
                     }
                 }
 
-                Log.i(TAG, "6. تم استخراج ${allServers.size} سيرفر بنجاح!")
-                if (allServers.isEmpty()) return@withContext false
+                Log.i(TAG, "6. تم استخراج ${rawServers.size} سيرفر!")
+                if (rawServers.isEmpty()) return@withContext false
 
-                var foundAny = false
-                for (s in allServers.take(16)) {
-                    val sourceEndpoint = if (s.isStream) "stream-source" else "download-source"
-                    val gateEndpoint = if (s.isStream) "stream-gate" else "download-gate"
+                // ── فرز وتوزيع ذكي للسيرفرات (مثل الكود الأول تماماً) ──────────
+                // نجلب أفضل جودة لكل سيرفر مختلف أولاً لضمان تنوع السيرفرات
+                val bestPerHost = mutableListOf<ServerItem>()
+                val remainingServers = mutableListOf<ServerItem>()
+                val seenHosts = HashSet<String>()
 
-                    val encodedToken = URLEncoder.encode(s.token, "UTF-8")
-                    val sourceUrl = "$mainUrl/watch/$sourceEndpoint/$encodedToken"
+                val sortedByPriority = rawServers.sortedWith(
+                    compareByDescending<ServerItem> { hostPriority(it.label) }
+                        .thenByDescending { qualityRank(it.quality) }
+                )
 
-                    try {
-                        val sReq = Request.Builder()
-                            .url(sourceUrl)
-                            .post(emptyBody)
-                            .header("User-Agent", DEFAULT_UA)
-                            .header("Accept", "application/json")
-                            .header("X-CSRF-TOKEN", csrfToken)
-                            .header("Origin", mainUrl)
-                            .header("Referer", finalWatchUrl)
-                            .header("Sec-Fetch-Site", "same-origin")
-                            .header("Sec-Fetch-Mode", "cors")
-                            .header("Sec-Fetch-Dest", "empty")
-                            .build()
-
-                        var gatePath = "/watch/$gateEndpoint/$encodedToken"
-                        var refPolicy = "no-referrer"
-
-                        engineClient.newCall(sReq).execute().use { resp ->
-                            val body = resp.body?.string().orEmpty()
-                            if (resp.isSuccessful) {
-                                runCatching { JSONObject(body) }.getOrNull()?.let { j ->
-                                    j.optString("gateUrl").takeIf { it.isNotBlank() }?.let { gatePath = it }
-                                    j.optString("referrerPolicy").takeIf { it.isNotBlank() }?.let { refPolicy = it }
-                                }
-                            }
-                        }
-
-                        val fullGateUrl = fixUrl(gatePath)
-                        val gateReqBuilder = Request.Builder()
-                            .url(fullGateUrl)
-                            .get()
-                            .header("User-Agent", DEFAULT_UA)
-                            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
-                            .header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
-                            .header("Sec-Fetch-Site", "same-origin")
-                            .header("Sec-Fetch-Mode", "navigate")
-                            .header("Sec-Fetch-Dest", "iframe")
-                            .header("Upgrade-Insecure-Requests", "1")
-
-                        if (refPolicy.equals("origin", ignoreCase = true)) {
-                            gateReqBuilder.header("Referer", "$mainUrl/")
-                        }
-
-                        val gRes = noRedirectClient.newCall(gateReqBuilder.build()).execute()
-                        var embedUrl = gRes.header("Location") ?: gRes.header("location")
-
-                        if (embedUrl.isNullOrBlank()) {
-                            val gBody = gRes.body?.string().orEmpty()
-                            val doc = Jsoup.parse(gBody, fullGateUrl)
-                            embedUrl = doc.selectFirst("iframe[src]")?.attr("src")
-                                ?: Regex("""url=['"]([^'"]+)['"]""").find(gBody)?.groupValues?.get(1)
-                                ?: Regex("""href=["'](https?://[^"']+)["']""").find(gBody)?.groupValues?.get(1)
-                        }
-                        gRes.close()
-
-                        Log.i(TAG, "سيرفر [${s.label}] رابط التضمين: $embedUrl")
-
-                        if (!embedUrl.isNullOrBlank() && embedUrl.startsWith("http")) {
-                            if (embedUrl.contains("mega.nz") || embedUrl.contains("mega.co.nz")) {
-                                val typeLabel = if (s.isStream) "مشاهدة" else "تنزيل"
-                                val displayName = "${s.label.uppercase()} (${s.quality}) [$typeLabel]"
-
-                                var megaSuccess = false
-                                try {
-                                    val localStreamUrl = WitAnimeMegaServer.registerMegaStream(embedUrl)
-                                    if (!localStreamUrl.isNullOrBlank()) {
-                                        val qVal = getQualityFromName(s.quality).takeIf { it > 0 } ?: Qualities.P1080.value
-                                        callback(
-                                            newExtractorLink(
-                                                name = "$displayName (Mega Direct)",
-                                                source = "Mega",
-                                                url = localStreamUrl
-                                            ) {
-                                                this.referer = embedUrl
-                                                this.quality = qVal
-                                                this.type = ExtractorLinkType.VIDEO
-                                            }
-                                        )
-                                        megaSuccess = true
-                                        foundAny = true
-                                    }
-                                } catch (e: Exception) {
-                                    logError(e)
-                                }
-
-                                if (!megaSuccess) {
-                                    val dummyUrl = "https://raw.githubusercontent.com/Anarios/Cloudstream/master/app/src/main/res/raw/blank.mp4#mega-webview://$embedUrl"
-                                    callback(
-                                        newExtractorLink(
-                                            name = "$displayName [WebView]",
-                                            source = "WitAnime",
-                                            url = dummyUrl
-                                        ) {
-                                            this.referer = embedUrl
-                                            this.quality = Qualities.Unknown.value
-                                            this.type = ExtractorLinkType.VIDEO
-                                        }
-                                    )
-                                    foundAny = true
-                                }
-                            } else {
-                                loadExtractor(embedUrl, finalWatchUrl, subtitleCallback) { link ->
-                                    foundAny = true
-                                    callback(link)
-                                }
-                            }
-                        }
-
-                        delay(1150)
-                    } catch (e: Exception) {
-                        logError(e)
-                        delay(1150)
+                for (s in sortedByPriority) {
+                    val key = s.label.lowercase().trim()
+                    if (seenHosts.add(key)) {
+                        bestPerHost.add(s)
+                    } else {
+                        remainingServers.add(s)
                     }
                 }
 
-                Log.i(TAG, "انتهت العملية، هل تم العثور على روابط: $foundAny")
-                foundAny
+                val prioritizedServers = bestPerHost + remainingServers
+
+                val emittedCount = AtomicInteger(0)
+                var lastGateStartMs = 0L
+
+                // ── فك بوابات السيرفرات مع الحساب الدقيق للمهلة الزمنية ────────
+                for (s in prioritizedServers.take(16)) {
+                    // التوقف الذكي: إذا استخرجنا 5 روابط صالحة للتشغيل نكتفي بذلك لبدء العرض فوراً
+                    if (emittedCount.get() >= 5) {
+                        Log.i(TAG, "تم الاكتفاء بـ ${emittedCount.get()} روابط صالحة للبدء السريع.")
+                        break
+                    }
+
+                    // حساب فاصل الأمان الدقيق (~1.15 ثانية) لمنع حظر النقر السريع
+                    if (lastGateStartMs > 0L) {
+                        val sincePrev = System.currentTimeMillis() - lastGateStartMs
+                        val waitMs = (1_150L - sincePrev).coerceAtLeast(180L)
+                        delay(waitMs)
+                    }
+                    lastGateStartMs = System.currentTimeMillis()
+
+                    var result = unlockGate(s, csrfToken, finalWatchUrl)
+
+                    // إذا وصلنا 429 بسبب تلاصق الطلبات، ننتظر 1.45 ثانية ونعيد المحاولة
+                    if (result.isRateLimited) {
+                        Log.w(TAG, "تم لمس الـ Rate Limit، جاري الانتظار 1.45 ثانية وإعادة المحاولة...")
+                        delay(1_450L)
+                        lastGateStartMs = System.currentTimeMillis()
+                        result = unlockGate(s, csrfToken, finalWatchUrl)
+
+                        // إذا تكرر 429 ونفد الرصيد بالكامل وكان لدينا روابط بالفعل نتوقف بنجاح
+                        if (result.isRateLimited && emittedCount.get() > 0) {
+                            Log.i(TAG, "نفد رصيد الدقيقة، الاكتفاء بما تم استخراجه.")
+                            break
+                        }
+                    }
+
+                    val embedUrl = result.embedUrl
+                    if (result.success && !embedUrl.isNullOrBlank()) {
+                        Log.i(TAG, "سيرفر [${s.label}] تم فك الرابط بنجاح: $embedUrl")
+
+                        if (embedUrl.contains("mega.nz") || embedUrl.contains("mega.co.nz")) {
+                            val typeLabel = if (s.isStream) "مشاهدة" else "تنزيل"
+                            val displayName = "${s.label.uppercase()} (${s.quality}) [$typeLabel]"
+
+                            var megaSuccess = false
+                            try {
+                                val localStreamUrl = WitAnimeMegaServer.registerMegaStream(embedUrl)
+                                if (!localStreamUrl.isNullOrBlank()) {
+                                    val qVal = getQualityFromName(s.quality).takeIf { it > 0 } ?: Qualities.P1080.value
+                                    callback(
+                                        newExtractorLink(
+                                            name = "$displayName (Mega Direct)",
+                                            source = "Mega",
+                                            url = localStreamUrl
+                                        ) {
+                                            this.referer = embedUrl
+                                            this.quality = qVal
+                                            this.type = ExtractorLinkType.VIDEO
+                                        }
+                                    )
+                                    emittedCount.incrementAndGet()
+                                    megaSuccess = true
+                                }
+                            } catch (e: Exception) {
+                                logError(e)
+                            }
+
+                            if (!megaSuccess) {
+                                val dummyUrl = "https://raw.githubusercontent.com/Anarios/Cloudstream/master/app/src/main/res/raw/blank.mp4#mega-webview://$embedUrl"
+                                callback(
+                                    newExtractorLink(
+                                        name = "$displayName [WebView]",
+                                        source = "WitAnime",
+                                        url = dummyUrl
+                                    ) {
+                                        this.referer = embedUrl
+                                        this.quality = Qualities.Unknown.value
+                                        this.type = ExtractorLinkType.VIDEO
+                                    }
+                                )
+                                emittedCount.incrementAndGet()
+                            }
+                        } else {
+                            loadExtractor(embedUrl, finalWatchUrl, subtitleCallback) { link ->
+                                emittedCount.incrementAndGet()
+                                callback(link)
+                            }
+                        }
+                    }
+                }
+
+                Log.i(TAG, "انتهت العملية بالكامل، إجمالي الروابط الصالحة: ${emittedCount.get()}")
+                emittedCount.get() > 0
             } catch (e: Exception) {
                 logError(e)
                 false
