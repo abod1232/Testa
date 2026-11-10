@@ -33,6 +33,7 @@ import javax.crypto.spec.SecretKeySpec
 import kotlin.random.Random
 import android.net.Uri
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.ConcurrentHashMap
 
 class MegaExtractor : ExtractorApi() {
     override val name: String = "Mega"
