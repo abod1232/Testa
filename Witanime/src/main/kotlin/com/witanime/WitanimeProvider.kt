@@ -27,8 +27,6 @@ import org.jsoup.Jsoup
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
-
-// ── CookieJar عام ومستمر (لا يحذف الكوكيز بسبب فارق توقيت الجهاز) ────────────
 class SharedSessionCookieJar : CookieJar {
     private val store = ConcurrentHashMap<String, Cookie>()
 
@@ -41,7 +39,6 @@ class SharedSessionCookieJar : CookieJar {
         val base = baseDomain(url.host)
         for (cookie in cookies) {
             val key = "$base|${cookie.name}"
-            // لا نحذف الكوكي إلا إذا أرسل السيرفر قيمة فارغة عمداً
             if (cookie.value.isEmpty()) {
                 store.remove(key)
             } else {
@@ -53,7 +50,6 @@ class SharedSessionCookieJar : CookieJar {
     override fun loadForRequest(url: HttpUrl): List<Cookie> {
         val base = baseDomain(url.host)
         val result = mutableListOf<Cookie>()
-        // إرسال الكوكيز دائماً بدون فحص تاريخ الانتهاء لتفادي اختلاف توقيت الجهاز
         for (entry in store.entries) {
             val cookie = entry.value
             if (entry.key.startsWith("$base|") || cookie.matches(url)) {
@@ -84,8 +80,6 @@ class WitAnime : MainAPI() {
         @Volatile var lastWebViewOpenTime = 0L
 
         val sharedCookieJar = SharedSessionCookieJar()
-
-        // عميل يتبع التوجيه تلقائياً لصفحات HTML وطلب Sources
         val directClient: OkHttpClient by lazy {
             app.baseClient.newBuilder()
                 .cookieJar(sharedCookieJar)
@@ -96,8 +90,6 @@ class WitAnime : MainAPI() {
                 .callTimeout(20, TimeUnit.SECONDS)
                 .build()
         }
-
-        // عميل مخصص للبوابات فقط لالتقاط كود 302 وترويسة Location
         val noRedirectClient: OkHttpClient by lazy {
             directClient.newBuilder()
                 .followRedirects(false)
@@ -105,8 +97,6 @@ class WitAnime : MainAPI() {
                 .build()
         }
     }
-
-    // ترويسات موحدة لمتصفح Chrome 131 لابتوب (Windows)
     private val customUserAgent =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
@@ -575,8 +565,6 @@ class WitAnime : MainAPI() {
                 Log.i(TAG, "1. البدء برابط المشاهدة النظيف: $cleanWatchUrl")
 
                 var finalWatchUrl = cleanWatchUrl
-
-                // طلب صفحة الحلقة
                 val pageReq = Request.Builder()
                     .url(cleanWatchUrl)
                     .apply {
@@ -594,8 +582,6 @@ class WitAnime : MainAPI() {
                     if (!resp.isSuccessful) return@withContext false
                     resp.body?.string().orEmpty()
                 }
-
-                // استخراج CSRF Token
                 val csrfToken = Regex("""name=['"]csrf-token['"]\s+content=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: Regex("""data-csrf=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: run {
@@ -603,8 +589,6 @@ class WitAnime : MainAPI() {
                         return@withContext false
                     }
                 Log.i(TAG, "3. تم العثور على CSRF Token: $csrfToken")
-
-                // استخراج رابط sources
                 val sourcesPattern = Regex("""sourcesUrl\s*:\s*['"]([^'"]+)['"]""")
                 val rawSources = sourcesPattern.find(pageHtml)?.groupValues?.get(1)?.replace("\\/", "/")?.trim()
                     ?: "${finalWatchUrl.substringBefore('?').trimEnd('/')}/sources"
@@ -612,8 +596,6 @@ class WitAnime : MainAPI() {
                 Log.i(TAG, "4. رابط Sources المستخرج: $sourcesUrl")
 
                 delay(300)
-
-                // طلب POST /sources بدون ترويسة Host اليدوية
                 val emptyBody = RequestBody.create(null, ByteArray(0))
                 val sourcesReq = Request.Builder()
                     .url(sourcesUrl)
@@ -642,8 +624,6 @@ class WitAnime : MainAPI() {
                     Log.e(TAG, "استجابة sources فارغة!")
                     return@withContext false
                 }
-
-                // استخراج كائنات السيرفرات (الجذر أو داخل versions)
                 val rootJson = JSONObject(sourcesJsonStr)
                 val allServers = mutableListOf<ServerItem>()
 
@@ -689,8 +669,6 @@ class WitAnime : MainAPI() {
                 if (allServers.isEmpty()) return@withContext false
 
                 var foundAny = false
-
-                // فك بوابات السيرفرات
                 for (s in allServers.take(16)) {
                     val sourceEndpoint = if (s.isStream) "stream-source" else "download-source"
                     val gateEndpoint = if (s.isStream) "stream-gate" else "download-gate"
@@ -732,8 +710,6 @@ class WitAnime : MainAPI() {
                             .apply { exactGateHeaders.forEach { (k, v) -> header(k, v) } }
                             .get()
                             .build()
-
-                        // استخدام noRedirectClient لقراءة كود 302
                         val gRes = noRedirectClient.newCall(gReq).execute()
                         var embedUrl = gRes.header("Location") ?: gRes.header("location")
 
