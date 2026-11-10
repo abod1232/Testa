@@ -1,14 +1,17 @@
 package com.witanime
 
-import android.net.Uri
 import android.util.Base64
 import android.util.Log
+import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.SubtitleFile
+import com.lagradost.cloudstream3.app
+import com.lagradost.cloudstream3.utils.AppUtils
 import com.lagradost.cloudstream3.utils.ExtractorApi
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.getQualityFromName
+import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -20,13 +23,16 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import org.jsoup.Jsoup
+import org.jsoup.parser.Parser
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
+import kotlin.random.Random
+import android.net.Uri
+import android.util.Base64
 
 class MegaExtractor : ExtractorApi() {
     override val name: String = "Mega"
