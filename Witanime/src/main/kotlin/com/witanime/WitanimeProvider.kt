@@ -575,8 +575,6 @@ class WitAnime : MainAPI() {
             try {
                 val cleanWatchUrl = fixUrl(data.substringBefore('?').trimEnd('/'))
                 Log.i(TAG, "1. البدء برابط المشاهدة النظيف: $cleanWatchUrl")
-
-                // طلب صفحة الحلقة
                 val pageReq = Request.Builder()
                     .url(cleanWatchUrl)
                     .apply {
@@ -593,8 +591,6 @@ class WitAnime : MainAPI() {
                     if (!resp.isSuccessful) return@withContext false
                     resp.body?.string().orEmpty()
                 }
-
-                // استخراج CSRF Token
                 val csrfToken = Regex("""name=['"]csrf-token['"]\s+content=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: Regex("""data-csrf=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: run {
@@ -602,8 +598,6 @@ class WitAnime : MainAPI() {
                         return@withContext false
                     }
                 Log.i(TAG, "3. تم العثور على CSRF Token: $csrfToken")
-
-                // استخراج رابط sources
                 val sourcesPattern = Regex("""sourcesUrl\s*:\s*['"]([^'"]+)['"]""")
                 val rawSources = sourcesPattern.find(pageHtml)?.groupValues?.get(1)?.replace("\\/", "/")?.trim()
                     ?: "$cleanWatchUrl/sources"
@@ -611,8 +605,6 @@ class WitAnime : MainAPI() {
                 Log.i(TAG, "4. رابط Sources المستخرج: $sourcesUrl")
 
                 delay(400)
-
-                // طلب POST /sources مع كامل ترويسات Sec-Ch-Ua
                 val emptyBody = RequestBody.create(null, ByteArray(0))
                 val sourcesReq = Request.Builder()
                     .url(sourcesUrl)
@@ -641,8 +633,6 @@ class WitAnime : MainAPI() {
                     Log.e(TAG, "استجابة sources فارغة!")
                     return@withContext false
                 }
-
-                // ── معالجة الـ JSON الذكية لدعم الجذر المباشر أو كائن versions ──
                 val rootJson = JSONObject(sourcesJsonStr)
                 val allServers = mutableListOf<ServerItem>()
 
@@ -670,13 +660,9 @@ class WitAnime : MainAPI() {
                         }
                     }
                 }
-
-                // 1. فحص وجود السيرفرات في الجذر
                 if (rootJson.has("players") || rootJson.has("downloads")) {
                     extractGroup(rootJson.optJSONObject("players"), rootJson.optJSONObject("downloads"))
                 }
-
-                // 2. فحص وجود السيرفرات داخل كائن versions (مثل sub أو dub)
                 rootJson.optJSONObject("versions")?.let { vObj ->
                     val keys = vObj.keys()
                     while (keys.hasNext()) {
@@ -693,8 +679,6 @@ class WitAnime : MainAPI() {
                 }
 
                 var foundAny = false
-
-                // استخراج روابط الفيديو
                 for (s in allServers.take(16)) {
                     val sourceEndpoint = if (s.isStream) "stream-source" else "download-source"
                     val gateEndpoint = if (s.isStream) "stream-gate" else "download-gate"
@@ -740,8 +724,6 @@ class WitAnime : MainAPI() {
                             .apply { exactGateHeaders.forEach { (k, v) -> header(k, v) } }
                             .get()
                             .build()
-
-                        // فتح البوابة بالعميل noRedirectClient لقراءة 302 Location
                         val gRes = noRedirectClient.newCall(gReq).execute()
                         var embedUrl = gRes.header("Location") ?: gRes.header("location")
 
