@@ -97,11 +97,7 @@ object WitAnimeNetwork {
     private val proxyMutex = Mutex()
     private val hostPaceMutex = Mutex()
     private val lastHostCallAt = AtomicLong(0L)
-
-    // DNS cache: host -> (expiresAtMs, addresses)
     private val dnsCache = ConcurrentHashMap<String, Pair<Long, List<InetAddress>>>()
-
-    // Proxy pool for ASN-blocked VPN / datacenter exits & gate rate-limit overflow
     private val workingProxies = CopyOnWriteArrayList<String>()
     private val deadProxies = ConcurrentHashMap.newKeySet<String>()
     private val proxyFailCounts = ConcurrentHashMap<String, Int>()
@@ -120,8 +116,6 @@ object WitAnimeNetwork {
     }
 
     private fun getAppContext(): Context? = appContextRef?.get()
-
-    // ── Session-Sticky Cookie Jar (handles Laravel XSRF + witanime-session rotation) ──
 
     class SessionCookieJar : CookieJar {
         private val store = ConcurrentHashMap<String, Cookie>()
@@ -191,8 +185,6 @@ object WitAnimeNetwork {
 
     val cookieJar = SessionCookieJar()
 
-    // ── Trust-All SSL (handles mp4upload:183 & CDN edge chains) ──────────────
-
     val trustAllManager: X509TrustManager = @SuppressLint("CustomX509TrustManager") object : X509TrustManager {
         @SuppressLint("TrustAllX509TrustManager")
         override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) = Unit
@@ -206,8 +198,6 @@ object WitAnimeNetwork {
     val trustAllSslSocketFactory = SSLContext.getInstance("TLS").apply {
         init(null, arrayOf<TrustManager>(trustAllManager), SecureRandom())
     }.socketFactory
-
-    // ── Hybrid System + DNS-over-HTTPS Resolver ──────────────────────────────
 
     private val dohBootstrapClient = OkHttpClient.Builder()
         .connectTimeout(6, TimeUnit.SECONDS)
@@ -232,7 +222,6 @@ object WitAnimeNetwork {
                     return sys
                 }
             } catch (_: Exception) {
-                // Fall back to DoH
             }
 
             val dohEndpoints = listOf(
@@ -272,8 +261,6 @@ object WitAnimeNetwork {
         }
     }
 
-    // ── Chromium Client Hints Interceptor (required by witanime.site /sources) ─
-
     private val CHROME_VER_REGEX = Regex("""Chrome/(\d+)""")
 
     private val browserClientHintsInterceptor = okhttp3.Interceptor { chain ->
@@ -298,8 +285,6 @@ object WitAnimeNetwork {
             chain.proceed(orig)
         }
     }
-
-    // ── Primary OkHttp Clients ───────────────────────────────────────────────
 
     val directClient: OkHttpClient = OkHttpClient.Builder()
         .dns(hybridDns)
@@ -341,8 +326,6 @@ object WitAnimeNetwork {
         .readTimeout(5, TimeUnit.SECONDS)
         .callTimeout(6, TimeUnit.SECONDS)
         .build()
-
-    // ── Persistence ──────────────────────────────────────────────────────────
 
     private fun ensurePrefsLoaded() {
         if (prefsLoaded) return
@@ -388,8 +371,6 @@ object WitAnimeNetwork {
         } catch (_: Exception) {
         }
     }
-
-    // ── URL Normalization & Cloudflare Detection ─────────────────────────────
 
     fun encodeUrlIfNeeded(rawUrl: String): String {
         val trimmed = rawUrl.trim()
@@ -465,8 +446,6 @@ object WitAnimeNetwork {
             }
         }
     }
-
-    // ── Silent Android WebView Solver & TLS-Bound Fetcher ────────────────────
 
     private data class WebViewHolder(
         val webView: WebView,
@@ -624,8 +603,6 @@ object WitAnimeNetwork {
             }
         }
     }
-
-    // ── Proxy Pool Harvester & Sticky Proxy Session Client ───────────────────
 
     class ProxySessionClient(
         val spec: String,
@@ -816,8 +793,6 @@ object WitAnimeNetwork {
         null
     }
 
-    // ── Core Page & JSON Fetchers ────────────────────────────────────────────
-
     private fun buildDocumentRequest(url: String, referer: String?): Request {
         val builder = Request.Builder()
             .url(encodeUrlIfNeeded(url))
@@ -838,8 +813,6 @@ object WitAnimeNetwork {
     suspend fun fetchDocument(url: String, referer: String? = "$mainUrl/"): Document? = withContext(Dispatchers.IO) {
         ensurePrefsLoaded()
         val fullUrl = resolveUrl(url) ?: return@withContext null
-
-        // Tier 1: Direct OkHttp with polite pacing
         if (!preferWebViewTransport) {
             try {
                 paceMainHost()
@@ -858,11 +831,8 @@ object WitAnimeNetwork {
                 Log.w(TAG, "Direct fetch failed for $fullUrl: ${e.message}")
             }
         }
-
-        // Tier 2: Silent Android WebView solver
         val wvHtml = solveCloudflareInWebView(fullUrl)
         if (!wvHtml.isNullOrBlank() && wvHtml.length > 500) {
-            // Test whether cf_clearance works on directClient or is TLS-bound to WebView
             if (!preferWebViewTransport) {
                 try {
                     directClient.newCall(buildDocumentRequest(fullUrl, referer)).execute().use { probe ->
@@ -876,8 +846,6 @@ object WitAnimeNetwork {
             }
             return@withContext Jsoup.parse(wvHtml, fullUrl)
         }
-
-        // Tier 3: CloudStream CloudflareKiller
         try {
             cfKillerClient.newCall(buildDocumentRequest(fullUrl, referer)).execute().use { resp ->
                 val body = resp.body?.string().orEmpty()
@@ -889,8 +857,6 @@ object WitAnimeNetwork {
             throw e
         } catch (_: Exception) {
         }
-
-        // Tier 4: Sticky proxy pool
         val proxyHtml = fetchHtmlViaProxy(fullUrl, referer)
         if (!proxyHtml.isNullOrBlank()) {
             return@withContext Jsoup.parse(proxyHtml, fullUrl)
@@ -914,8 +880,6 @@ object WitAnimeNetwork {
             val hasOlder = obj.optBoolean("hasOlder", false)
             return Jsoup.parseBodyFragment(html, mainUrl) to hasOlder
         }
-
-        // Tier 1: Direct session (prime `/` if witanime-session is missing)
         if (!preferWebViewTransport) {
             try {
                 if (!cookieJar.getCookieMap(mainUrl).containsKey("witanime-session")) {
@@ -946,8 +910,6 @@ object WitAnimeNetwork {
             } catch (_: Exception) {
             }
         }
-
-        // Tier 4: Proxy session (self-primes `/` on the sticky proxy CookieJar if needed)
         ensureWorkingProxies("$mainUrl/", minRequired = 1)
         for (spec in workingProxies.toList()) {
             val pSession = getOrCreateProxySession(spec) ?: continue
@@ -980,8 +942,6 @@ object WitAnimeNetwork {
 
         null
     }
-
-    // ── Watch Page Gate Resolution Engine ────────────────────────────────────
 
     data class ResolvedWitSource(
         val kind: String,         // "stream" or "download"
@@ -1112,7 +1072,6 @@ object WitAnimeNetwork {
                         val ver = item.optString("version", defaultVer).ifBlank { defaultVer }
                         val lang = item.optString("lang", if (ver == "dub") "ar" else "jp")
                         if (name.isNotEmpty() && tok.isNotEmpty()) {
-                            // Deduplicate exact same (version, lang, quality, serverName) already in stream players
                             val dedupKey = "$ver|$lang|${qLabel.uppercase()}|${name.lowercase()}"
                             if (!streamKeys.contains(dedupKey)) {
                                 val baseKey = "download|$ver|$lang|${qLabel.uppercase()}|${name.lowercase()}"
@@ -1125,13 +1084,9 @@ object WitAnimeNetwork {
                 }
             }
         }
-
-        // Primary WitAnime schema: top-level `players` & `downloads` maps keyed by quality ("4K", "FHD", "HD", "SD")
         if (root.has("players") || root.has("downloads")) {
             collectGroup(root.optJSONObject("players"), root.optJSONObject("downloads"))
         }
-
-        // Legacy/nested schema fallback: `versions.<sub|dub>.{players, downloads}`
         root.optJSONObject("versions")?.let { versionsObj ->
             val verKeys = versionsObj.keys().asSequence().toList()
             for (ver in verKeys) {
@@ -1139,9 +1094,6 @@ object WitAnimeNetwork {
                 collectGroup(vObj.optJSONObject("players"), vObj.optJSONObject("downloads"), ver)
             }
         }
-
-        // Interleave best quality per distinct server host FIRST so the initial 5-8 gate unlocks
-        // guarantee maximum server & CDN diversity within WitAnime's per-minute rate limit!
         val streamsBestPerHost = mutableListOf<RawGateToken>()
         val streamsSecondary = mutableListOf<RawGateToken>()
         val seenStreamFamilies = HashSet<String>()
@@ -1432,23 +1384,17 @@ object WitAnimeNetwork {
         val startMs = System.currentTimeMillis()
 
         val sessions = mutableListOf<ActiveWatchSession>()
-
-        // 1. Direct OkHttp session (fast path on residential mobile/home networks: ~0.4-0.8s)
         if (!preferWebViewTransport) {
             withTimeoutOrNull(12_000L) {
                 openWatchSessionWithClient("direct", directClient, noRedirectClient, watchUrl)
             }?.let(sessions::add)
         }
-
-        // 2. If direct was challenged by Cloudflare, solve in WebView (bounded 12s) and retry direct
         if (sessions.isEmpty()) {
             solveCloudflareInWebView(watchUrl, timeoutMs = 12_000L)
             withTimeoutOrNull(10_000L) {
                 openWatchSessionWithClient("direct-after-wv", directClient, noRedirectClient, watchUrl)
             }?.let(sessions::add)
         }
-
-        // 3. Try CloudflareKiller (bounded 10s)
         if (sessions.isEmpty()) {
             val cfNoRedirect = cfKillerClient.newBuilder()
                 .followRedirects(false)
@@ -1459,8 +1405,6 @@ object WitAnimeNetwork {
                 openWatchSessionWithClient("cfkiller", cfKillerClient, cfNoRedirect, watchUrl)
             }?.let(sessions::add)
         }
-
-        // 4. Strictly-bounded proxy fallback ONLY when direct/WebView/CFKiller could not open session at all
         val usedProxySpecs = HashSet<String>()
         suspend fun openNextProxyWatchSession(): ActiveWatchSession? = withTimeoutOrNull(8_500L) {
             ensureWorkingProxies(watchUrl, minRequired = 1, maxBudgetMs = 6_500L)
@@ -1500,15 +1444,12 @@ object WitAnimeNetwork {
                 Log.i(TAG, "Stopping gate unlock early after $unlockedCount unlocked sources (sufficient links ready)")
                 break
             }
-
-            // Never spend precious rate-limit quota on MediaFire `.zip` archives once we unlocked real stream gates
             if (unlockedCount > 0 && slotItem.kind == "download" && hostFamily(slotItem.serverName) == "mediafire") {
                 continue
             }
 
             var tokenForCurrent = currentSession.tokensBySlot[slotItem.slotKey] ?: continue
             if (lastGateStartMs > 0L) {
-                // WitAnime enforces ~1.1s anti-rapid-click interval in addition to the 20/min quota
                 val sincePrev = System.currentTimeMillis() - lastGateStartMs
                 val waitMs = (1_150L - sincePrev).coerceAtLeast(180L)
                 delay(waitMs)
@@ -1519,7 +1460,6 @@ object WitAnimeNetwork {
 
             if (attempt.outcome == GateAttemptOutcome.RATE_LIMITED) {
                 if (attempt.rateLimitRemaining > 1) {
-                    // Minute quota NOT exhausted — we only grazed the anti-rapid-click interval; 1.45s direct retry succeeds!
                     delay(1_450L)
                     lastGateStartMs = System.currentTimeMillis()
                     attempt = unlockSingleGate(currentSession, tokenForCurrent)
@@ -1527,7 +1467,6 @@ object WitAnimeNetwork {
 
                 if (attempt.outcome == GateAttemptOutcome.RATE_LIMITED) {
                     if (unlockedCount > 0 && !allowOverflowProxies) {
-                        // Direct session ALREADY unlocked priority servers; finish fast without proxy stall!
                         Log.i(TAG, "Minute quota exhausted after $unlockedCount unlocked gates; finishing fast")
                         break
                     }
@@ -1582,8 +1521,6 @@ object WitAnimeNetwork {
         )
         return out
     }
-
-    // ── Protected Sub-Host Session Helper (YonaPlay / DotPlay / CF sub-hosts) ──
 
     class ProtectedHttpSession(
         private val client: OkHttpClient,
@@ -1641,8 +1578,6 @@ object WitAnimeNetwork {
                 put("Upgrade-Insecure-Requests", "1")
                 if (!referer.isNullOrBlank()) put("Referer", referer)
             }
-
-            // 1. Direct fast session with isolated sticky CookieJar (~0.4s on residential IPs)
             val localJar = SessionCookieJar()
             val localClient = subHostFastClient.newBuilder()
                 .cookieJar(localJar)
@@ -1656,8 +1591,6 @@ object WitAnimeNetwork {
                     return@withContext directSess to html
                 }
             }
-
-            // 2. Fast bounded sticky proxy fallback (<= 5s) when sub-host challenges direct IP
             ensureWorkingProxies(mainUrl, minRequired = 1, maxBudgetMs = 4_500L)
             for (spec in workingProxies.take(3)) {
                 val pClient = getOrCreateProxySession(spec) ?: continue
@@ -1673,8 +1606,6 @@ object WitAnimeNetwork {
             null
         }
     }
-
-    // ── General Sub-Host HTTP Helpers (Fast Time-Boxed) ──────────────────────
 
     suspend fun httpGet(
         url: String,
@@ -1829,19 +1760,16 @@ object WitAnimeNetwork {
                 val magic = ByteArray(8)
                 val read = stream.read(magic)
                 if (read >= 4) {
-                    // ZIP: PK\x03\x04 (0x50 0x4B 0x03 0x04)
                     if (magic[0] == 0x50.toByte() && magic[1] == 0x4B.toByte() &&
                         magic[2] == 0x03.toByte() && magic[3] == 0x04.toByte()
                     ) {
                         return@withContext false
                     }
-                    // RAR: Rar! (0x52 0x61 0x72 0x21)
                     if (magic[0] == 0x52.toByte() && magic[1] == 0x61.toByte() &&
                         magic[2] == 0x72.toByte() && magic[3] == 0x21.toByte()
                     ) {
                         return@withContext false
                     }
-                    // HTML: <!DO or <htm
                     val ascii = String(magic, 0, read, Charsets.ISO_8859_1).trimStart().lowercase()
                     if (ascii.startsWith("<!do") || ascii.startsWith("<htm")) {
                         return@withContext false
