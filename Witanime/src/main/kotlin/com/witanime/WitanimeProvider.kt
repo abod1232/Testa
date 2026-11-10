@@ -689,31 +689,32 @@ class WitAnime : MainAPI() {
     ): Boolean {
         return withContext(Dispatchers.IO) {
             try {
+                // تنظيف رابط المشاهدة
                 val cleanWatchUrl = fixUrl(data.substringBefore('?').trimEnd('/'))
-                Log.i(TAG, "1. البدء برابط المشاهدة: $cleanWatchUrl")
-
                 var finalWatchUrl = cleanWatchUrl
+
+                // 1. طلب صفحة الحلقة
                 val pageReq = buildDocumentRequest(cleanWatchUrl, "$mainUrl/")
                 val pageHtml = engineClient.newCall(pageReq).execute().use { resp ->
                     finalWatchUrl = resp.request.url.toString()
-                    Log.i(TAG, "2. استجابة صفحة الحلقة كود: ${resp.code} (الرابط: $finalWatchUrl)")
                     if (!resp.isSuccessful) return@withContext false
                     resp.body?.string().orEmpty()
                 }
+
+                // 2. استخراج CSRF Token
                 val csrfToken = Regex("""name=['"]csrf-token['"]\s+content=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
                     ?: Regex("""data-csrf=['"]([^'"]+)['"]""").find(pageHtml)?.groupValues?.get(1)
-                    ?: run {
-                        Log.e(TAG, "فشل استخراج CSRF Token!")
-                        return@withContext false
-                    }
-                Log.i(TAG, "3. تم العثور على CSRF Token: $csrfToken")
+                    ?: return@withContext false
+
+                // 3. استخراج رابط sources
                 val sourcesPattern = Regex("""sourcesUrl\s*:\s*['"]([^'"]+)['"]""")
                 val rawSources = sourcesPattern.find(pageHtml)?.groupValues?.get(1)?.replace("\\/", "/")?.trim()
                     ?: "${finalWatchUrl.substringBefore('?').trimEnd('/')}/sources"
                 val sourcesUrl = fixUrl(rawSources)
-                Log.i(TAG, "4. رابط Sources المستخرج: $sourcesUrl")
 
-                delay(200)
+                delay(500)
+
+                // 4. طلب قائمة السيرفرات (sources)
                 val emptyBody = ByteArray(0).toRequestBody(null)
                 val sourcesReq = Request.Builder()
                     .url(sourcesUrl)
@@ -729,27 +730,26 @@ class WitAnime : MainAPI() {
                     .build()
 
                 val sourcesJsonStr = engineClient.newCall(sourcesReq).execute().use { resp ->
-                    Log.i(TAG, "5. استجابة /sources كود: ${resp.code}")
-                    val body = resp.body?.string().orEmpty()
-                    if (!resp.isSuccessful) {
-                        Log.e(TAG, "تفاصيل خطأ sources: $body")
-                        return@withContext false
-                    }
-                    body
+                    if (!resp.isSuccessful) return@withContext false
+                    resp.body?.string().orEmpty()
                 }
 
-                val rootJson = JSONObject(sourcesJsonStr)
-                val rawServers = mutableListOf<ServerItem>()
+                if (sourcesJsonStr.isBlank()) return@withContext false
 
-                fun extractGroup(playersObj: JSONObject?, downloadsObj: JSONObject?) {
+                // 5. استخراج السيرفرات
+                val rootJson = JSONObject(sourcesJsonStr)
+                data class ServerItem(val quality: String, val label: String, val token: String, val isStream: Boolean)
+                val allServers = mutableListOf<ServerItem>()
+
+                fun collectServers(playersObj: JSONObject?, downloadsObj: JSONObject?) {
                     playersObj?.let { p ->
                         for (q in p.keys()) {
                             val arr = p.optJSONArray(q) ?: continue
                             for (i in 0 until arr.length()) {
                                 val obj = arr.optJSONObject(i) ?: continue
                                 val token = obj.optString("token")
-                                val label = obj.optString("label").ifBlank { obj.optString("name", "server") }
-                                if (token.isNotBlank()) rawServers.add(ServerItem(q, label, token, true))
+                                val label = obj.optString("label").ifBlank { obj.optString("name", "Server") }
+                                if (token.isNotBlank()) allServers.add(ServerItem(q, label, token, true))
                             }
                         }
                     }
@@ -759,106 +759,104 @@ class WitAnime : MainAPI() {
                             for (i in 0 until arr.length()) {
                                 val obj = arr.optJSONObject(i) ?: continue
                                 val token = obj.optString("token")
-                                val label = obj.optString("label").ifBlank { obj.optString("name", "download") }
-                                if (token.isNotBlank()) rawServers.add(ServerItem(q, label, token, false))
+                                val label = obj.optString("label").ifBlank { obj.optString("name", "Download") }
+                                if (token.isNotBlank()) allServers.add(ServerItem(q, label, token, false))
                             }
                         }
                     }
                 }
 
                 if (rootJson.has("players") || rootJson.has("downloads")) {
-                    extractGroup(rootJson.optJSONObject("players"), rootJson.optJSONObject("downloads"))
+                    collectServers(rootJson.optJSONObject("players"), rootJson.optJSONObject("downloads"))
                 }
-
                 rootJson.optJSONObject("versions")?.let { vObj ->
                     val keys = vObj.keys()
                     while (keys.hasNext()) {
                         val ver = keys.next()
                         val subGroup = vObj.optJSONObject(ver) ?: continue
-                        extractGroup(subGroup.optJSONObject("players"), subGroup.optJSONObject("downloads"))
+                        collectServers(subGroup.optJSONObject("players"), subGroup.optJSONObject("downloads"))
                     }
                 }
 
-                Log.i(TAG, "6. تم استخراج ${rawServers.size} سيرفر!")
-                if (rawServers.isEmpty()) return@withContext false
-                val bestPerHost = mutableListOf<ServerItem>()
-                val remainingServers = mutableListOf<ServerItem>()
-                val seenHosts = HashSet<String>()
+                if (allServers.isEmpty()) return@withContext false
 
-                val sortedByPriority = rawServers.sortedWith(
-                    compareByDescending<ServerItem> { hostPriority(it.label) }
-                        .thenByDescending { qualityRank(it.quality) }
-                )
+                // 6. نفس طريقتك: أخذ أول 10 سيرفرات والمرور عليها بالترتيب مع انتظار ثانيتين
+                val limitedServers = allServers.take(10)
+                var foundAny = false
 
-                for (s in sortedByPriority) {
-                    val key = s.label.lowercase().trim()
-                    if (seenHosts.add(key)) {
-                        bestPerHost.add(s)
-                    } else {
-                        remainingServers.add(s)
-                    }
-                }
+                for ((idx, server) in limitedServers.withIndex()) {
+                    try {
+                        val sourceEndpoint = if (server.isStream) "stream-source" else "download-source"
+                        val gateEndpoint = if (server.isStream) "stream-gate" else "download-gate"
 
-                val prioritizedServers = bestPerHost + remainingServers
+                        // تشفير التوكن لمنع تلف الرابط
+                        val encodedToken = URLEncoder.encode(server.token, "UTF-8")
+                        val sourceUrl = "$mainUrl/watch/$sourceEndpoint/$encodedToken"
 
-                val emittedCount = AtomicInteger(0)
-                var lastGateStartMs = 0L
-                for (s in prioritizedServers.take(16)) {
-                    if (emittedCount.get() >= 5) {
-                        Log.i(TAG, "تم الاكتفاء بـ ${emittedCount.get()} روابط صالحة للبدء السريع.")
-                        break
-                    }
-                    if (lastGateStartMs > 0L) {
-                        val sincePrev = System.currentTimeMillis() - lastGateStartMs
-                        val waitMs = (1_150L - sincePrev).coerceAtLeast(180L)
-                        delay(waitMs)
-                    }
-                    lastGateStartMs = System.currentTimeMillis()
+                        // طلب تفعيل السيرفر (POST)
+                        val sReq = Request.Builder()
+                            .url(sourceUrl)
+                            .post(emptyBody)
+                            .header("User-Agent", DEFAULT_UA)
+                            .header("Accept", "application/json")
+                            .header("X-CSRF-TOKEN", csrfToken)
+                            .header("Origin", mainUrl)
+                            .header("Referer", finalWatchUrl)
+                            .header("Sec-Fetch-Site", "same-origin")
+                            .header("Sec-Fetch-Mode", "cors")
+                            .header("Sec-Fetch-Dest", "empty")
+                            .build()
 
-                    var result = unlockGate(s, csrfToken, finalWatchUrl)
-                    if (result.isRateLimited) {
-                        Log.w(TAG, "تم لمس الـ Rate Limit، جاري الانتظار 1.45 ثانية وإعادة المحاولة...")
-                        delay(1_450L)
-                        lastGateStartMs = System.currentTimeMillis()
-                        result = unlockGate(s, csrfToken, finalWatchUrl)
-                        if (result.isRateLimited && emittedCount.get() > 0) {
-                            Log.i(TAG, "نفد رصيد الدقيقة، الاكتفاء بما تم استخراجه.")
-                            break
-                        }
-                    }
+                        var gatePath = "/watch/$gateEndpoint/$encodedToken"
+                        var refPolicy = "no-referrer"
 
-                    val embedUrl = result.embedUrl
-                    if (result.success && !embedUrl.isNullOrBlank()) {
-                        Log.i(TAG, "سيرفر [${s.label}] تم فك الرابط بنجاح: $embedUrl")
-
-                        if (embedUrl.contains("mega.nz") || embedUrl.contains("mega.co.nz")) {
-                            val typeLabel = if (s.isStream) "مشاهدة" else "تنزيل"
-                            val displayName = "${s.label.uppercase()} (${s.quality}) [$typeLabel]"
-
-                            var megaSuccess = false
-                            try {
-                                val localStreamUrl = WitAnimeMegaServer.registerMegaStream(embedUrl)
-                                if (!localStreamUrl.isNullOrBlank()) {
-                                    val qVal = getQualityFromName(s.quality).takeIf { it > 0 } ?: Qualities.P1080.value
-                                    callback(
-                                        newExtractorLink(
-                                            name = "$displayName (Mega Direct)",
-                                            source = "Mega",
-                                            url = localStreamUrl
-                                        ) {
-                                            this.referer = embedUrl
-                                            this.quality = qVal
-                                            this.type = ExtractorLinkType.VIDEO
-                                        }
-                                    )
-                                    emittedCount.incrementAndGet()
-                                    megaSuccess = true
+                        engineClient.newCall(sReq).execute().use { resp ->
+                            val body = resp.body?.string().orEmpty()
+                            if (resp.isSuccessful) {
+                                runCatching { JSONObject(body) }.getOrNull()?.let { j ->
+                                    j.optString("gateUrl").takeIf { it.isNotBlank() }?.let { gatePath = it }
+                                    j.optString("referrerPolicy").takeIf { it.isNotBlank() }?.let { refPolicy = it }
                                 }
-                            } catch (e: Exception) {
-                                logError(e)
                             }
+                        }
 
-                            if (!megaSuccess) {
+                        val fullGateUrl = fixUrl(gatePath)
+
+                        // طلب فتح البوابة (GET) بترويسات صحيحة وبدون Host يدوي
+                        val gateReqBuilder = Request.Builder()
+                            .url(fullGateUrl)
+                            .get()
+                            .header("User-Agent", DEFAULT_UA)
+                            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+                            .header("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
+                            .header("Sec-Fetch-Site", "same-origin")
+                            .header("Sec-Fetch-Mode", "navigate")
+                            .header("Sec-Fetch-Dest", "iframe")
+                            .header("Upgrade-Insecure-Requests", "1")
+
+                        if (refPolicy.equals("origin", ignoreCase = true)) {
+                            gateReqBuilder.header("Referer", "$mainUrl/")
+                        }
+
+                        // قراءة رابط التضمين بواسطة عميل noRedirectClient لالتقاط كود 302
+                        val gRes = noRedirectClient.newCall(gateReqBuilder.build()).execute()
+                        var embedUrl = gRes.header("Location") ?: gRes.header("location")
+
+                        if (embedUrl.isNullOrBlank()) {
+                            val gBody = gRes.body?.string().orEmpty()
+                            val doc = Jsoup.parse(gBody, fullGateUrl)
+                            embedUrl = doc.selectFirst("iframe[src]")?.attr("src")
+                                ?: Regex("""url=['"]([^'"]+)['"]""").find(gBody)?.groupValues?.get(1)
+                                ?: Regex("""href=["'](https?://[^"']+)["']""").find(gBody)?.groupValues?.get(1)
+                        }
+                        gRes.close()
+
+                        // إرسال الرابط إلى المشغل
+                        if (!embedUrl.isNullOrBlank() && embedUrl.startsWith("http")) {
+                            val typeLabel = if (server.isStream) "مشاهدة" else "تنزيل"
+                            val displayName = "${server.label} (${server.quality}) [$typeLabel]"
+
+                            if (embedUrl.contains("mega.nz") || embedUrl.contains("mega.co.nz")) {
                                 val dummyUrl = "https://raw.githubusercontent.com/Anarios/Cloudstream/master/app/src/main/res/raw/blank.mp4#mega-webview://$embedUrl"
                                 callback(
                                     newExtractorLink(
@@ -871,19 +869,26 @@ class WitAnime : MainAPI() {
                                         this.type = ExtractorLinkType.VIDEO
                                     }
                                 )
-                                emittedCount.incrementAndGet()
-                            }
-                        } else {
-                            loadExtractor(embedUrl, finalWatchUrl, subtitleCallback) { link ->
-                                emittedCount.incrementAndGet()
-                                callback(link)
+                                foundAny = true
+                            } else {
+                                loadExtractor(embedUrl, finalWatchUrl, subtitleCallback) { link ->
+                                    foundAny = true
+                                    callback(link)
+                                }
                             }
                         }
+
+                        // نفس طريقتك: الانتظار ثانيتين بين كل سيرفر والذي يليه
+                        if (idx < limitedServers.size - 1) {
+                            delay(2000)
+                        }
+                    } catch (e: Exception) {
+                        logError(e)
+                        delay(2000)
                     }
                 }
 
-                Log.i(TAG, "انتهت العملية بالكامل، إجمالي الروابط الصالحة: ${emittedCount.get()}")
-                emittedCount.get() > 0
+                foundAny
             } catch (e: Exception) {
                 logError(e)
                 false
