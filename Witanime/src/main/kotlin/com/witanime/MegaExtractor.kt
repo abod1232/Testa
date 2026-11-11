@@ -1,10 +1,12 @@
 package com.witanime
 
+import android.net.Uri
 import android.util.Base64
 import android.util.Log
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.SubtitleFile
 import com.lagradost.cloudstream3.app
+import com.lagradost.cloudstream3.newSubtitleFile
 import com.lagradost.cloudstream3.utils.AppUtils
 import com.lagradost.cloudstream3.utils.ExtractorApi
 import com.lagradost.cloudstream3.utils.ExtractorLink
@@ -22,19 +24,21 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import org.jsoup.Jsoup
 import org.jsoup.parser.Parser
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 import kotlin.random.Random
-import android.net.Uri
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.ConcurrentHashMap
 
+// ── 1. Mega Extractor ────────────────────────────────────────────────────────
 class MegaExtractor : ExtractorApi() {
     override val name: String = "Mega"
     override val mainUrl: String = "https://mega.nz"
@@ -78,6 +82,7 @@ class MegaExtractor : ExtractorApi() {
     }
 }
 
+// ── 2. GoFile Extractor ──────────────────────────────────────────────────────
 class GoFileExtractor : ExtractorApi() {
     override val name: String = "GoFile"
     override val mainUrl: String = "https://gofile.io"
@@ -196,6 +201,7 @@ class GoFileExtractor : ExtractorApi() {
     }
 }
 
+// ── 3. Videa Extractor ───────────────────────────────────────────────────────
 class VideaExtractor : ExtractorApi() {
     override val name: String = "Videa"
     override val mainUrl: String = "https://videa.hu"
@@ -329,6 +335,7 @@ class VideaExtractor : ExtractorApi() {
     }
 }
 
+// ── 4. MailRu Extractor ──────────────────────────────────────────────────────
 class MailruExtractor : ExtractorApi() {
     override val name = "MailRu"
     override val mainUrl = "https://my.mail.ru"
@@ -389,6 +396,7 @@ class MailruExtractor : ExtractorApi() {
     )
 }
 
+// ── 5. 4Shared Extractor ─────────────────────────────────────────────────────
 class FourSharedExtractor : ExtractorApi() {
     override val name = "4Shared"
     override val mainUrl = "https://www.4shared.com"
@@ -434,7 +442,7 @@ class FourSharedExtractor : ExtractorApi() {
     }
 }
 
-
+// ── 6. YonaPlay Extractor ────────────────────────────────────────────────────
 class YonaPlayExtractor : ExtractorApi() {
     override val name = "YonaPlay"
     override val mainUrl = "https://mid.yonaplay.net"
@@ -654,7 +662,6 @@ class YonaPlayExtractor : ExtractorApi() {
                         if (encD.isEmpty()) continue
 
                         val subUrl = decryptAesGcm(encD, pageKey)?.takeIf { it.startsWith("http") } ?: continue
-
                         val sourceLabel = "${this@YonaPlayExtractor.name} ($srvName - ${qKey.uppercase()})"
 
                         if (subUrl.contains("dotplay.", ignoreCase = true)) {
@@ -691,4 +698,169 @@ class YonaPlayExtractor : ExtractorApi() {
             }
         }
     }
+}
+
+// ── 7. Videas Extractor ──────────────────────────────────────────────────────
+open class VideasExtractor : ExtractorApi() {
+    override val name: String = "Videas"
+    override val mainUrl: String = "https://app.videas.com"
+    override val requiresReferer: Boolean = false
+
+    companion object {
+        private const val TAG = "VIDEAS_EXTRACTOR"
+        private const val USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    }
+
+    override suspend fun getUrl(
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        Log.d(TAG, "▶️ getUrl start for: $url")
+        withContext(Dispatchers.IO) {
+            try {
+                val origin = if (url.contains("videas.fr")) "https://app.videas.fr" else "https://app.videas.com"
+                val normalizedUrl = url.replace("/embed/media/", "/embed/")
+
+                // 1. فتح صفحة التضمين واستخراج embedId و opening
+                val pageReq = Request.Builder()
+                    .url(normalizedUrl)
+                    .header("User-Agent", USER_AGENT)
+                    .header("Referer", referer ?: "https://witanime.site/")
+                    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                    .build()
+
+                val pageHtml = app.baseClient.newCall(pageReq).execute().use { it.body?.string().orEmpty() }
+                val doc = Jsoup.parse(pageHtml, normalizedUrl)
+
+                var embedId = ""
+                var opening = ""
+
+                val cfgRaw = doc.selectFirst("script#videas-embed-config")?.data().orEmpty()
+                if (cfgRaw.isNotBlank()) {
+                    runCatching { JSONObject(cfgRaw) }.getOrNull()?.let { cfg ->
+                        embedId = cfg.optString("embedId").trim()
+                        opening = cfg.optString("opening").trim()
+                    }
+                }
+
+                if (embedId.isEmpty()) {
+                    embedId = Regex("""/embed/(?:media/)?([0-9a-fA-F-]{20,})""").find(url)?.groupValues?.get(1).orEmpty()
+                }
+
+                if (embedId.isEmpty()) {
+                    Log.w(TAG, "لم يتم العثور على embedId في Videas")
+                    return@withContext
+                }
+
+                // 2. طلب الحصول على playback_token و session_id
+                val viewerId = UUID.randomUUID().toString()
+                val visReqBuilder = Request.Builder()
+                    .url("$origin/api/visitor/embed/$embedId/?viewer_id=$viewerId")
+                    .header("User-Agent", USER_AGENT)
+                    .header("Accept", "application/json")
+                    .header("Origin", origin)
+                    .header("Referer", normalizedUrl)
+
+                if (opening.isNotEmpty()) {
+                    visReqBuilder.header("X-Embed-Opening", opening)
+                }
+
+                val visRaw = app.baseClient.newCall(visReqBuilder.build()).execute().use { it.body?.string().orEmpty() }
+                val visObj = runCatching { JSONObject(visRaw) }.getOrNull() ?: return@withContext
+
+                val playbackToken = visObj.optString("playback_token").trim()
+                val sessionId = visObj.optString("session_id").trim()
+                val items = visObj.optJSONArray("items") ?: JSONArray()
+
+                // 3. جلب الروابط لكل Asset
+                for (idx in 0 until items.length()) {
+                    val itemObj = items.optJSONObject(idx) ?: continue
+                    val assetObj = itemObj.optJSONObject("asset") ?: continue
+                    val assetUid = assetObj.optString("uid").trim()
+                    if (assetUid.isEmpty()) continue
+
+                    // استخراج الترجمات إن وجدت
+                    assetObj.optJSONArray("subtitles")?.let { subs ->
+                        for (s in 0 until subs.length()) {
+                            val sub = subs.optJSONObject(s) ?: continue
+                            val subUrl = sub.optString("url").trim()
+                            val subLang = sub.optString("label", sub.optString("language", "Arabic")).trim()
+                            if (subUrl.isNotEmpty()) {
+                                val fullSubUrl = if (subUrl.startsWith("http")) subUrl else "$origin$subUrl"
+                                subtitleCallback(newSubtitleFile(subLang, fullSubUrl))
+                            }
+                        }
+                    }
+
+                    // طلب معلومات البث
+                    val reqJson = JSONObject()
+                        .put("asset_id", assetUid)
+                        .put("playback_token", playbackToken)
+                        .put("session_id", sessionId)
+                        .toString()
+
+                    val pbReq = Request.Builder()
+                        .url("$origin/api/visitor/playback/info/")
+                        .post(reqJson.toRequestBody("application/json".toMediaType()))
+                        .header("User-Agent", USER_AGENT)
+                        .header("Accept", "application/json")
+                        .header("Origin", origin)
+                        .header("Referer", normalizedUrl)
+                        .build()
+
+                    val pbRaw = app.baseClient.newCall(pbReq).execute().use { it.body?.string().orEmpty() }
+                    val pbObj = runCatching { JSONObject(pbRaw) }.getOrNull() ?: continue
+
+                    val hlsRaw = pbObj.optJSONObject("hls_url")?.optString("url")
+                        ?: pbObj.optString("hls_url").takeIf { it.startsWith("/") || it.startsWith("http") }
+
+                    // استخراج رابط بث HLS (.m3u8)
+                    if (!hlsRaw.isNullOrBlank()) {
+                        val fullHls = if (hlsRaw.startsWith("http")) hlsRaw else "$origin$hlsRaw"
+                        callback.invoke(
+                            newExtractorLink(
+                                source = this@VideasExtractor.name,
+                                name = "${this@VideasExtractor.name} (HLS)",
+                                url = fullHls,
+                                type = ExtractorLinkType.M3U8
+                            ) {
+                                this.referer = "$origin/"
+                                this.quality = Qualities.P1080.value
+                            }
+                        )
+                    }
+
+                    // استخراج رابط MP4 المباشر إن وجد
+                    val mp4Raw = pbObj.optJSONObject("source_url")?.optString("url")
+                        ?: pbObj.optString("source_url").takeIf { it.startsWith("/") || it.startsWith("http") }
+
+                    if (!mp4Raw.isNullOrBlank()) {
+                        val fullMp4 = if (mp4Raw.startsWith("http")) mp4Raw else "$origin$mp4Raw"
+                        callback.invoke(
+                            newExtractorLink(
+                                source = this@VideasExtractor.name,
+                                name = "${this@VideasExtractor.name} (MP4)",
+                                url = fullMp4,
+                                type = ExtractorLinkType.VIDEO
+                            ) {
+                                this.referer = "$origin/"
+                                this.quality = Qualities.P1080.value
+                            }
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Videas getUrl error: ${e.message}")
+            }
+        }
+    }
+}
+
+// نسخة النطاق الفرنسي لـ Videas
+class VideasFrExtractor : VideasExtractor() {
+    override val name: String = "VideasFr"
+    override val mainUrl: String = "https://app.videas.fr"
 }
