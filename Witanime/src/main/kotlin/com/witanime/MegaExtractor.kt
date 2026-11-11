@@ -678,6 +678,8 @@ class YonaPlayExtractor : ExtractorApi() {
                         if (encD.isEmpty()) continue
 
                         val subUrl = decryptAesGcm(encD, pageKey)?.takeIf { it.startsWith("http") } ?: continue
+                        Log.i(TAG, "🟢 [YonaPlay] تم فك تشفير سيرفر: [$srvName] - الجودة: [${qKey.uppercase()}]")
+                        Log.i(TAG, "🔗 الرابط المفكوك: $subUrl")
                         val sourceLabel = "${this@YonaPlayExtractor.name} ($srvName - ${qKey.uppercase()})"
 
                         if (subUrl.contains("dotplay.", ignoreCase = true)) {
