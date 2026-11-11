@@ -37,8 +37,6 @@ import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 import kotlin.random.Random
-
-// ── 1. Mega Extractor ────────────────────────────────────────────────────────
 class MegaExtractor : ExtractorApi() {
     override val name: String = "Mega"
     override val mainUrl: String = "https://mega.nz"
@@ -81,8 +79,6 @@ class MegaExtractor : ExtractorApi() {
         }
     }
 }
-
-// ── 2. GoFile Extractor ──────────────────────────────────────────────────────
 class GoFileExtractor : ExtractorApi() {
     override val name: String = "GoFile"
     override val mainUrl: String = "https://gofile.io"
@@ -200,8 +196,6 @@ class GoFileExtractor : ExtractorApi() {
         }
     }
 }
-
-// ── 3. Videa Extractor ───────────────────────────────────────────────────────
 class VideaExtractor : ExtractorApi() {
     override val name: String = "Videa"
     override val mainUrl: String = "https://videa.hu"
@@ -334,8 +328,6 @@ class VideaExtractor : ExtractorApi() {
         }
     }
 }
-
-// ── 4. MailRu Extractor ──────────────────────────────────────────────────────
 class MailruExtractor : ExtractorApi() {
     override val name = "MailRu"
     override val mainUrl = "https://my.mail.ru"
@@ -395,8 +387,6 @@ class MailruExtractor : ExtractorApi() {
         @JsonProperty("key") val key: String
     )
 }
-
-// ── 5. 4Shared Extractor ─────────────────────────────────────────────────────
 class FourSharedExtractor : ExtractorApi() {
     override val name = "4Shared"
     override val mainUrl = "https://www.4shared.com"
@@ -441,8 +431,6 @@ class FourSharedExtractor : ExtractorApi() {
         }
     }
 }
-
-// ── 6. YonaPlay Extractor ────────────────────────────────────────────────────
 class YonaPlayExtractor : ExtractorApi() {
     override val name = "YonaPlay"
     override val mainUrl = "https://mid.yonaplay.net"
@@ -699,8 +687,6 @@ class YonaPlayExtractor : ExtractorApi() {
         }
     }
 }
-
-// ── 7. Videas Extractor ──────────────────────────────────────────────────────
 open class VideasExtractor : ExtractorApi() {
     override val name: String = "Videas"
     override val mainUrl: String = "https://app.videas.com"
@@ -723,8 +709,6 @@ open class VideasExtractor : ExtractorApi() {
             try {
                 val origin = if (url.contains("videas.fr")) "https://app.videas.fr" else "https://app.videas.com"
                 val normalizedUrl = url.replace("/embed/media/", "/embed/")
-
-                // 1. فتح صفحة التضمين واستخراج embedId و opening
                 val pageReq = Request.Builder()
                     .url(normalizedUrl)
                     .header("User-Agent", USER_AGENT)
@@ -754,8 +738,6 @@ open class VideasExtractor : ExtractorApi() {
                     Log.w(TAG, "لم يتم العثور على embedId في Videas")
                     return@withContext
                 }
-
-                // 2. طلب الحصول على playback_token و session_id
                 val viewerId = UUID.randomUUID().toString()
                 val visReqBuilder = Request.Builder()
                     .url("$origin/api/visitor/embed/$embedId/?viewer_id=$viewerId")
@@ -774,15 +756,11 @@ open class VideasExtractor : ExtractorApi() {
                 val playbackToken = visObj.optString("playback_token").trim()
                 val sessionId = visObj.optString("session_id").trim()
                 val items = visObj.optJSONArray("items") ?: JSONArray()
-
-                // 3. جلب الروابط لكل Asset
                 for (idx in 0 until items.length()) {
                     val itemObj = items.optJSONObject(idx) ?: continue
                     val assetObj = itemObj.optJSONObject("asset") ?: continue
                     val assetUid = assetObj.optString("uid").trim()
                     if (assetUid.isEmpty()) continue
-
-                    // استخراج الترجمات إن وجدت
                     assetObj.optJSONArray("subtitles")?.let { subs ->
                         for (s in 0 until subs.length()) {
                             val sub = subs.optJSONObject(s) ?: continue
@@ -794,8 +772,6 @@ open class VideasExtractor : ExtractorApi() {
                             }
                         }
                     }
-
-                    // طلب معلومات البث
                     val reqJson = JSONObject()
                         .put("asset_id", assetUid)
                         .put("playback_token", playbackToken)
@@ -816,8 +792,6 @@ open class VideasExtractor : ExtractorApi() {
 
                     val hlsRaw = pbObj.optJSONObject("hls_url")?.optString("url")
                         ?: pbObj.optString("hls_url").takeIf { it.startsWith("/") || it.startsWith("http") }
-
-                    // استخراج رابط بث HLS (.m3u8)
                     if (!hlsRaw.isNullOrBlank()) {
                         val fullHls = if (hlsRaw.startsWith("http")) hlsRaw else "$origin$hlsRaw"
                         callback.invoke(
@@ -832,8 +806,6 @@ open class VideasExtractor : ExtractorApi() {
                             }
                         )
                     }
-
-                    // استخراج رابط MP4 المباشر إن وجد
                     val mp4Raw = pbObj.optJSONObject("source_url")?.optString("url")
                         ?: pbObj.optString("source_url").takeIf { it.startsWith("/") || it.startsWith("http") }
 
@@ -858,8 +830,6 @@ open class VideasExtractor : ExtractorApi() {
         }
     }
 }
-
-// نسخة النطاق الفرنسي لـ Videas
 class VideasFrExtractor : VideasExtractor() {
     override val name: String = "VideasFr"
     override val mainUrl: String = "https://app.videas.fr"
