@@ -37,6 +37,34 @@ import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 import kotlin.random.Random
+
+class GoogleDriveExtractor : ExtractorApi() {
+    override val name = "GoogleDrive"
+    override val mainUrl = "https://drive.google.com"
+    override val requiresReferer = false
+
+    override suspend fun getUrl(
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ) {
+        val fileId = Regex("""(?:/file/d/|[?&]id=)([0-9A-Za-z_-]{15,})""").find(url)?.groupValues?.get(1) ?: return
+        val directUrl = "https://drive.usercontent.google.com/download?id=$fileId&export=download&confirm=t"
+
+        callback.invoke(
+            newExtractorLink(
+                source = this.name,
+                name = "${this.name} (Direct)",
+                url = directUrl,
+                type = ExtractorLinkType.VIDEO
+            ) {
+                this.referer = "https://drive.google.com/"
+                this.quality = Qualities.P1080.value
+            }
+        )
+    }
+}
 class MegaExtractor : ExtractorApi() {
     override val name: String = "Mega"
     override val mainUrl: String = "https://mega.nz"
