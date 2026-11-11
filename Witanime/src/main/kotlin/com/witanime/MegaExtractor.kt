@@ -705,6 +705,7 @@ class YonaPlayExtractor : ExtractorApi() {
                                     }
                                 )
                             }
+                            Log.i(TAG, "🔄 جاري تمرير الرابط إلى loadExtractor: $subUrl")
                             loadExtractor(subUrl, "$origin/", subtitleCallback, callback)
                         }
                     }
