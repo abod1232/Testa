@@ -113,7 +113,8 @@ class EgyDead(val context: Context) : MainAPI() {
     }
 
     private suspend fun httpGet(url: String, referer: String? = null): Document {
-        var currentRequestUrl = if (url == mainUrl && !url.endsWith("/")) "$url/" else url
+        // التأكد دائماً أن الرابط الأساسي ينتهي بـ /
+        var currentRequestUrl = if (url.trimEnd('/') == mainUrl.trimEnd('/')) "${mainUrl.trimEnd('/')}/" else url
         log("GET-REQUEST", "Fetching: $currentRequestUrl")
         
         var headers = buildHeaders(referer)
@@ -128,7 +129,7 @@ class EgyDead(val context: Context) : MainAPI() {
                     log("GET-REQUEST", "تم العثور على كوكيز صالحة مسبقاً.")
                     savedCookies = currentCookies
                 } else {
-                    log("GET-REQUEST", "Cloudflare detected (Code: ${res.code}). تشغيل صياد الكوكيز بالـ User-Agent الجديد...")
+                    log("GET-REQUEST", "Cloudflare detected (Code: ${res.code}). تشغيل صياد الكوكيز...")
                     val activity = CommonActivity.activity ?: com.lagradost.cloudstream3.CommonActivity.activity
 
                     if (activity != null) {
@@ -141,7 +142,8 @@ class EgyDead(val context: Context) : MainAPI() {
                             if (solverResult.finalUrl != currentRequestUrl) {
                                 try {
                                     val newHost = URL(solverResult.finalUrl).host
-                                    mainUrl = "https://$newHost"
+                                    // هنا التعديل: إضافة / في نهاية الدومين الجديد
+                                    mainUrl = "https://$newHost/"
                                 } catch (e: Exception) {}
                                 currentRequestUrl = solverResult.finalUrl
                             }
@@ -174,8 +176,18 @@ class EgyDead(val context: Context) : MainAPI() {
                 val activity = CommonActivity.activity ?: com.lagradost.cloudstream3.CommonActivity.activity
                 if (activity != null) {
                     val solverResult = CloudflareSolver.solve(activity, currentRequestUrl, userAgent)
-                    if (solverResult != null && !solverResult.cookies.isNullOrEmpty()) {
-                        savedCookies = solverResult.cookies
+                    if (solverResult != null) {
+                        if (!solverResult.cookies.isNullOrEmpty()) {
+                            savedCookies = solverResult.cookies
+                        }
+                        if (solverResult.finalUrl != currentRequestUrl) {
+                            try {
+                                val newHost = URL(solverResult.finalUrl).host
+                                // هنا التعديل: إضافة / في نهاية الدومين الجديد
+                                mainUrl = "https://$newHost/"
+                            } catch (e: Exception) {}
+                            currentRequestUrl = solverResult.finalUrl
+                        }
                     }
                 }
             }
