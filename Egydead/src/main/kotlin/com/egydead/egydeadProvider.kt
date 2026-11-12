@@ -1,5 +1,6 @@
 package com.egydead
 
+import android.content.Context
 import android.webkit.CookieManager
 import android.webkit.WebSettings
 import com.lagradost.cloudstream3.*
@@ -56,7 +57,7 @@ data class MegamaxInitialPage(
     @SerialName("component") val component: String? = null
 )
 
-class EgyDead : MainAPI() {
+class EgyDead(val context: Context) : MainAPI() {
     override var mainUrl = "https://egydead.life"
     override var name = "ايجي ديد"
     override val hasMainPage = true
