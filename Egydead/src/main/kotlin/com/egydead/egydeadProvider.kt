@@ -55,7 +55,7 @@ data class MegamaxInitialPage(
 )
 
 class EgyDead : MainAPI() {
-    override var mainUrl = "https://tv10.egydead.live/"
+    override var mainUrl = "https://egydead.life/"
     override var name = "ايجي ديد"
     override val hasMainPage = true
     override var lang = "ar"
@@ -68,7 +68,7 @@ class EgyDead : MainAPI() {
     private var savedCookies: String? = null
     private val cfMutex = Mutex()
 
-    private fun log(tag: String, msg: String) {
+   private fun log(tag: String, msg: String) {
         println("EgyDeadDebug | [$tag] -> $msg")
     }
 
