@@ -21,10 +21,6 @@ import kotlinx.serialization.Serializable
 import java.util.ArrayDeque
 import java.net.URL
 import java.net.URLDecoder
-
-// ==========================================
-// نماذج بيانات فك تشفير Megamax / Share4max
-// ==========================================
 @Serializable
 data class MegamaxMirror(
     @SerialName("driver") val driver: String? = null,
@@ -556,7 +552,6 @@ class EgyDead : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         return try {
-            // تحويل رابط الـ mirror إلى رابط iframe المشغل مع معامل ?nt=1
             val iframeUrl = when {
                 targetUrl.contains("/mirror/") -> {
                     val converted = targetUrl.replace("/mirror/", "/iframe/")
@@ -574,8 +569,6 @@ class EgyDead : MainAPI() {
                 "Accept-Language" to "ar,en-US;q=0.9",
                 "Upgrade-Insecure-Requests" to "1"
             )
-
-            // 1. جلب صفحة الـ Iframe لأخذ الـ Version والكوكيز
             val initialRes = app.get(iframeUrl, headers = reqHeaders, timeout = 25)
             val doc = initialRes.document
 
@@ -593,13 +586,9 @@ class EgyDead : MainAPI() {
 
             val version = pageData.version ?: return false
             val component = pageData.component ?: "files/mirror/video"
-
-            // استخراج وتشفير XSRF-TOKEN إن وجد
             val xsrfToken = initialRes.cookies["XSRF-TOKEN"]?.let {
                 try { URLDecoder.decode(it, "UTF-8") } catch (e: Exception) { it }
             }
-
-            // 2. إرسال طلب Inertia Partial Data لجلب السيرفرات
             val inertiaHeaders = mutableMapOf(
                 "User-Agent" to userAgent,
                 "Referer" to iframeUrl,
@@ -672,8 +661,6 @@ class EgyDead : MainAPI() {
                 if (raw.isNullOrBlank()) return null
                 return try { normalizeUrl(raw, watchPageUrl) } catch (e: Exception) { null }
             }
-
-            // روابط التحميل
             val downloadSelectors = listOf("ul.donwload-servers-list li", "ul.download-servers-list li", "ul.donwload-servers-list > li", "div.donwload-servers-list li")
             for (sel in downloadSelectors) {
                 val nodes = document.select(sel)
@@ -684,8 +671,6 @@ class EgyDead : MainAPI() {
                     if (normalized != null) candidates += Pair(normalized, serverName)
                 }
             }
-
-            // سيرفرات المشاهدة
             val watchSelectors = listOf("ul.serversList li", "ul.servers-list li", "div.serversList li", "div.servers-list li")
             for (sel in watchSelectors) {
                 val nodes = document.select(sel)
@@ -701,16 +686,12 @@ class EgyDead : MainAPI() {
                     if (normalized != null) candidates += Pair(normalized, serverName)
                 }
             }
-
-            // وسوم data-link
             for (el in document.select("[data-link]")) {
                 val serverName = el.attr("data-name").takeIf { it.isNotBlank() } ?: el.attr("data-provider")
                 val dl = el.attr("data-link")
                 val normalized = normalizeCandidate(dl)
                 if (normalized != null) candidates += Pair(normalized, serverName)
             }
-
-            // روابط a المشابهة لمشغلات الفيديو
             for (a in document.select("a")) {
                 val href = a.attr("href")
                 if (href.contains("player") || href.contains("embed") || href.contains("download") || href.contains("drive") || href.contains("mp4") || href.contains("mirror")) {
@@ -730,27 +711,19 @@ class EgyDead : MainAPI() {
                 if (!allSeenLinks.add(normalized)) return false
 
                 var isLoaded = false
-
-                // 1. إذا كان الرابط يخص سيرفر Megamax / Share4max صراحة، استخرجه بطريقة Megamax
                 if (normalized.contains("megamax") || normalized.contains("share4max") || normalized.contains("/mirror/") || normalized.contains("/iframe/")) {
                     isLoaded = processMegamax(normalized, watchPageUrl, subtitleCallback, callback)
                 }
-
-                // 2. إذا لم يكن Megamax أو فشل، جرب المستخرج الافتراضي لـ Cloudstream
                 if (!isLoaded) {
                     try {
                         isLoaded = loadExtractor(normalized, data, subtitleCallback, callback)
                     } catch (ex: Exception) {}
                 }
-
-                // 3. (الشرط المطلوب): أي رابط فشل استخراج الفيديو منه، نحاول معه بطريقة Megamax كخطة بديلة
                 if (!isLoaded) {
                     try {
                         isLoaded = processMegamax(normalized, watchPageUrl, subtitleCallback, callback)
                     } catch (ex: Exception) {}
                 }
-
-                // التعامل مع السيرفرات الخاصة مثل EarnVids
                 try {
                     if (serverName != null && (serverName.equals("EarnVids", true) || serverName.equals("StreamHG", true))) {
                         val customLink: String? = try {
