@@ -113,7 +113,6 @@ class EgyDead(val context: Context) : MainAPI() {
     }
 
     private suspend fun httpGet(url: String, referer: String? = null): Document {
-        // التأكد دائماً أن الرابط الأساسي ينتهي بـ /
         var currentRequestUrl = if (url.trimEnd('/') == mainUrl.trimEnd('/')) "${mainUrl.trimEnd('/')}/" else url
         log("GET-REQUEST", "Fetching: $currentRequestUrl")
         
@@ -142,7 +141,6 @@ class EgyDead(val context: Context) : MainAPI() {
                             if (solverResult.finalUrl != currentRequestUrl) {
                                 try {
                                     val newHost = URL(solverResult.finalUrl).host
-                                    // هنا التعديل: إضافة / في نهاية الدومين الجديد
                                     mainUrl = "https://$newHost/"
                                 } catch (e: Exception) {}
                                 currentRequestUrl = solverResult.finalUrl
@@ -183,7 +181,6 @@ class EgyDead(val context: Context) : MainAPI() {
                         if (solverResult.finalUrl != currentRequestUrl) {
                             try {
                                 val newHost = URL(solverResult.finalUrl).host
-                                // هنا التعديل: إضافة / في نهاية الدومين الجديد
                                 mainUrl = "https://$newHost/"
                             } catch (e: Exception) {}
                             currentRequestUrl = solverResult.finalUrl
