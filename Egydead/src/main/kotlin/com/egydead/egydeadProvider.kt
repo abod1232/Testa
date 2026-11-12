@@ -24,6 +24,9 @@ import java.util.ArrayDeque
 import java.net.URL
 import java.net.URLDecoder
 
+// ==========================================
+// نماذج بيانات فك تشفير Megamax / Share4max
+// ==========================================
 @Serializable
 data class MegamaxMirror(
     @SerialName("driver") val driver: String? = null,
@@ -66,9 +69,14 @@ class EgyDead(val context: Context) : MainAPI() {
         TvType.Movie,
         TvType.TvSeries
     )
+
     private val userAgent by lazy {
-    WebSettings.getDefaultUserAgent(context)
-}
+        try {
+            WebSettings.getDefaultUserAgent(context)
+        } catch (e: Exception) {
+            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Mobile Safari/537.36"
+        }
+    }
 
     private var savedCookies: String? = null
     private val cfMutex = Mutex()
@@ -76,19 +84,19 @@ class EgyDead(val context: Context) : MainAPI() {
     private fun log(tag: String, msg: String) {
         println("EgyDeadDebug | [$tag] -> $msg")
     }
-    private fun getCookiesMap(targetUrl: String): Map<String, String> {
-        val cookieStr = try {
-            CookieManager.getInstance().getCookie(targetUrl)
-        } catch (e: Exception) { null } ?: savedCookies
 
-        if (!cookieStr.isNullOrBlank()) {
-            savedCookies = cookieStr
+    private fun fixUrlSlash(url: String): String {
+        return try {
+            val u = URL(url)
+            if (u.path.isEmpty() || u.path == "") {
+                val query = if (u.query != null) "?${u.query}" else ""
+                "${u.protocol}://${u.host}/$query"
+            } else {
+                url
+            }
+        } catch (e: Exception) {
+            if (!url.endsWith("/")) "$url/" else url
         }
-
-        return savedCookies?.split(";")?.mapNotNull {
-            val parts = it.split("=", limit = 2)
-            if (parts.size == 2) parts[0].trim() to parts[1].trim() else null
-        }?.toMap() ?: emptyMap()
     }
 
     private val imageHeaders: Map<String, String>
@@ -105,43 +113,41 @@ class EgyDead(val context: Context) : MainAPI() {
         val headers = mutableMapOf(
             "User-Agent" to userAgent,
             "Referer" to (referer ?: "$mainUrl/"),
+            "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
             "Accept-Language" to "ar-IQ,ar;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Upgrade-Insecure-Requests" to "1"
+            "Upgrade-Insecure-Requests" to "1",
+            "sec-ch-ua" to "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\", \"Google Chrome\";v=\"156\"",
+            "sec-ch-ua-mobile" to "?1",
+            "sec-ch-ua-platform" to "\"Android\"",
+            "sec-fetch-dest" to "document",
+            "sec-fetch-mode" to "navigate",
+            "sec-fetch-site" to "same-origin",
+            "sec-fetch-user" to "?1"
         )
         savedCookies?.let { headers["Cookie"] = it }
         return headers
     }
-    private fun fixUrlSlash(url: String): String {
-        return try {
-            val u = URL(url)
-            if (u.path.isEmpty() || u.path == "") {
-                val query = if (u.query != null) "?${u.query}" else ""
-                "${u.protocol}://${u.host}/$query"
-            } else {
-                url
-            }
-        } catch (e: Exception) {
-            if (!url.endsWith("/")) "$url/" else url
-        }
-    }
 
     private suspend fun httpGet(url: String, referer: String? = null): Document {
-        var currentRequestUrl = fixUrlSlash(url)
-        log("GET-REQUEST", "Fetching: $currentRequestUrl")
-        
+        val currentRequestUrl = fixUrlSlash(url)
+        log("CF-TRACE", "1. بدء طلب الرابط: $currentRequestUrl")
         var headers = buildHeaders(referer?.let { fixUrlSlash(it) })
-        var cookies = getCookiesMap(currentRequestUrl)
 
-        var res = app.get(currentRequestUrl, headers = headers, cookies = cookies, timeout = 30)
-        
+        val hasCookieBefore = !savedCookies.isNullOrBlank()
+        log("CF-TRACE", "2. هل توجد كوكيز محفوظة قبل الطلب؟ $hasCookieBefore")
+
+        var res = app.get(currentRequestUrl, headers = headers, timeout = 30)
+        log("CF-TRACE", "3. استجابة الطلب الأول: Code=${res.code} | حجم الرد=${res.text.length} حرف")
+
         if (res.code in listOf(403, 503, 429)) {
+            log("CF-TRACE", "4. رصد حماية Cloudflare (Code: ${res.code}). دخول الـ Lock...")
             cfMutex.withLock {
-                val currentCookies = CookieManager.getInstance().getCookie(currentRequestUrl)
+                val currentCookies = try { CookieManager.getInstance().getCookie(currentRequestUrl) } catch (e: Exception) { null }
                 if (currentCookies != null && currentCookies.contains("cf_clearance") && currentCookies != savedCookies) {
-                    log("GET-REQUEST", "تم العثور على كوكيز صالحة مسبقاً.")
+                    log("CF-TRACE", "5. تم العثور على كوكيز صالحة مسبقاً في CookieManager.")
                     savedCookies = currentCookies
                 } else {
-                    log("GET-REQUEST", "Cloudflare detected (Code: ${res.code}). تشغيل صياد الكوكيز...")
+                    log("CF-TRACE", "5. تشغيل CloudflareSolver في الخلفية...")
                     val activity = CommonActivity.activity ?: com.lagradost.cloudstream3.CommonActivity.activity
 
                     if (activity != null) {
@@ -149,23 +155,35 @@ class EgyDead(val context: Context) : MainAPI() {
                         if (solverResult != null) {
                             if (!solverResult.cookies.isNullOrEmpty()) {
                                 savedCookies = solverResult.cookies
-                                log("GET-REQUEST", "تم حفظ الكوكيز بنجاح.")
+                                val hasClearance = solverResult.cookies.contains("cf_clearance")
+                                log("CF-TRACE", "6. تم صيد الكوكيز بنجاح! تحتوي cf_clearance: $hasClearance")
+                            } else {
+                                log("CF-TRACE", "6. تحذير: انتهت العملية ولكن الكوكيز فارغة!")
                             }
                             if (solverResult.finalUrl != currentRequestUrl) {
                                 try {
                                     val newHost = URL(solverResult.finalUrl).host
                                     mainUrl = "https://$newHost/"
+                                    log("CF-TRACE", "تحديث mainUrl ليصبح: $mainUrl")
                                 } catch (e: Exception) {}
-                                currentRequestUrl = fixUrlSlash(solverResult.finalUrl)
                             }
+                        } else {
+                            log("CF-TRACE", "6. فشل الصياد: solverResult عاد بـ null!")
                         }
+                    } else {
+                        log("CF-TRACE", "6. خطأ: Activity غير متاح لتشغيل الصياد!")
                     }
                 }
             }
-            log("GET-REQUEST", "إعادة الطلب (Retry) بالكوكيز الجديدة: $currentRequestUrl")
+
             headers = buildHeaders(referer?.let { fixUrlSlash(it) })
-            cookies = getCookiesMap(currentRequestUrl)
-            res = app.get(currentRequestUrl, headers = headers, cookies = cookies, timeout = 30)
+            log("CF-TRACE", "7. جاري تنفيذ طلب الإعادة (Retry) بالكوكيز الجديدة...")
+            res = app.get(currentRequestUrl, headers = headers, timeout = 30)
+            log("CF-TRACE", "8. نتيجة طلب الإعادة: Code=${res.code} | حجم الرد=${res.text.length} حرف | عنوان الصفحة: '${res.document.title()}'")
+            
+            if (res.code in listOf(403, 503)) {
+                log("CF-TRACE", "⚠️ فشل التخطي حتى بعد الكوكيز! عينة من الرد: ${res.text.take(250)}")
+            }
         }
 
         return res.document
@@ -178,9 +196,8 @@ class EgyDead(val context: Context) : MainAPI() {
             put("X-Requested-With", "XMLHttpRequest")
             put("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
         }
-        var cookies = getCookiesMap(currentRequestUrl)
 
-        var res = app.post(currentRequestUrl, data = data, headers = headers, cookies = cookies, timeout = 30)
+        var res = app.post(currentRequestUrl, data = data, headers = headers, timeout = 30)
 
         if (res.code in listOf(403, 503, 429)) {
             cfMutex.withLock {
@@ -196,7 +213,6 @@ class EgyDead(val context: Context) : MainAPI() {
                                 val newHost = URL(solverResult.finalUrl).host
                                 mainUrl = "https://$newHost/"
                             } catch (e: Exception) {}
-                            currentRequestUrl = fixUrlSlash(solverResult.finalUrl)
                         }
                     }
                 }
@@ -205,24 +221,25 @@ class EgyDead(val context: Context) : MainAPI() {
                 put("X-Requested-With", "XMLHttpRequest")
                 put("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
             }
-            cookies = getCookiesMap(currentRequestUrl)
-            res = app.post(currentRequestUrl, data = data, headers = headers, cookies = cookies, timeout = 30)
+            res = app.post(currentRequestUrl, data = data, headers = headers, timeout = 30)
         }
 
         return res.document
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val logTag = "MAIN-PAGE"
-        val requestUrl = if (mainUrl.endsWith("/")) mainUrl else "$mainUrl/"
-        log(logTag, "Starting getMainPage | Page: $page | URL: $requestUrl")
+        val requestUrl = fixUrlSlash(mainUrl)
+        log("MAIN-PAGE", "=== بدء طلب الصفحة الرئيسية: $requestUrl | الصفحة: $page ===")
 
         val document = try {
             httpGet(requestUrl)
         } catch (e: Exception) {
-            log(logTag, "CRITICAL ERROR: Failed to fetch main page -> ${e.message}")
+            log("MAIN-PAGE", "CRITICAL ERROR: فشل الاتصال بالصفحة الرئيسية -> ${e.message}")
             return newHomePageResponse(emptyList())
         }
+
+        val pageTitle = document.title()
+        log("MAIN-PAGE", "عنوان المستند المستلم: '$pageTitle'")
 
         val homePageList = ArrayList<HomePageList>()
 
@@ -232,20 +249,32 @@ class EgyDead(val context: Context) : MainAPI() {
             val items = pinnedSection.select("li.movieItem").mapNotNull {
                 it.toSearchResponse("PINNED")
             }
+            log("MAIN-PAGE", "قسم المميز [$sectionTitle]: استخراج ${items.size} عنصر")
             if (items.isNotEmpty()) {
                 homePageList.add(HomePageList(sectionTitle, items, isHorizontalImages = true))
             }
+        } else {
+            log("MAIN-PAGE", "لم يتم العثور على div.pin-posts-list")
         }
 
         val mainSections = document.select("section.main-section")
+        log("MAIN-PAGE", "عدد الأقسام المكتشفة (section.main-section): ${mainSections.size}")
+        
         mainSections.forEachIndexed { index, section ->
             val sectionTitle = section.selectFirst("h1.TitleMaster em")?.text()?.trim() ?: "قسم ${index + 1}"
             val items = section.select("li.movieItem").mapNotNull {
                 it.toSearchResponse("SECTION-$index")
             }
+            log("MAIN-PAGE", "القسم [$sectionTitle]: استخراج ${items.size} عنصر")
             if (items.isNotEmpty()) {
                 homePageList.add(HomePageList(sectionTitle, items))
             }
+        }
+
+        log("MAIN-PAGE", "إجمالي القوائم المستخرجة بنجاح: ${homePageList.size}")
+        if (homePageList.isEmpty()) {
+            val htmlSample = document.body()?.text()?.take(200) ?: "Body is empty"
+            log("MAIN-PAGE", "تحذير: القائمة فارغة! عينة من محتوى الصفحة: $htmlSample")
         }
 
         return newHomePageResponse(homePageList.filter { it.list.isNotEmpty() })
@@ -269,7 +298,7 @@ class EgyDead(val context: Context) : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val url = "$mainUrl/?s=$query"
+        val url = "$mainUrl?s=$query"
         val document = httpGet(url)
         return document.select("ul.posts-list li.movieItem").mapNotNull {
             it.toSearchResponse("SEARCH")
