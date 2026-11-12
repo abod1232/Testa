@@ -111,7 +111,6 @@ class EgyDead(val context: Context) : MainAPI() {
         savedCookies?.let { headers["Cookie"] = it }
         return headers
     }
-    // دالة تضمن دائماً إضافة / في نهاية أي نطاق رئيسي
     private fun fixUrlSlash(url: String): String {
         return try {
             val u = URL(url)
@@ -127,7 +126,6 @@ class EgyDead(val context: Context) : MainAPI() {
     }
 
     private suspend fun httpGet(url: String, referer: String? = null): Document {
-        // إجبار الرابط أن ينتهي بـ / دائماً
         var currentRequestUrl = fixUrlSlash(url)
         log("GET-REQUEST", "Fetching: $currentRequestUrl")
         
