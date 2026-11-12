@@ -3,6 +3,7 @@ package com.egydead
 import android.webkit.CookieManager
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
+import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.Episode as CS3Episode
 import org.jsoup.nodes.Element
 import org.jsoup.nodes.Document
@@ -13,15 +14,52 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.util.ArrayDeque
-import java.net.URL
-
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import java.util.ArrayDeque
+import java.net.URL
+import java.net.URLDecoder
+
+// ==========================================
+// نماذج بيانات فك تشفير Megamax / Share4max
+// ==========================================
+@Serializable
+data class MegamaxMirror(
+    @SerialName("driver") val driver: String? = null,
+    @SerialName("link") val link: String? = null
+)
+
+@Serializable
+data class MegamaxQuality(
+    @SerialName("label") val label: String? = null,
+    @SerialName("mirrors") val mirrors: List<MegamaxMirror>? = null
+)
+
+@Serializable
+data class MegamaxStreamsData(
+    @SerialName("data") val data: List<MegamaxQuality>? = null
+)
+
+@Serializable
+data class MegamaxProps(
+    @SerialName("streams") val streams: MegamaxStreamsData? = null
+)
+
+@Serializable
+data class MegamaxInertiaResponse(
+    @SerialName("props") val props: MegamaxProps? = null
+)
+
+@Serializable
+data class MegamaxInitialPage(
+    @SerialName("version") val version: String? = null,
+    @SerialName("component") val component: String? = null
+)
 
 class EgyDead : MainAPI() {
-    override var mainUrl = "https://egydead.beer"
+    override var mainUrl = "https://tv10.egydead.live/"
     override var name = "ايجي ديد"
     override val hasMainPage = true
     override var lang = "ar"
@@ -47,6 +85,7 @@ class EgyDead : MainAPI() {
             savedCookies?.let { headers["Cookie"] = it }
             return headers
         }
+
     private fun buildHeaders(referer: String?): MutableMap<String, String> {
         val headers = mutableMapOf(
             "User-Agent" to userAgent,
@@ -58,7 +97,6 @@ class EgyDead : MainAPI() {
         return headers
     }
 
-
     private suspend fun httpGet(url: String, referer: String? = null): Document {
         var currentRequestUrl = url
         log("GET-REQUEST", "Fetching: $currentRequestUrl")
@@ -67,7 +105,7 @@ class EgyDead : MainAPI() {
         var res = app.get(currentRequestUrl, headers = headers, timeout = 30)
         if (res.code in listOf(403, 503, 429)) {
             cfMutex.withLock {
-                val currentCookies = android.webkit.CookieManager.getInstance().getCookie(currentRequestUrl)
+                val currentCookies = CookieManager.getInstance().getCookie(currentRequestUrl)
                 if (currentCookies != null && currentCookies != savedCookies && currentCookies.contains("cf_clearance")) {
                     log("GET-REQUEST", "Cloudflare already solved by another thread.")
                     savedCookies = currentCookies
@@ -86,7 +124,7 @@ class EgyDead : MainAPI() {
                             if (solverResult.finalUrl != currentRequestUrl) {
                                 log("DOMAIN-UPDATE", "تم اكتشاف توجيه من $currentRequestUrl إلى ${solverResult.finalUrl}")
                                 try {
-                                    val newHost = java.net.URL(solverResult.finalUrl).host
+                                    val newHost = URL(solverResult.finalUrl).host
                                     mainUrl = "https://$newHost"
                                     log("DOMAIN-UPDATE", "تم تحديث mainUrl ليصبح: $mainUrl")
                                 } catch (e: Exception) {}
@@ -103,6 +141,7 @@ class EgyDead : MainAPI() {
 
         return res.document
     }
+
     private suspend fun httpPost(url: String, data: Map<String, String>, referer: String? = null): Document {
         var currentRequestUrl = url
         log("POST-REQUEST", "Sending to: $currentRequestUrl")
@@ -115,7 +154,7 @@ class EgyDead : MainAPI() {
 
         if (res.code in listOf(403, 503, 429)) {
             cfMutex.withLock {
-                val currentCookies = android.webkit.CookieManager.getInstance().getCookie(currentRequestUrl)
+                val currentCookies = CookieManager.getInstance().getCookie(currentRequestUrl)
                 if (currentCookies != null && currentCookies != savedCookies && currentCookies.contains("cf_clearance")) {
                     savedCookies = currentCookies
                 } else {
@@ -129,7 +168,7 @@ class EgyDead : MainAPI() {
                             }
                             if (solverResult.finalUrl != currentRequestUrl) {
                                 try {
-                                    val newHost = java.net.URL(solverResult.finalUrl).host
+                                    val newHost = URL(solverResult.finalUrl).host
                                     mainUrl = "https://$newHost"
                                 } catch (e: Exception) {}
                                 currentRequestUrl = solverResult.finalUrl
@@ -148,6 +187,7 @@ class EgyDead : MainAPI() {
 
         return res.document
     }
+
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val logTag = "MAIN-PAGE"
         log(logTag, "Starting getMainPage | Page: $page | Request: ${request.name}")
@@ -193,6 +233,7 @@ class EgyDead : MainAPI() {
 
         return newHomePageResponse(homePageList.filter { it.list.isNotEmpty() })
     }
+
     private fun Element.toSearchResponse(parentTag: String): SearchResponse? {
         try {
             val linkEl = this.selectFirst("a") ?: return null
@@ -248,6 +289,7 @@ class EgyDead : MainAPI() {
             fixUrl(resolved)
         } catch (e: Exception) { null }
     }
+
     private suspend fun batchFetch(
         urls: List<String>,
         concurrency: Int = 8
@@ -271,39 +313,7 @@ class EgyDead : MainAPI() {
         }
         return out
     }
-    private suspend fun discoverSeasonsPreserveOrder(
-        startUrl: String,
-        concurrency: Int = 8
-    ): List<Triple<Int, String, String>> {
-        val discovered = mutableListOf<Triple<Int, String, String>>()
-        val seen = mutableSetOf<String>()
-        val queue = ArrayDeque<String>()
-        queue.add(startUrl); seen.add(startUrl)
-        var nextIndex = 0
 
-        while (queue.isNotEmpty()) {
-            val batch = mutableListOf<String>()
-            repeat(minOf(queue.size, concurrency)) { batch.add(queue.poll()) }
-            if (batch.isEmpty()) break
-
-            val docs = batchFetch(batch, concurrency)
-            for (u in batch) {
-                val doc = docs[u] ?: continue
-                val title = doc.selectFirst("meta[property=og:title]")?.attr("content")?.trim() ?: "موسم غير معروف"
-                discovered.add(Triple(nextIndex++, title, u))
-
-                val seasonsCont = doc.selectFirst("div.seasons-list") ?: doc.selectFirst("div.seasons")
-                seasonsCont?.select("li.movieItem a, a")?.forEach { a ->
-                    val href = normalizeUrl(a.attr("href"), u) ?: return@forEach
-                    if (href !in seen && href.contains("/season/")) {
-                        seen.add(href)
-                        queue.add(href)
-                    }
-                }
-            }
-        }
-        return discovered.distinctBy { it.third }
-    }
     private fun extractEpisodesFromSeasonDoc(seasonUrl: String, doc: Document): List<CS3Episode> {
         val episodes = mutableListOf<CS3Episode>()
         val epsContainer = doc.selectFirst("div.EpsList") ?: doc.selectFirst("div.episodes-list") ?: doc.selectFirst("ul") ?: return emptyList()
@@ -327,6 +337,7 @@ class EgyDead : MainAPI() {
         }
         return episodes.sortedBy { it.episode ?: 9999 }
     }
+
     private fun parseRecommendations(doc: Document, base: String): List<SearchResponse> {
         val out = mutableListOf<SearchResponse>()
         val nodes = doc.select(".related-posts li.movieItem, .related-posts a, .related-posts li")
@@ -350,6 +361,7 @@ class EgyDead : MainAPI() {
         }
         return out
     }
+
     override suspend fun load(url: String): LoadResponse? {
         val document = try {
             httpGet(url)
@@ -534,6 +546,101 @@ class EgyDead : MainAPI() {
         }
     }
 
+    /**
+     * دالة استخراج روابط المشاهدة وسيرفرات Megamax / Share4max
+     */
+    private suspend fun processMegamax(
+        targetUrl: String,
+        referer: String,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        return try {
+            // تحويل رابط الـ mirror إلى رابط iframe المشغل مع معامل ?nt=1
+            val iframeUrl = when {
+                targetUrl.contains("/mirror/") -> {
+                    val converted = targetUrl.replace("/mirror/", "/iframe/")
+                    if (!converted.contains("?nt=1")) "$converted?nt=1" else converted
+                }
+                targetUrl.contains("/iframe/") -> {
+                    if (!targetUrl.contains("?nt=1")) "$targetUrl?nt=1" else targetUrl
+                }
+                else -> targetUrl
+            }
+
+            val reqHeaders = mapOf(
+                "User-Agent" to userAgent,
+                "Referer" to referer,
+                "Accept-Language" to "ar,en-US;q=0.9",
+                "Upgrade-Insecure-Requests" to "1"
+            )
+
+            // 1. جلب صفحة الـ Iframe لأخذ الـ Version والكوكيز
+            val initialRes = app.get(iframeUrl, headers = reqHeaders, timeout = 25)
+            val doc = initialRes.document
+
+            val rawJson = doc.selectFirst("script[data-page=app]")?.data()
+                ?: doc.selectFirst("script[data-page=app]")?.html()
+                ?: Regex("""<script[^>]*data-page=["']app["'][^>]*>(.*?)</script>""", RegexOption.DOT_MATCHES_ALL)
+                    .find(initialRes.text)?.groupValues?.get(1)
+                ?: return false
+
+            val pageData = try {
+                parseJson<MegamaxInitialPage>(rawJson)
+            } catch (e: Exception) {
+                return false
+            }
+
+            val version = pageData.version ?: return false
+            val component = pageData.component ?: "files/mirror/video"
+
+            // استخراج وتشفير XSRF-TOKEN إن وجد
+            val xsrfToken = initialRes.cookies["XSRF-TOKEN"]?.let {
+                try { URLDecoder.decode(it, "UTF-8") } catch (e: Exception) { it }
+            }
+
+            // 2. إرسال طلب Inertia Partial Data لجلب السيرفرات
+            val inertiaHeaders = mutableMapOf(
+                "User-Agent" to userAgent,
+                "Referer" to iframeUrl,
+                "X-Inertia" to "true",
+                "X-Inertia-Partial-Component" to component,
+                "X-Inertia-Partial-Data" to "streams",
+                "X-Inertia-Version" to version,
+                "X-Requested-With" to "XMLHttpRequest",
+                "Accept" to "text/html, application/xhtml+xml"
+            )
+
+            xsrfToken?.let { inertiaHeaders["X-XSRF-TOKEN"] = it }
+
+            val streamRes = app.get(
+                iframeUrl,
+                headers = inertiaHeaders,
+                cookies = initialRes.cookies,
+                timeout = 25
+            )
+
+            val streamJson = parseJson<MegamaxInertiaResponse>(streamRes.text)
+            var extractedAny = false
+
+            streamJson.props?.streams?.data?.forEach { quality ->
+                quality.mirrors?.forEach { mirror ->
+                    var mirrorLink = mirror.link ?: return@forEach
+                    if (mirrorLink.startsWith("//")) mirrorLink = "https:$mirrorLink"
+
+                    try {
+                        val loaded = loadExtractor(mirrorLink, iframeUrl, subtitleCallback, callback)
+                        if (loaded) extractedAny = true
+                    } catch (e: Exception) {}
+                }
+            }
+
+            extractedAny
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -566,6 +673,7 @@ class EgyDead : MainAPI() {
                 return try { normalizeUrl(raw, watchPageUrl) } catch (e: Exception) { null }
             }
 
+            // روابط التحميل
             val downloadSelectors = listOf("ul.donwload-servers-list li", "ul.download-servers-list li", "ul.donwload-servers-list > li", "div.donwload-servers-list li")
             for (sel in downloadSelectors) {
                 val nodes = document.select(sel)
@@ -577,6 +685,7 @@ class EgyDead : MainAPI() {
                 }
             }
 
+            // سيرفرات المشاهدة
             val watchSelectors = listOf("ul.serversList li", "ul.servers-list li", "div.serversList li", "div.servers-list li")
             for (sel in watchSelectors) {
                 val nodes = document.select(sel)
@@ -593,6 +702,7 @@ class EgyDead : MainAPI() {
                 }
             }
 
+            // وسوم data-link
             for (el in document.select("[data-link]")) {
                 val serverName = el.attr("data-name").takeIf { it.isNotBlank() } ?: el.attr("data-provider")
                 val dl = el.attr("data-link")
@@ -600,9 +710,10 @@ class EgyDead : MainAPI() {
                 if (normalized != null) candidates += Pair(normalized, serverName)
             }
 
+            // روابط a المشابهة لمشغلات الفيديو
             for (a in document.select("a")) {
                 val href = a.attr("href")
-                if (href.contains("player") || href.contains("embed") || href.contains("download") || href.contains("drive") || href.contains("mp4")) {
+                if (href.contains("player") || href.contains("embed") || href.contains("download") || href.contains("drive") || href.contains("mp4") || href.contains("mirror")) {
                     val serverName = a.attr("title").takeIf { it.isNotBlank() } ?: a.text().takeIf { it.isNotBlank() }
                     val normalized = normalizeCandidate(href)
                     if (normalized != null) candidates += Pair(normalized, serverName)
@@ -610,7 +721,7 @@ class EgyDead : MainAPI() {
             }
 
             val maxConcurrency = 8
-            val semaphore = kotlinx.coroutines.sync.Semaphore(maxConcurrency)
+            val semaphore = Semaphore(maxConcurrency)
 
             suspend fun prepareAndSendParallel(linkRaw: String?, serverName: String?): Boolean {
                 if (linkRaw.isNullOrBlank()) return false
@@ -618,10 +729,28 @@ class EgyDead : MainAPI() {
 
                 if (!allSeenLinks.add(normalized)) return false
 
-                try {
-                    loadExtractor(normalized, data, subtitleCallback, callback)
-                } catch (ex: Exception) {}
+                var isLoaded = false
 
+                // 1. إذا كان الرابط يخص سيرفر Megamax / Share4max صراحة، استخرجه بطريقة Megamax
+                if (normalized.contains("megamax") || normalized.contains("share4max") || normalized.contains("/mirror/") || normalized.contains("/iframe/")) {
+                    isLoaded = processMegamax(normalized, watchPageUrl, subtitleCallback, callback)
+                }
+
+                // 2. إذا لم يكن Megamax أو فشل، جرب المستخرج الافتراضي لـ Cloudstream
+                if (!isLoaded) {
+                    try {
+                        isLoaded = loadExtractor(normalized, data, subtitleCallback, callback)
+                    } catch (ex: Exception) {}
+                }
+
+                // 3. (الشرط المطلوب): أي رابط فشل استخراج الفيديو منه، نحاول معه بطريقة Megamax كخطة بديلة
+                if (!isLoaded) {
+                    try {
+                        isLoaded = processMegamax(normalized, watchPageUrl, subtitleCallback, callback)
+                    } catch (ex: Exception) {}
+                }
+
+                // التعامل مع السيرفرات الخاصة مثل EarnVids
                 try {
                     if (serverName != null && (serverName.equals("EarnVids", true) || serverName.equals("StreamHG", true))) {
                         val customLink: String? = try {
@@ -648,17 +777,14 @@ class EgyDead : MainAPI() {
                     }
                 } catch (outer: Exception) {}
 
-                return true
+                return isLoaded
             }
 
             coroutineScope {
                 candidates.map { pair ->
                     async {
-                        semaphore.acquire()
-                        try {
+                        semaphore.withPermit {
                             prepareAndSendParallel(pair.first, pair.second)
-                        } finally {
-                            semaphore.release()
                         }
                     }
                 }.awaitAll()
