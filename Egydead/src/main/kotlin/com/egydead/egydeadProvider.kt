@@ -126,24 +126,28 @@ class EgyDead(val context: Context) : MainAPI() {
 
     private suspend fun httpGet(url: String, referer: String? = null): Document {
         val currentRequestUrl = fixUrlSlash(url)
+        log("CF-TRACE", "==================================================")
         log("CF-TRACE", "1. بدء طلب الرابط: $currentRequestUrl")
         var headers = buildHeaders(referer?.let { fixUrlSlash(it) })
 
-        val hasCookieBefore = !savedCookies.isNullOrBlank()
-        log("CF-TRACE", "2. هل توجد كوكيز محفوظة قبل الطلب؟ $hasCookieBefore")
+        // طباعة تفصيلية لجميع الهيدرات في الطلب الأول
+        log("CF-TRACE", "--- [الهيدرات المرسلة مع الطلب الأول] ---")
+        headers.forEach { (key, value) ->
+            log("CF-TRACE", "  -> $key: $value")
+        }
 
         var res = app.get(currentRequestUrl, headers = headers, timeout = 30)
-        log("CF-TRACE", "3. استجابة الطلب الأول: Code=${res.code} | حجم الرد=${res.text.length} حرف")
+        log("CF-TRACE", "2. استجابة الطلب الأول: Code=${res.code} | حجم الرد=${res.text.length} حرف")
 
         if (res.code in listOf(403, 503, 429)) {
-            log("CF-TRACE", "4. رصد حماية Cloudflare (Code: ${res.code}). دخول الـ Lock...")
+            log("CF-TRACE", "3. رصد حماية Cloudflare (Code: ${res.code}). دخول الـ Lock...")
             cfMutex.withLock {
                 val currentCookies = try { CookieManager.getInstance().getCookie(currentRequestUrl) } catch (e: Exception) { null }
                 if (currentCookies != null && currentCookies.contains("cf_clearance") && currentCookies != savedCookies) {
-                    log("CF-TRACE", "5. تم العثور على كوكيز صالحة مسبقاً في CookieManager.")
+                    log("CF-TRACE", "4. تم العثور على كوكيز صالحة مسبقاً في CookieManager.")
                     savedCookies = currentCookies
                 } else {
-                    log("CF-TRACE", "5. تشغيل CloudflareSolver في الخلفية...")
+                    log("CF-TRACE", "4. تشغيل CloudflareSolver في الخلفية...")
                     val activity = CommonActivity.activity ?: com.lagradost.cloudstream3.CommonActivity.activity
 
                     if (activity != null) {
@@ -152,9 +156,9 @@ class EgyDead(val context: Context) : MainAPI() {
                             if (!solverResult.cookies.isNullOrEmpty()) {
                                 savedCookies = solverResult.cookies
                                 val hasClearance = solverResult.cookies.contains("cf_clearance")
-                                log("CF-TRACE", "6. تم صيد الكوكيز بنجاح! تحتوي cf_clearance: $hasClearance")
+                                log("CF-TRACE", "5. تم صيد الكوكيز بنجاح! تحتوي cf_clearance: $hasClearance")
                             } else {
-                                log("CF-TRACE", "6. تحذير: انتهت العملية ولكن الكوكيز فارغة!")
+                                log("CF-TRACE", "5. تحذير: انتهت العملية ولكن الكوكيز فارغة!")
                             }
                             if (solverResult.finalUrl != currentRequestUrl) {
                                 try {
@@ -164,18 +168,25 @@ class EgyDead(val context: Context) : MainAPI() {
                                 } catch (e: Exception) {}
                             }
                         } else {
-                            log("CF-TRACE", "6. فشل الصياد: solverResult عاد بـ null!")
+                            log("CF-TRACE", "5. فشل الصياد: solverResult عاد بـ null!")
                         }
                     } else {
-                        log("CF-TRACE", "6. خطأ: Activity غير متاح لتشغيل الصياد!")
+                        log("CF-TRACE", "5. خطأ: Activity غير متاح لتشغيل الصياد!")
                     }
                 }
             }
 
             headers = buildHeaders(referer?.let { fixUrlSlash(it) })
-            log("CF-TRACE", "7. جاري تنفيذ طلب الإعادة (Retry) بالكوكيز الجديدة...")
+
+            // طباعة تفصيلية لجميع الهيدرات بعد إضافة الكوكيز في طلب الـ Retry
+            log("CF-TRACE", "--- [الهيدرات المرسلة مع طلب الإعادة (Retry)] ---")
+            headers.forEach { (key, value) ->
+                log("CF-TRACE", "  -> $key: $value")
+            }
+
+            log("CF-TRACE", "6. جاري إرسال طلب الإعادة (Retry)...")
             res = app.get(currentRequestUrl, headers = headers, timeout = 30)
-            log("CF-TRACE", "8. نتيجة طلب الإعادة: Code=${res.code} | حجم الرد=${res.text.length} حرف | عنوان الصفحة: '${res.document.title()}'")
+            log("CF-TRACE", "7. نتيجة طلب الإعادة: Code=${res.code} | حجم الرد=${res.text.length} حرف | عنوان الصفحة: '${res.document.title()}'")
             
             if (res.code in listOf(403, 503)) {
                 log("CF-TRACE", "⚠️ فشل التخطي حتى بعد الكوكيز! عينة من الرد: ${res.text.take(250)}")
