@@ -129,8 +129,6 @@ class EgyDead(val context: Context) : MainAPI() {
         log("CF-TRACE", "==================================================")
         log("CF-TRACE", "1. بدء طلب الرابط: $currentRequestUrl")
         var headers = buildHeaders(referer?.let { fixUrlSlash(it) })
-
-        // طباعة تفصيلية لجميع الهيدرات في الطلب الأول
         log("CF-TRACE", "--- [الهيدرات المرسلة مع الطلب الأول] ---")
         headers.forEach { (key, value) ->
             log("CF-TRACE", "  -> $key: $value")
@@ -177,8 +175,6 @@ class EgyDead(val context: Context) : MainAPI() {
             }
 
             headers = buildHeaders(referer?.let { fixUrlSlash(it) })
-
-            // طباعة تفصيلية لجميع الهيدرات بعد إضافة الكوكيز في طلب الـ Retry
             log("CF-TRACE", "--- [الهيدرات المرسلة مع طلب الإعادة (Retry)] ---")
             headers.forEach { (key, value) ->
                 log("CF-TRACE", "  -> $key: $value")
