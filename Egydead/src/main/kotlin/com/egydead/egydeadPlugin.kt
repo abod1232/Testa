@@ -6,6 +6,6 @@ import com.egydead.EgyDead
 @CloudstreamPlugin
 class egydeadPlugin: Plugin() {
     override fun load(context: Context) {
-        registerMainAPI(EgyDead())
+        registerMainAPI(EgyDead(context))
     }
 }
