@@ -23,10 +23,6 @@ import kotlinx.serialization.Serializable
 import java.util.ArrayDeque
 import java.net.URL
 import java.net.URLDecoder
-
-// ==========================================
-// نماذج بيانات فك تشفير Megamax / Share4max
-// ==========================================
 @Serializable
 data class MegamaxMirror(
     @SerialName("driver") val driver: String? = null,
