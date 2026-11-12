@@ -66,14 +66,9 @@ class EgyDead(val context: Context) : MainAPI() {
         TvType.Movie,
         TvType.TvSeries
     )
-    private val userAgent: String by lazy {
-        try {
-            val context = app.context
-            WebSettings.getDefaultUserAgent(context)
-        } catch (e: Exception) {
-            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Mobile Safari/537.36"
-        }
-    }
+    private val userAgent by lazy {
+    WebSettings.getDefaultUserAgent(context)
+}
 
     private var savedCookies: String? = null
     private val cfMutex = Mutex()
