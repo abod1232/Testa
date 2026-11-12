@@ -65,8 +65,6 @@ class EgyDead : MainAPI() {
         TvType.Movie,
         TvType.TvSeries
     )
-
-    // جلب User-Agent الـ WebView الفعلي للهاتف لضمان تطابقه 100% مع كلاودفلير
     private val userAgent: String by lazy {
         try {
             val context = app.context
@@ -82,8 +80,6 @@ class EgyDead : MainAPI() {
     private fun log(tag: String, msg: String) {
         println("EgyDeadDebug | [$tag] -> $msg")
     }
-
-    // تحويل نص الكوكيز إلى Map لتثبيته في طلبات okhttp
     private fun getCookiesMap(targetUrl: String): Map<String, String> {
         val cookieStr = try {
             CookieManager.getInstance().getCookie(targetUrl)
@@ -121,7 +117,6 @@ class EgyDead : MainAPI() {
     }
 
     private suspend fun httpGet(url: String, referer: String? = null): Document {
-        // التأكد من وجود / في نهاية النطاق لمنع الـ Redirect وفقدان الكوكيز
         var currentRequestUrl = if (url == mainUrl && !url.endsWith("/")) "$url/" else url
         log("GET-REQUEST", "Fetching: $currentRequestUrl")
         
@@ -593,20 +588,14 @@ class EgyDead : MainAPI() {
                 if (!allSeenLinks.add(normalized)) return false
 
                 var isLoaded = false
-
-                // 1. فحص إذا كان الرابط هو سيرفر Megamax / Mirror
                 if (normalized.contains("megamax") || normalized.contains("share4max") || normalized.contains("/mirror/") || normalized.contains("/iframe/")) {
                     isLoaded = processMegamax(normalized, watchPageUrl, subtitleCallback, callback)
                 }
-
-                // 2. استخدام المستخرجات العامة
                 if (!isLoaded) {
                     try {
                         isLoaded = loadExtractor(normalized, data, subtitleCallback, callback)
                     } catch (ex: Exception) {}
                 }
-
-                // 3. المحاولة بطريقة Megamax كخيار بديل إذا فشل الاستخراج
                 if (!isLoaded) {
                     try {
                         isLoaded = processMegamax(normalized, watchPageUrl, subtitleCallback, callback)
