@@ -58,7 +58,7 @@ data class MegamaxInitialPage(
 )
 
 class EgyDead(val context: Context) : MainAPI() {
-    override var mainUrl = "https://egydead.life"
+    override var mainUrl = "https://egydead.life/"
     override var name = "ايجي ديد"
     override val hasMainPage = true
     override var lang = "ar"
