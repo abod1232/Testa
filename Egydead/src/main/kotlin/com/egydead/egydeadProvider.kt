@@ -111,12 +111,27 @@ class EgyDead(val context: Context) : MainAPI() {
         savedCookies?.let { headers["Cookie"] = it }
         return headers
     }
+    // دالة تضمن دائماً إضافة / في نهاية أي نطاق رئيسي
+    private fun fixUrlSlash(url: String): String {
+        return try {
+            val u = URL(url)
+            if (u.path.isEmpty() || u.path == "") {
+                val query = if (u.query != null) "?${u.query}" else ""
+                "${u.protocol}://${u.host}/$query"
+            } else {
+                url
+            }
+        } catch (e: Exception) {
+            if (!url.endsWith("/")) "$url/" else url
+        }
+    }
 
     private suspend fun httpGet(url: String, referer: String? = null): Document {
-        var currentRequestUrl = if (url.trimEnd('/') == mainUrl.trimEnd('/')) "${mainUrl.trimEnd('/')}/" else url
+        // إجبار الرابط أن ينتهي بـ / دائماً
+        var currentRequestUrl = fixUrlSlash(url)
         log("GET-REQUEST", "Fetching: $currentRequestUrl")
         
-        var headers = buildHeaders(referer)
+        var headers = buildHeaders(referer?.let { fixUrlSlash(it) })
         var cookies = getCookiesMap(currentRequestUrl)
 
         var res = app.get(currentRequestUrl, headers = headers, cookies = cookies, timeout = 30)
@@ -143,14 +158,14 @@ class EgyDead(val context: Context) : MainAPI() {
                                     val newHost = URL(solverResult.finalUrl).host
                                     mainUrl = "https://$newHost/"
                                 } catch (e: Exception) {}
-                                currentRequestUrl = solverResult.finalUrl
+                                currentRequestUrl = fixUrlSlash(solverResult.finalUrl)
                             }
                         }
                     }
                 }
             }
             log("GET-REQUEST", "إعادة الطلب (Retry) بالكوكيز الجديدة: $currentRequestUrl")
-            headers = buildHeaders(referer)
+            headers = buildHeaders(referer?.let { fixUrlSlash(it) })
             cookies = getCookiesMap(currentRequestUrl)
             res = app.get(currentRequestUrl, headers = headers, cookies = cookies, timeout = 30)
         }
@@ -161,7 +176,7 @@ class EgyDead(val context: Context) : MainAPI() {
     private suspend fun httpPost(url: String, data: Map<String, String>, referer: String? = null): Document {
         var currentRequestUrl = url
         log("POST-REQUEST", "Sending to: $currentRequestUrl")
-        var headers = buildHeaders(referer).apply {
+        var headers = buildHeaders(referer?.let { fixUrlSlash(it) }).apply {
             put("X-Requested-With", "XMLHttpRequest")
             put("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
         }
@@ -183,12 +198,12 @@ class EgyDead(val context: Context) : MainAPI() {
                                 val newHost = URL(solverResult.finalUrl).host
                                 mainUrl = "https://$newHost/"
                             } catch (e: Exception) {}
-                            currentRequestUrl = solverResult.finalUrl
+                            currentRequestUrl = fixUrlSlash(solverResult.finalUrl)
                         }
                     }
                 }
             }
-            headers = buildHeaders(referer).apply {
+            headers = buildHeaders(referer?.let { fixUrlSlash(it) }).apply {
                 put("X-Requested-With", "XMLHttpRequest")
                 put("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
             }
