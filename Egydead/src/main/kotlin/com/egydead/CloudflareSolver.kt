@@ -36,11 +36,7 @@ object CloudflareSolver {
 
                 val cookieManager = CookieManager.getInstance()
                 cookieManager.setAcceptCookie(true)
-
-                // 1. جلب الكوكي القديم المنتهي لحفظ قيمته
                 val oldCookie = cookieManager.getCookie(initialUrl) ?: ""
-
-                // 2. تصفير الكوكي التالف من الذاكرة تماماً
                 cookieManager.setCookie(initialUrl, "cf_clearance=deleted; Max-Age=0; path=/")
                 cookieManager.flush()
 
@@ -170,8 +166,6 @@ object CloudflareSolver {
 
                     val currentLiveUrl = webView.url ?: initialUrl
                     val currentCookies = cookieManager.getCookie(currentLiveUrl)
-
-                    // التحقق أن الكوكي الجديد تم توليده وأنه مختلف عن الكوكي القديم التالف
                     if (currentCookies != null && 
                         currentCookies.contains("cf_clearance") && 
                         !currentCookies.contains("cf_clearance=deleted") &&
