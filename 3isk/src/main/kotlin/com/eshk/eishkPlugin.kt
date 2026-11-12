@@ -6,6 +6,6 @@ import android.content.Context
 @CloudstreamPlugin
 class AnimeRiftPlugin: Plugin() {
     override fun load(context: Context) {
-        registerMainAPI(AnimeRift())
+        registerMainAPI(Anime4up())
     }
 }
