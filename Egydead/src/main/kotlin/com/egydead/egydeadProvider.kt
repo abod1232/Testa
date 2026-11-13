@@ -23,6 +23,10 @@ import kotlinx.serialization.Serializable
 import java.util.ArrayDeque
 import java.net.URL
 import java.net.URLDecoder
+
+// ==========================================
+// نماذج فك تشفير Megamax / Share4max
+// ==========================================
 @Serializable
 data class MegamaxMirror(
     @SerialName("driver") val driver: String? = null,
@@ -82,8 +86,7 @@ class EgyDead(val context: Context) : MainAPI() {
         "streamhg.com",
         "wishembed.pro",
         "dwish.net",
-        "embedwish.com",
-        "strwish.com"
+        "embedwish.com"
     )
 
     private fun log(tag: String, msg: String) {
@@ -136,98 +139,57 @@ class EgyDead(val context: Context) : MainAPI() {
 
     private suspend fun httpGet(url: String, referer: String? = null): Document {
         val currentRequestUrl = fixUrlSlash(url)
-        log("CF-TRACE", "==================================================")
-        log("CF-TRACE", "1. بدء طلب الرابط: $currentRequestUrl")
         var headers = buildHeaders(referer)
 
-        log("CF-TRACE", "--- [الهيدرات المرسلة مع الطلب الأول] ---")
-        headers.forEach { (key, value) ->
-            log("CF-TRACE", "  -> $key: $value")
-        }
-
-        var res = app.get(currentRequestUrl, headers = headers, timeout = 30)
-        log("CF-TRACE", "2. استجابة الطلب الأول: Code=${res.code} | حجم الرد=${res.text.length} حرف")
+        var res = app.get(currentRequestUrl, headers = headers, timeout = 25)
 
         if (res.code in listOf(403, 503, 429)) {
-            log("CF-TRACE", "3. رصد حماية Cloudflare (Code: ${res.code}). دخول الـ Lock...")
             cfMutex.withLock {
                 val currentCookies = try { CookieManager.getInstance().getCookie(currentRequestUrl) } catch (e: Exception) { null }
                 if (currentCookies != null && currentCookies.contains("cf_clearance") && currentCookies != savedCookies) {
-                    log("CF-TRACE", "4. تم العثور على كوكيز صالحة مسبقاً في CookieManager.")
                     savedCookies = currentCookies
                 } else {
-                    log("CF-TRACE", "4. تشغيل CloudflareSolver في الخلفية...")
                     val activity = CommonActivity.activity ?: com.lagradost.cloudstream3.CommonActivity.activity
-
                     if (activity != null) {
                         val solverResult = CloudflareSolver.solve(activity, currentRequestUrl, userAgent)
                         if (solverResult != null) {
                             if (!solverResult.cookies.isNullOrEmpty()) {
                                 savedCookies = solverResult.cookies
-                                val hasClearance = solverResult.cookies.contains("cf_clearance")
-                                log("CF-TRACE", "5. تم صيد الكوكيز بنجاح! تحتوي cf_clearance: $hasClearance")
-                            } else {
-                                log("CF-TRACE", "5. تحذير: انتهت العملية ولكن الكوكيز فارغة!")
                             }
                             if (solverResult.finalUrl != currentRequestUrl) {
                                 try {
                                     val newHost = URL(solverResult.finalUrl).host
                                     mainUrl = "https://$newHost/"
-                                    log("CF-TRACE", "تحديث mainUrl ليصبح: $mainUrl")
                                 } catch (e: Exception) {}
                             }
-                        } else {
-                            log("CF-TRACE", "5. فشل الصياد: solverResult عاد بـ null!")
                         }
-                    } else {
-                        log("CF-TRACE", "5. خطأ: Activity غير متاح لتشغيل الصياد!")
                     }
                 }
             }
 
             headers = buildHeaders(referer)
-            log("CF-TRACE", "--- [الهيدرات المرسلة مع طلب الإعادة (Retry)] ---")
-            headers.forEach { (key, value) ->
-                log("CF-TRACE", "  -> $key: $value")
-            }
-
-            log("CF-TRACE", "6. جاري إرسال طلب الإعادة (Retry)...")
-            res = app.get(currentRequestUrl, headers = headers, timeout = 30)
-            log("CF-TRACE", "7. نتيجة طلب الإعادة: Code=${res.code} | حجم الرد=${res.text.length} حرف | عنوان الصفحة: '${res.document.title()}'")
-
-            if (res.code in listOf(403, 503)) {
-                log("CF-TRACE", "⚠️ فشل التخطي حتى بعد الكوكيز! عينة من الرد: ${res.text.take(250)}")
-            }
+            res = app.get(currentRequestUrl, headers = headers, timeout = 25)
         }
 
         return res.document
     }
 
     private suspend fun httpPost(url: String, data: Map<String, String>, referer: String? = null): Document {
-        var currentRequestUrl = url
-        log("POST-REQUEST", "Sending to: $currentRequestUrl")
+        val currentRequestUrl = url
         var headers = buildHeaders(referer).apply {
             put("X-Requested-With", "XMLHttpRequest")
             put("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
         }
 
-        var res = app.post(currentRequestUrl, data = data, headers = headers, timeout = 30)
+        var res = app.post(currentRequestUrl, data = data, headers = headers, timeout = 25)
 
         if (res.code in listOf(403, 503, 429)) {
             cfMutex.withLock {
                 val activity = CommonActivity.activity ?: com.lagradost.cloudstream3.CommonActivity.activity
                 if (activity != null) {
                     val solverResult = CloudflareSolver.solve(activity, currentRequestUrl, userAgent)
-                    if (solverResult != null) {
-                        if (!solverResult.cookies.isNullOrEmpty()) {
-                            savedCookies = solverResult.cookies
-                        }
-                        if (solverResult.finalUrl != currentRequestUrl) {
-                            try {
-                                val newHost = URL(solverResult.finalUrl).host
-                                mainUrl = "https://$newHost/"
-                            } catch (e: Exception) {}
-                        }
+                    if (solverResult != null && !solverResult.cookies.isNullOrEmpty()) {
+                        savedCookies = solverResult.cookies
                     }
                 }
             }
@@ -235,7 +197,7 @@ class EgyDead(val context: Context) : MainAPI() {
                 put("X-Requested-With", "XMLHttpRequest")
                 put("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
             }
-            res = app.post(currentRequestUrl, data = data, headers = headers, timeout = 30)
+            res = app.post(currentRequestUrl, data = data, headers = headers, timeout = 25)
         }
 
         return res.document
@@ -243,17 +205,11 @@ class EgyDead(val context: Context) : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val requestUrl = fixUrlSlash(mainUrl)
-        log("MAIN-PAGE", "=== بدء طلب الصفحة الرئيسية: $requestUrl | الصفحة: $page ===")
-
         val document = try {
             httpGet(requestUrl)
         } catch (e: Exception) {
-            log("MAIN-PAGE", "CRITICAL ERROR: فشل الاتصال بالصفحة الرئيسية -> ${e.message}")
             return newHomePageResponse(emptyList())
         }
-
-        val pageTitle = document.title()
-        log("MAIN-PAGE", "عنوان المستند المستلم: '$pageTitle'")
 
         val homePageList = ArrayList<HomePageList>()
 
@@ -263,21 +219,17 @@ class EgyDead(val context: Context) : MainAPI() {
             val items = pinnedSection.select("li.movieItem").mapNotNull {
                 it.toSearchResponse("PINNED")
             }
-            log("MAIN-PAGE", "قسم المميز [$sectionTitle]: استخراج ${items.size} عنصر")
             if (items.isNotEmpty()) {
                 homePageList.add(HomePageList(sectionTitle, items, isHorizontalImages = true))
             }
         }
 
         val mainSections = document.select("section.main-section")
-        log("MAIN-PAGE", "عدد الأقسام المكتشفة (section.main-section): ${mainSections.size}")
-
         mainSections.forEachIndexed { index, section ->
             val sectionTitle = section.selectFirst("h1.TitleMaster em")?.text()?.trim() ?: "قسم ${index + 1}"
             val items = section.select("li.movieItem").mapNotNull {
                 it.toSearchResponse("SECTION-$index")
             }
-            log("MAIN-PAGE", "القسم [$sectionTitle]: استخراج ${items.size} عنصر")
             if (items.isNotEmpty()) {
                 homePageList.add(HomePageList(sectionTitle, items))
             }
@@ -408,12 +360,14 @@ class EgyDead(val context: Context) : MainAPI() {
         } catch (e: Exception) {
             return null
         }
+
         val seriesPoster = document.selectFirst("meta[property=og:image]")?.attr("content")
             ?: document.selectFirst("div.single-thumbnail img")?.attr("src")
         val plot = document.selectFirst("div.singleStory")?.text()?.trim()
             ?: document.selectFirst("div.extra-content p")?.text()?.trim()
         val year = document.select("div.LeftBox li:has(span:contains(السنه)) a").text().toIntOrNull()
         val tags = document.select("div.LeftBox li:has(span:contains(النوع)) a").map { it.text() }
+
         if (url.contains("/film/")) {
             val title = document.selectFirst("meta[property=og:title]")?.attr("content")?.trim() ?: "Movie"
             return newMovieLoadResponse(title, url, TvType.Movie, url) {
@@ -428,6 +382,8 @@ class EgyDead(val context: Context) : MainAPI() {
 
         val seriesTitle = document.selectFirst("meta[property=og:title]")?.attr("content")?.trim()
             ?.replace(Regex("""\s*(الموسم|الحلقة)\s+.*"""), "")?.trim() ?: "TV Series"
+
+        // 🌟 الحل الأساسي السريع من القالب الجديد بطلب واحد
         val episodeNav = document.selectFirst("section.dead-changes-episode-nav")
         if (episodeNav != null) {
             val groups = episodeNav.select("div.dead-changes-episode-group")
@@ -471,6 +427,8 @@ class EgyDead(val context: Context) : MainAPI() {
                 }
             }
         }
+
+        // 🔄 الحل الثانوي القديم
         var startSeasonUrl: String? = null
         if (url.contains("/episode/")) {
             val bc = document.selectFirst("div.breadcrumbs-single, div.breadcrumbs")
@@ -527,6 +485,7 @@ class EgyDead(val context: Context) : MainAPI() {
                 }
             }
         }
+
         val fallbackEpisodes = extractEpisodesFromSeasonDoc(startSeasonUrl!!, startDoc)
         fallbackEpisodes.forEach { ep ->
             if (ep.posterUrl.isNullOrBlank()) {
@@ -543,6 +502,10 @@ class EgyDead(val context: Context) : MainAPI() {
             this.recommendations = parseRecommendations(document, url)
         }
     }
+
+    // ==========================================
+    // معالجة سيرفرات Megamax / Share4max
+    // ==========================================
     private suspend fun processMegamax(
         targetUrl: String,
         referer: String,
@@ -568,7 +531,8 @@ class EgyDead(val context: Context) : MainAPI() {
                 "Upgrade-Insecure-Requests" to "1"
             )
 
-            val initialRes = app.get(iframeUrl, headers = reqHeaders, timeout = 25)
+            // مهلة منخفضة (10 ثوانٍ) لمنع التجميد
+            val initialRes = app.get(iframeUrl, headers = reqHeaders, timeout = 10)
             val doc = initialRes.document
 
             val rawJson = doc.selectFirst("script[data-page=app]")?.data()
@@ -604,7 +568,7 @@ class EgyDead(val context: Context) : MainAPI() {
                 iframeUrl,
                 headers = inertiaHeaders,
                 cookies = initialRes.cookies,
-                timeout = 25
+                timeout = 10
             )
 
             val streamJson = parseJson<MegamaxInertiaResponse>(streamRes.text)
@@ -626,6 +590,10 @@ class EgyDead(val context: Context) : MainAPI() {
             false
         }
     }
+
+    // ==========================================
+    // دوال حل وفك تشفير سيرفرات HgCloud
+    // ==========================================
     private fun customB64Decode(s: String, alphabet: String): String {
         var bc = 0
         var bs = 0
@@ -735,7 +703,7 @@ class EgyDead(val context: Context) : MainAPI() {
                 "Referer" to (referer ?: targetUrl)
             )
 
-            val r1 = app.get(targetUrl, headers = headers, timeout = 15)
+            val r1 = app.get(targetUrl, headers = headers, timeout = 8)
             if (r1.code != 200) return null
 
             val html = r1.text
@@ -744,13 +712,13 @@ class EgyDead(val context: Context) : MainAPI() {
 
             val uri = URL(r1.url)
             val currentHost = uri.host
-            var candidates = mutableListOf<String>()
+            val candidates = mutableListOf<String>()
 
             if (jsPathMatch != null) {
                 val jsRelative = jsPathMatch.groupValues[1]
                 val jsUrl = if (jsRelative.startsWith("http")) jsRelative else "${uri.protocol}://${uri.host}$jsRelative"
 
-                val r2 = app.get(jsUrl, headers = headers, timeout = 15)
+                val r2 = app.get(jsUrl, headers = headers, timeout = 8)
                 if (r2.code == 200) {
                     try {
                         val decodedJs = deobfuscateJs(r2.text)
@@ -760,15 +728,15 @@ class EgyDead(val context: Context) : MainAPI() {
             }
 
             candidates.addAll(hgFallbackDomains)
-            candidates = candidates.distinct().toMutableList()
+            val uniqueCandidates = candidates.distinct().take(4) // فحص أسرع 4 دومينات فقط
 
-            for (dest in candidates) {
+            for (dest in uniqueCandidates) {
                 if (dest.equals(currentHost, ignoreCase = true)) continue
                 val query = if (!uri.query.isNullOrBlank()) "?${uri.query}" else ""
                 val testUrl = "https://$dest${uri.path}$query"
 
                 try {
-                    val check = app.get(testUrl, headers = mapOf("User-Agent" to userAgent, "Referer" to r1.url), timeout = 10)
+                    val check = app.get(testUrl, headers = mapOf("User-Agent" to userAgent, "Referer" to r1.url), timeout = 5)
                     if (check.code == 200 && !check.text.contains("loading", ignoreCase = true)) {
                         return testUrl
                     }
@@ -780,6 +748,9 @@ class EgyDead(val context: Context) : MainAPI() {
         }
     }
 
+    // ==========================================
+    // دالة استخراج الروابط السريعة بالتوازي الكامل
+    // ==========================================
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -787,35 +758,25 @@ class EgyDead(val context: Context) : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         try {
-            val originalUrl = data
             val watchPageUrl = if (!data.contains("?view=watch")) "$data?view=watch" else data
 
-            try { httpGet(originalUrl, referer = originalUrl) } catch (e: Exception) {}
-
+            // طلب صفحة المشاهدة مباشرة بالـ POST دون إضاعة الوقت في GET
             val document = try {
-                httpPost(watchPageUrl, data = mapOf("View" to "1"), referer = originalUrl)
+                httpPost(watchPageUrl, data = mapOf("View" to "1"), referer = data)
             } catch (e: Exception) {
-                try { httpGet(watchPageUrl, referer = originalUrl) } catch (e2: Exception) { return false }
+                try { httpGet(watchPageUrl, referer = data) } catch (e2: Exception) { return false }
             }
 
             val allSeenLinks = java.util.Collections.synchronizedSet(mutableSetOf<String>())
-            val candidates = mutableListOf<Pair<String?, String?>>()
+            val rawCandidates = mutableListOf<Pair<String, String?>>()
 
-            fun normalizeCandidate(raw: String?): String? {
-                if (raw.isNullOrBlank()) return null
-                return try { normalizeUrl(raw, watchPageUrl) } catch (e: Exception) { null }
+            fun addCandidate(raw: String?, name: String?) {
+                if (raw.isNullOrBlank()) return
+                val normalized = normalizeUrl(raw, watchPageUrl) ?: return
+                rawCandidates.add(Pair(normalized, name))
             }
 
-            val downloadSelectors = listOf("ul.donwload-servers-list li", "ul.download-servers-list li")
-            for (sel in downloadSelectors) {
-                for (li in document.select(sel)) {
-                    val serverName = li.selectFirst("span.ser-name, p")?.text()?.trim()
-                    val href = li.selectFirst("a.ser-link, a")?.attr("href") ?: li.attr("data-link")
-                    val normalized = normalizeCandidate(href)
-                    if (normalized != null) candidates += Pair(normalized, serverName)
-                }
-            }
-
+            // 1. استخراج سيرفرات المشاهدة أولاً (هي الأهم والأسرع)
             val watchSelectors = listOf("ul.serversList li", "ul.servers-list li", "div.serversList li")
             for (sel in watchSelectors) {
                 for (li in document.select(sel)) {
@@ -824,70 +785,72 @@ class EgyDead(val context: Context) : MainAPI() {
                         ?: li.selectFirst("[data-link]")?.attr("data-link")
                         ?: li.selectFirst("button[data-link]")?.attr("data-link")
                         ?: li.selectFirst("a")?.attr("href")
-                    val normalized = normalizeCandidate(candidate)
-                    if (normalized != null) candidates += Pair(normalized, serverName)
+                    addCandidate(candidate, serverName)
                 }
             }
 
+            // 2. استخراج سيرفرات التحميل
+            val downloadSelectors = listOf("ul.donwload-servers-list li", "ul.download-servers-list li")
+            for (sel in downloadSelectors) {
+                for (li in document.select(sel)) {
+                    val serverName = li.selectFirst("span.ser-name, p")?.text()?.trim()
+                    val href = li.selectFirst("a.ser-link, a")?.attr("href") ?: li.attr("data-link")
+                    addCandidate(href, serverName)
+                }
+            }
+
+            // 3. استخراج وسوم data-link الأخرى
             for (el in document.select("[data-link]")) {
                 val serverName = el.attr("data-name").takeIf { it.isNotBlank() } ?: el.attr("data-provider")
-                val normalized = normalizeCandidate(el.attr("data-link"))
-                if (normalized != null) candidates += Pair(normalized, serverName)
+                addCandidate(el.attr("data-link"), serverName)
             }
 
-            for (a in document.select("a")) {
-                val href = a.attr("href")
-                if (href.contains("player") || href.contains("embed") || href.contains("download") || href.contains("drive") || href.contains("mp4") || href.contains("mirror")) {
-                    val serverName = a.attr("title").takeIf { it.isNotBlank() } ?: a.text().takeIf { it.isNotBlank() }
-                    val normalized = normalizeCandidate(href)
-                    if (normalized != null) candidates += Pair(normalized, serverName)
-                }
-            }
+            // 4. استبعاد التكرار المسبق لتقليل عدد المهام
+            val candidates = rawCandidates.distinctBy { it.first }
 
-            val semaphore = Semaphore(8)
+            // رفع التوازي إلى 16 رابطاً في نفس اللحظة عبر Dispatchers.IO
+            val semaphore = Semaphore(16)
 
-            suspend fun prepareAndSendParallel(linkRaw: String?, serverName: String?): Boolean {
-                if (linkRaw.isNullOrBlank()) return false
-                val normalized = normalizeUrl(linkRaw, watchPageUrl) ?: return false
+            suspend fun processLinkParallel(url: String, serverName: String?): Boolean {
+                if (!allSeenLinks.add(url)) return false
 
-                if (!allSeenLinks.add(normalized)) return false
-                var targetUrl = normalized
+                var targetUrl = url
+
+                // ⚡ إذا كان الرابط hgcloud نحله فوراً
                 if (targetUrl.contains("hgcloud") || (serverName != null && serverName.contains("hgcloud", ignoreCase = true))) {
                     val resolved = resolveHgCloud(targetUrl, watchPageUrl)
                     if (!resolved.isNullOrBlank()) {
-                        log("HGCLOUD", "تم استخراج الرابط الحقيقي من hgcloud: $resolved")
                         targetUrl = resolved
                     }
                 }
 
-                var isLoaded = false
-                if (targetUrl.contains("megamax") || targetUrl.contains("share4max") || targetUrl.contains("/mirror/") || targetUrl.contains("/iframe/")) {
-                    isLoaded = processMegamax(targetUrl, watchPageUrl, subtitleCallback, callback)
-                }
-                if (!isLoaded) {
-                    try {
-                        isLoaded = loadExtractor(targetUrl, data, subtitleCallback, callback)
-                    } catch (ex: Exception) {}
-                }
-                if (!isLoaded) {
-                    try {
-                        isLoaded = processMegamax(targetUrl, watchPageUrl, subtitleCallback, callback)
-                    } catch (ex: Exception) {}
-                }
-                if (!isLoaded) {
-                    try {
-                        isLoaded = UniversalExtractor.extract(targetUrl, watchPageUrl, subtitleCallback, callback)
-                    } catch (ex: Exception) {}
-                }
+                // ⚡ توجيه ذكي مباشر: لا تجعل الرابط يجرب كل المستخرجات بالتتابع!
+                return when {
+                    // إذا كان الرابط هو سيرفر Megamax يذهب مباشرة لمستخرج Megamax فقط
+                    targetUrl.contains("megamax") || targetUrl.contains("share4max") || targetUrl.contains("/mirror/") || targetUrl.contains("/iframe/") -> {
+                        processMegamax(targetUrl, watchPageUrl, subtitleCallback, callback)
+                    }
 
-                return isLoaded
+                    // السيرفرات الأخرى تجرب loadExtractor أولاً
+                    else -> {
+                        val loaded = try {
+                            loadExtractor(targetUrl, watchPageUrl, subtitleCallback, callback)
+                        } catch (e: Exception) { false }
+
+                        if (!loaded) {
+                            // إذا فشل المستخرج العادي، نجرب فك التشفير الشامل فوراً
+                            UniversalExtractor.extract(targetUrl, watchPageUrl, subtitleCallback, callback)
+                        } else true
+                    }
+                }
             }
 
+            // تشغيل جميع الروابط بالتوازي التام فوراً دون انتظار أحد
             coroutineScope {
                 candidates.map { pair ->
-                    async {
+                    async(Dispatchers.IO) {
                         semaphore.withPermit {
-                            prepareAndSendParallel(pair.first, pair.second)
+                            processLinkParallel(pair.first, pair.second)
                         }
                     }
                 }.awaitAll()
