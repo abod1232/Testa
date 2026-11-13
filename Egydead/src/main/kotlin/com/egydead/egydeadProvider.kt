@@ -23,6 +23,10 @@ import kotlinx.serialization.Serializable
 import java.util.ArrayDeque
 import java.net.URL
 import java.net.URLDecoder
+
+// ==========================================
+// نماذج فك تشفير Megamax / Share4max
+// ==========================================
 @Serializable
 data class MegamaxMirror(
     @SerialName("driver") val driver: String? = null,
@@ -77,6 +81,15 @@ class EgyDead(val context: Context) : MainAPI() {
     private var savedCookies: String? = null
     private val cfMutex = Mutex()
 
+    private val hgFallbackDomains = listOf(
+        "streamwish.to",
+        "streamhg.com",
+        "wishembed.pro",
+        "dwish.net",
+        "embedwish.com",
+        "strwish.com"
+    )
+
     private fun log(tag: String, msg: String) {
         println("EgyDeadDebug | [$tag] -> $msg")
     }
@@ -106,9 +119,10 @@ class EgyDead(val context: Context) : MainAPI() {
         }
 
     private fun buildHeaders(referer: String?): MutableMap<String, String> {
+        val safeReferer = (referer ?: mainUrl).trimEnd('/') + "/"
         val headers = mutableMapOf(
             "User-Agent" to userAgent,
-            "Referer" to (referer ?: "$mainUrl/"),
+            "Referer" to safeReferer,
             "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
             "Accept-Language" to "ar-IQ,ar;q=0.9,en-US;q=0.8,en;q=0.7",
             "Upgrade-Insecure-Requests" to "1",
@@ -128,7 +142,8 @@ class EgyDead(val context: Context) : MainAPI() {
         val currentRequestUrl = fixUrlSlash(url)
         log("CF-TRACE", "==================================================")
         log("CF-TRACE", "1. بدء طلب الرابط: $currentRequestUrl")
-        var headers = buildHeaders(referer?.let { fixUrlSlash(it) })
+        var headers = buildHeaders(referer)
+
         log("CF-TRACE", "--- [الهيدرات المرسلة مع الطلب الأول] ---")
         headers.forEach { (key, value) ->
             log("CF-TRACE", "  -> $key: $value")
@@ -174,7 +189,7 @@ class EgyDead(val context: Context) : MainAPI() {
                 }
             }
 
-            headers = buildHeaders(referer?.let { fixUrlSlash(it) })
+            headers = buildHeaders(referer)
             log("CF-TRACE", "--- [الهيدرات المرسلة مع طلب الإعادة (Retry)] ---")
             headers.forEach { (key, value) ->
                 log("CF-TRACE", "  -> $key: $value")
@@ -183,7 +198,7 @@ class EgyDead(val context: Context) : MainAPI() {
             log("CF-TRACE", "6. جاري إرسال طلب الإعادة (Retry)...")
             res = app.get(currentRequestUrl, headers = headers, timeout = 30)
             log("CF-TRACE", "7. نتيجة طلب الإعادة: Code=${res.code} | حجم الرد=${res.text.length} حرف | عنوان الصفحة: '${res.document.title()}'")
-            
+
             if (res.code in listOf(403, 503)) {
                 log("CF-TRACE", "⚠️ فشل التخطي حتى بعد الكوكيز! عينة من الرد: ${res.text.take(250)}")
             }
@@ -195,7 +210,7 @@ class EgyDead(val context: Context) : MainAPI() {
     private suspend fun httpPost(url: String, data: Map<String, String>, referer: String? = null): Document {
         var currentRequestUrl = url
         log("POST-REQUEST", "Sending to: $currentRequestUrl")
-        var headers = buildHeaders(referer?.let { fixUrlSlash(it) }).apply {
+        var headers = buildHeaders(referer).apply {
             put("X-Requested-With", "XMLHttpRequest")
             put("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
         }
@@ -220,7 +235,7 @@ class EgyDead(val context: Context) : MainAPI() {
                     }
                 }
             }
-            headers = buildHeaders(referer?.let { fixUrlSlash(it) }).apply {
+            headers = buildHeaders(referer).apply {
                 put("X-Requested-With", "XMLHttpRequest")
                 put("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
             }
@@ -256,13 +271,11 @@ class EgyDead(val context: Context) : MainAPI() {
             if (items.isNotEmpty()) {
                 homePageList.add(HomePageList(sectionTitle, items, isHorizontalImages = true))
             }
-        } else {
-            log("MAIN-PAGE", "لم يتم العثور على div.pin-posts-list")
         }
 
         val mainSections = document.select("section.main-section")
         log("MAIN-PAGE", "عدد الأقسام المكتشفة (section.main-section): ${mainSections.size}")
-        
+
         mainSections.forEachIndexed { index, section ->
             val sectionTitle = section.selectFirst("h1.TitleMaster em")?.text()?.trim() ?: "قسم ${index + 1}"
             val items = section.select("li.movieItem").mapNotNull {
@@ -272,12 +285,6 @@ class EgyDead(val context: Context) : MainAPI() {
             if (items.isNotEmpty()) {
                 homePageList.add(HomePageList(sectionTitle, items))
             }
-        }
-
-        log("MAIN-PAGE", "إجمالي القوائم المستخرجة بنجاح: ${homePageList.size}")
-        if (homePageList.isEmpty()) {
-            val htmlSample = document.body()?.text()?.take(200) ?: "Body is empty"
-            log("MAIN-PAGE", "تحذير: القائمة فارغة! عينة من محتوى الصفحة: $htmlSample")
         }
 
         return newHomePageResponse(homePageList.filter { it.list.isNotEmpty() })
@@ -481,6 +488,9 @@ class EgyDead(val context: Context) : MainAPI() {
         }
     }
 
+    // ==========================================
+    // معالجة سيرفرات Megamax / Share4max
+    // ==========================================
     private suspend fun processMegamax(
         targetUrl: String,
         referer: String,
@@ -565,6 +575,163 @@ class EgyDead(val context: Context) : MainAPI() {
         }
     }
 
+    // ==========================================
+    // دوال حل وفك تشفير سيرفرات HgCloud
+    // ==========================================
+    private fun customB64Decode(s: String, alphabet: String): String {
+        var bc = 0
+        var bs = 0
+        val out = mutableListOf<Byte>()
+        for (ch in s) {
+            val idx = alphabet.indexOf(ch)
+            if (idx == -1) continue
+            bs = if (bc % 4 != 0) (bs * 64 + idx) else idx
+            if (bc % 4 != 0) {
+                out.add((0xff and (bs shr ((-2 * (bc + 1)) and 6))).toByte())
+            }
+            bc++
+        }
+        return try {
+            val pct = out.joinToString("") { "%02x".format(it) }
+            URLDecoder.decode("%$pct".replace("%", "%25").replace("%25", "%"), "UTF-8")
+        } catch (e: Exception) {
+            String(out.toByteArray(), Charsets.UTF_8)
+        }
+    }
+
+    private fun rc4(s: String, key: String): String {
+        val sbox = IntArray(256) { it }
+        var j = 0
+        for (i in 0 until 256) {
+            j = (j + sbox[i] + key[i % key.length].code) % 256
+            val temp = sbox[i]; sbox[i] = sbox[j]; sbox[j] = temp
+        }
+        var i = 0
+        j = 0
+        val res = StringBuilder()
+        for (ch in s) {
+            i = (i + 1) % 256
+            j = (j + sbox[i]) % 256
+            val temp = sbox[i]; sbox[i] = sbox[j]; sbox[j] = temp
+            res.append((ch.code xor sbox[(sbox[i] + sbox[j]) % 256]).toChar())
+        }
+        return res.toString()
+    }
+
+    private fun deobfuscateJs(jsCode: String): String {
+        val jsId = """[a-zA-Z_$][\w$]*"""
+        val decRegex = Regex("""function\s+($jsId)\s*\(\s*($jsId)(?:\s*,\s*$jsId)?\s*\)\s*\{\s*\2\s*=\s*\2\s*([-+])\s*([^;]+);\s*(?:const|let|var)\s+$jsId\s*=\s*($jsId)\s*\(\s*\)\s*;""")
+        val mDec = decRegex.find(jsCode) ?: return jsCode
+
+        val decFn = mDec.groupValues[1]
+        val op = mDec.groupValues[3]
+        val offsetVal = mDec.groupValues[4].trim().toIntOrNull() ?: 0
+        val offset = if (op == "+") -offsetVal else offsetVal
+        val arrFn = mDec.groupValues[5]
+
+        val arrRegex = Regex("""function\s+${Regex.escape(arrFn)}\s*\(\s*\)\s*\{\s*(?:const|let|var)\s+$jsId\s*=\s*(\[.*?\])\s*;""", RegexOption.DOT_MATCHES_ALL)
+        val mArr = arrRegex.find(jsCode) ?: return jsCode
+        val rawArrStr = mArr.groupValues[1]
+
+        val arr = Regex("""['"]([^'"]+)['"]""").findAll(rawArrStr).map { it.groupValues[1] }.toMutableList()
+        val alphabetMatch = Regex("""['"]([A-Za-z0-9+/=]{64,65})['"]""").find(jsCode)
+        val alphabet = alphabetMatch?.groupValues?.get(1) ?: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/="
+
+        fun decodeItem(idx: Int, key: String): String {
+            val realIdx = idx - offset
+            if (realIdx !in arr.indices) return ""
+            val raw = arr[realIdx]
+            return try {
+                if (key.isNotEmpty()) {
+                    rc4(customB64Decode(raw, alphabet), key)
+                } else {
+                    customB64Decode(raw, alphabet)
+                }
+            } catch (e: Exception) { raw }
+        }
+
+        val callRegex = Regex("""\b${Regex.escape(decFn)}\(\s*(0x[0-9a-fA-F]+|\d+)(?:\s*,\s*['"]([^'"]*)['"])?\s*\)""")
+        return callRegex.replace(jsCode) { m ->
+            val numStr = m.groupValues[1]
+            val idx = if (numStr.startsWith("0x")) numStr.substring(2).toInt(16) else numStr.toInt()
+            val key = m.groupValues.getOrNull(2) ?: ""
+            "\"${decodeItem(idx, key)}\""
+        }
+    }
+
+    private fun extractDomains(decodedJs: String, currentHost: String): List<String> {
+        val domains = mutableListOf<String>()
+        val listRegex = Regex("""\b(?:main|dmca)\s*=\s*\[([^\]]+)\]""")
+        listRegex.findAll(decodedJs).forEach { match ->
+            val content = match.groupValues[1]
+            Regex("""['"]([a-zA-Z0-9.-]+\.[a-z]{2,})['"]""").findAll(content).forEach { d ->
+                domains.add(d.groupValues[1])
+            }
+        }
+        if (domains.isEmpty()) {
+            val domainRegex = Regex("""['"]([a-zA-Z0-9.-]+\.[a-z]{2,})['"]""")
+            domainRegex.findAll(decodedJs).forEach { d ->
+                val dom = d.groupValues[1]
+                if (!dom.contains("google") && !dom.contains("cloudflare") && !dom.endsWith(currentHost)) {
+                    domains.add(dom)
+                }
+            }
+        }
+        return domains.distinct()
+    }
+
+    private suspend fun resolveHgCloud(targetUrl: String, referer: String? = null): String? {
+        return try {
+            val headers = mapOf(
+                "User-Agent" to userAgent,
+                "Referer" to (referer ?: targetUrl)
+            )
+
+            val r1 = app.get(targetUrl, headers = headers, timeout = 15)
+            if (r1.code != 200) return null
+
+            val html = r1.text
+            val jsPathMatch = Regex("""<script[^>]+src=["']([^"']*main\.js[^"']*)["']""").find(html)
+                ?: if (html.lowercase().contains("loading")) Regex("""<script[^>]+src=["'](/[^"']+\.js[^"']*)["']""").find(html) else null
+
+            val uri = URL(r1.url)
+            val currentHost = uri.host
+            var candidates = mutableListOf<String>()
+
+            if (jsPathMatch != null) {
+                val jsRelative = jsPathMatch.groupValues[1]
+                val jsUrl = if (jsRelative.startsWith("http")) jsRelative else "${uri.protocol}://${uri.host}$jsRelative"
+
+                val r2 = app.get(jsUrl, headers = headers, timeout = 15)
+                if (r2.code == 200) {
+                    try {
+                        val decodedJs = deobfuscateJs(r2.text)
+                        candidates.addAll(extractDomains(decodedJs, currentHost))
+                    } catch (e: Exception) {}
+                }
+            }
+
+            candidates.addAll(hgFallbackDomains)
+            candidates = candidates.distinct().toMutableList()
+
+            for (dest in candidates) {
+                if (dest.equals(currentHost, ignoreCase = true)) continue
+                val query = if (!uri.query.isNullOrBlank()) "?${uri.query}" else ""
+                val testUrl = "https://$dest${uri.path}$query"
+
+                try {
+                    val check = app.get(testUrl, headers = mapOf("User-Agent" to userAgent, "Referer" to r1.url), timeout = 10)
+                    if (check.code == 200 && !check.text.contains("loading", ignoreCase = true)) {
+                        return testUrl
+                    }
+                } catch (e: Exception) {}
+            }
+            null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -632,33 +799,51 @@ class EgyDead(val context: Context) : MainAPI() {
             val semaphore = Semaphore(8)
 
             suspend fun prepareAndSendParallel(linkRaw: String?, serverName: String?): Boolean {
-    if (linkRaw.isNullOrBlank()) return false
-    val normalized = normalizeUrl(linkRaw, watchPageUrl) ?: return false
+                if (linkRaw.isNullOrBlank()) return false
+                val normalized = normalizeUrl(linkRaw, watchPageUrl) ?: return false
 
-    if (!allSeenLinks.add(normalized)) return false
+                if (!allSeenLinks.add(normalized)) return false
 
-    var isLoaded = false
-    if (normalized.contains("megamax") || normalized.contains("share4max") || normalized.contains("/mirror/") || normalized.contains("/iframe/")) {
-        isLoaded = processMegamax(normalized, watchPageUrl, subtitleCallback, callback)
-    }
-    if (!isLoaded) {
-        try {
-            isLoaded = loadExtractor(normalized, data, subtitleCallback, callback)
-        } catch (ex: Exception) {}
-    }
-    if (!isLoaded) {
-        try {
-            isLoaded = processMegamax(normalized, watchPageUrl, subtitleCallback, callback)
-        } catch (ex: Exception) {}
-    }
-    if (!isLoaded) {
-        try {
-            isLoaded = UniversalExtractor.extract(normalized, watchPageUrl, subtitleCallback, callback)
-        } catch (ex: Exception) {}
-    }
+                // 🌟 فحص واستخراج الرابط الحقيقي لـ hgcloud مباشرة
+                var targetUrl = normalized
+                if (targetUrl.contains("hgcloud") || (serverName != null && serverName.contains("hgcloud", ignoreCase = true))) {
+                    val resolved = resolveHgCloud(targetUrl, watchPageUrl)
+                    if (!resolved.isNullOrBlank()) {
+                        log("HGCLOUD", "تم استخراج الرابط الحقيقي من hgcloud: $resolved")
+                        targetUrl = resolved
+                    }
+                }
 
-    return isLoaded
-}
+                var isLoaded = false
+
+                // 1. فحص سيرفر Megamax الخاص بـ EgyDead
+                if (targetUrl.contains("megamax") || targetUrl.contains("share4max") || targetUrl.contains("/mirror/") || targetUrl.contains("/iframe/")) {
+                    isLoaded = processMegamax(targetUrl, watchPageUrl, subtitleCallback, callback)
+                }
+
+                // 2. استخدام المستخرجات العامة
+                if (!isLoaded) {
+                    try {
+                        isLoaded = loadExtractor(targetUrl, data, subtitleCallback, callback)
+                    } catch (ex: Exception) {}
+                }
+
+                // 3. المحاولة بطريقة Megamax كخيار بديل
+                if (!isLoaded) {
+                    try {
+                        isLoaded = processMegamax(targetUrl, watchPageUrl, subtitleCallback, callback)
+                    } catch (ex: Exception) {}
+                }
+
+                // 4. المحاولة الشاملة لفك تشفير أي مشغل مجهول عبر UniversalExtractor
+                if (!isLoaded) {
+                    try {
+                        isLoaded = UniversalExtractor.extract(targetUrl, watchPageUrl, subtitleCallback, callback)
+                    } catch (ex: Exception) {}
+                }
+
+                return isLoaded
+            }
 
             coroutineScope {
                 candidates.map { pair ->
