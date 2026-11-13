@@ -17,10 +17,6 @@ object UniversalExtractor {
         "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     private const val FALLBACK_UA =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-
-    // ═══════════════════════════════════════════════════════════════
-    //  1) نقطة الدخول العامة
-    // ═══════════════════════════════════════════════════════════════
     suspend fun extract(
         url: String,
         referer: String? = null,
@@ -40,41 +36,27 @@ object UniversalExtractor {
                 val key = normalizeForDedup(link.url)
                 if (emittedUrls.add(key)) callback(link)
             }
-
-            // ── جلب الصفحة الرئيسية ────────────────────────────
             var rawHtml = fetchHtml(serverUrl, referer ?: domain) ?: return false
-
-            // ── استخراج الكوكيز من JS (file_id, aff, ref_url) ──
             val cookieMap = extractCookiesFromHtml(rawHtml)
             val cookieHeader = cookieMap.entries.joinToString("; ") { "${it.key}=${it.value}" }
             Log.d(TAG, "Cookies found: $cookieMap")
-
-            // ── إعادة الجلب بالكوكيز ───────────────────────────
             if (cookieMap.isNotEmpty()) {
                 val withCookies = fetchHtml(serverUrl, referer ?: domain, cookieHeader)
                 if (!withCookies.isNullOrBlank() && withCookies.length >= rawHtml.length) {
                     rawHtml = withCookies
                 }
             }
-
-            // ── فك كل طبقات التشفير ────────────────────────────
             val unpacked = extractLogic(rawHtml)
             if (unpacked.length > rawHtml.length) {
                 Log.d(TAG, "Unpacked content expanded: ${rawHtml.length} → ${unpacked.length}")
             }
-
-            // ── ترجمات ─────────────────────────────────────────
             safeRun { extractSubtitles(unpacked, domain, subtitleCallback) }
-
-            // ── جمع روابط الفيديو ──────────────────────────────
             val videoLinks = findVideoLinks(unpacked)
                 .map { fixUrl(it, domain) }
                 .filter { it.isNotBlank() && (it.startsWith("http") || it.startsWith("/")) }
                 .distinct()
 
             Log.d(TAG, "Candidate video links (${videoLinks.size}): ${videoLinks.take(10)}")
-
-            // ── جرب /dl?op=view4 إذا وُجد file_code ─────────────
             val extraLinks = safeRunResult { tryDlEndpoint(rawHtml, serverUrl, domain, cookieHeader) } ?: emptyList()
             val allLinks = (videoLinks + extraLinks).distinct()
 
@@ -93,7 +75,6 @@ object UniversalExtractor {
                 val ok = verifyUrl(finalUrl, verifyHeaders)
                 if (!ok) {
                     Log.d(TAG, "Verify failed for: $finalUrl")
-                    // جرّب UA بديل مرة واحدة
                     val altHeaders = verifyHeaders + mapOf("User-Agent" to FALLBACK_UA)
                     if (!verifyUrl(finalUrl, altHeaders)) continue
                 }
@@ -150,10 +131,6 @@ object UniversalExtractor {
             false
         }
     }
-
-    // ═══════════════════════════════════════════════════════════════
-    //  2) مساعدات الشبكة
-    // ═══════════════════════════════════════════════════════════════
     private suspend fun fetchHtml(
         url: String,
         referer: String,
@@ -194,10 +171,6 @@ object UniversalExtractor {
             r.code in listOf(200, 206, 301, 302, 304)
         } ?: false
     }
-
-    // ═══════════════════════════════════════════════════════════════
-    //  3) استخراج الكوكيز من HTML
-    // ═══════════════════════════════════════════════════════════════
     private fun extractCookiesFromHtml(html: String): Map<String, String> {
         val result = mutableMapOf<String, String>()
         val patterns = listOf(
@@ -214,10 +187,6 @@ object UniversalExtractor {
         }
         return result
     }
-
-    // ═══════════════════════════════════════════════════════════════
-    //  4) فك Packer (Dean Edwards) — نسخة موسّعة
-    // ═══════════════════════════════════════════════════════════════
     private fun deobfuscatePacker(packed: String): String {
         return try {
             val packerRegex = Regex(
@@ -262,10 +231,6 @@ object UniversalExtractor {
             ""
         }
     }
-
-    // ═══════════════════════════════════════════════════════════════
-    //  5) فك كل طبقات التشفير (Packer + JSON unescape + URL decode)
-    // ═══════════════════════════════════════════════════════════════
     private fun extractLogic(html: String): String {
         var current = html
         var iter = 0
@@ -289,20 +254,12 @@ object UniversalExtractor {
             if (unpacked.isBlank()) break
             current = current.substring(0, startIdx) + unpacked + current.substring(min(current.length, endIdx + endLen))
         }
-
-        // فك \/ و \u002F
         current = current.replace("\\/", "/").replace("\\u002F", "/").replace("\\u002f", "/")
 
         return current
     }
-
-    // ═══════════════════════════════════════════════════════════════
-    //  6) استخراج روابط الفيديو — شامل
-    // ═══════════════════════════════════════════════════════════════
     private fun findVideoLinks(text: String): List<String> {
         val found = LinkedHashSet<String>()
-
-        // (أ) أي كائن JS يحتوي مفاتيح hls/file/stream
         val objectJsonRegex = Regex(
             """(?:var|let|const)\s+\w+\s*=\s*(\{[^{}]*(?:hls|m3u8|mp4|stream|file)[^{}]*\})""",
             RegexOption.IGNORE_CASE
@@ -317,8 +274,6 @@ object UniversalExtractor {
                 }
             }
         }
-
-        // (ب) innerHTML = 'a' + 'b'
         Regex("""getElementById\(['"][^'"]+['"]\)\.innerHTML\s*=\s*['"]([^'"]+)['"]\s*\+\s*\(?['"]([^'"]+)['"]\)?""")
             .find(text)?.let { m ->
                 var direct = m.groupValues[1] + m.groupValues[2]
@@ -326,37 +281,23 @@ object UniversalExtractor {
                 if (!direct.contains("&stream=")) direct += "&stream=1"
                 if (looksLikeVideoUrl(direct)) found.add(direct)
             }
-
-        // (ج) file/source/src: '...'
         Regex("""(?:file|sources?|src|url|stream)\s*[:=]\s*\[?\s*["']([^"']+\.(?:m3u8|mp4|txt|php)[^"']*)["']""", RegexOption.IGNORE_CASE)
             .findAll(text).forEach { m ->
                 val u = cleanUrl(m.groupValues[1])
                 if (looksLikeVideoUrl(u)) found.add(u)
             }
-
-        // (د) m3u8 مباشر
         Regex("""(https?:[^\s"'<>]+?\.m3u8[^\s"'<>?]*(?:\?[^\s"'<>]*)?)""")
             .findAll(text).forEach { m -> found.add(cleanUrl(m.groupValues[1])) }
-
-        // (هـ) mp4 مباشر
         Regex("""(https?:[^\s"'<>]+?\.mp4[^\s"'<>?]*(?:\?[^\s"'<>]*)?)""")
             .findAll(text).forEach { m -> found.add(cleanUrl(m.groupValues[1])) }
-
-        // (و) txt (مثل m3u8 متخفّي)
         Regex("""(https?:[^\s"'<>]+?/(?:hls|stream|index)[^\s"'<>]*\.txt[^\s"'<>]*)""", RegexOption.IGNORE_CASE)
             .findAll(text).forEach { m -> found.add(cleanUrl(m.groupValues[1])) }
-
-        // (ز) روابط نسبية تنتهي بـ m3u8
         Regex("""["'](/[^"']+\.m3u8[^"']*)["']""").findAll(text).forEach { m ->
             found.add(m.groupValues[1].trim())
         }
 
         return found.toList()
     }
-
-    // ═══════════════════════════════════════════════════════════════
-    //  7) محاولة /dl?op=view4 (نمط hgcloud)
-    // ═══════════════════════════════════════════════════════════════
     private suspend fun tryDlEndpoint(
         html: String,
         baseUrl: String,
@@ -390,10 +331,6 @@ object UniversalExtractor {
         }
         return results.distinct()
     }
-
-    // ═══════════════════════════════════════════════════════════════
-    //  8) الترجمات
-    // ═══════════════════════════════════════════════════════════════
     private fun extractSubtitles(text: String, domain: String, cb: (SubtitleFile) -> Unit) {
         val patterns = listOf(
             """["'](?:file|src|url)["']?\s*:\s*["']([^"']+\.(?:vtt|srt)[^"']*)["']""",
@@ -418,10 +355,6 @@ object UniversalExtractor {
             }
         }
     }
-
-    // ═══════════════════════════════════════════════════════════════
-    //  9) جودة + مساعدات
-    // ═══════════════════════════════════════════════════════════════
     private fun parseQualityFromUrl(url: String): Pair<Int, String> {
         val lower = url.lowercase()
         return when {
