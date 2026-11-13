@@ -3,27 +3,24 @@ package com.egydead
 import android.util.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URL
+import java.net.URLDecoder
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.min
 
 object UniversalExtractor {
     private const val TAG = "UniversalExtractor"
-    private const val DEFAULT_UA = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    private const val DEFAULT_UA =
+        "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    private const val FALLBACK_UA =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 
-    private fun fixUrl(url: String, baseDomain: String = ""): String {
-        val trimmed = url.trim()
-        return when {
-            trimmed.startsWith("//") -> "https:$trimmed"
-            trimmed.startsWith("/") && baseDomain.isNotBlank() -> "${baseDomain.trimEnd('/')}$trimmed"
-            else -> trimmed
-        }
-    }
-
-    /**
-     * الدالة العامة لاستخراج أي مشغل أو Iframe مجهول
-     */
+    // ═══════════════════════════════════════════════════════════════
+    //  1) نقطة الدخول العامة
+    // ═══════════════════════════════════════════════════════════════
     suspend fun extract(
         url: String,
         referer: String? = null,
@@ -32,225 +29,453 @@ object UniversalExtractor {
     ): Boolean {
         return try {
             val serverUrl = fixUrl(url)
-            val uri = URL(serverUrl)
+            if (serverUrl.isBlank()) return false
+
+            val uri = runCatching { URL(serverUrl) }.getOrNull() ?: return false
             val domain = "${uri.protocol}://${uri.host}/"
             val serverName = uri.host.replace("www.", "").substringBefore(".")
 
             val emittedUrls = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
-            val deduplicatedCallback: (ExtractorLink) -> Unit = { link ->
-                if (emittedUrls.add(link.url.trim())) {
-                    callback(link)
+            val dedup: (ExtractorLink) -> Unit = { link ->
+                val key = normalizeForDedup(link.url)
+                if (emittedUrls.add(key)) callback(link)
+            }
+
+            // ── جلب الصفحة الرئيسية ────────────────────────────
+            var rawHtml = fetchHtml(serverUrl, referer ?: domain) ?: return false
+
+            // ── استخراج الكوكيز من JS (file_id, aff, ref_url) ──
+            val cookieMap = extractCookiesFromHtml(rawHtml)
+            val cookieHeader = cookieMap.entries.joinToString("; ") { "${it.key}=${it.value}" }
+            Log.d(TAG, "Cookies found: $cookieMap")
+
+            // ── إعادة الجلب بالكوكيز ───────────────────────────
+            if (cookieMap.isNotEmpty()) {
+                val withCookies = fetchHtml(serverUrl, referer ?: domain, cookieHeader)
+                if (!withCookies.isNullOrBlank() && withCookies.length >= rawHtml.length) {
+                    rawHtml = withCookies
                 }
             }
 
-            val headers = mapOf(
-                "Referer" to (referer ?: domain),
-                "User-Agent" to DEFAULT_UA,
-                "Accept" to "*/*"
-            )
-            val response = app.get(serverUrl, headers = headers, timeout = 20)
-            if (response.code != 200) return false
+            // ── فك كل طبقات التشفير ────────────────────────────
+            val unpacked = extractLogic(rawHtml)
+            if (unpacked.length > rawHtml.length) {
+                Log.d(TAG, "Unpacked content expanded: ${rawHtml.length} → ${unpacked.length}")
+            }
 
-            val rawHtml = response.text
-            val unpackedContent = extractLogic(rawHtml)
-            extractSubtitles(unpackedContent, domain, subtitleCallback)
-            val videoLinks = findVideoLinks(unpackedContent)
+            // ── ترجمات ─────────────────────────────────────────
+            safeRun { extractSubtitles(unpacked, domain, subtitleCallback) }
+
+            // ── جمع روابط الفيديو ──────────────────────────────
+            val videoLinks = findVideoLinks(unpacked)
+                .map { fixUrl(it, domain) }
+                .filter { it.isNotBlank() && (it.startsWith("http") || it.startsWith("/")) }
+                .distinct()
+
+            Log.d(TAG, "Candidate video links (${videoLinks.size}): ${videoLinks.take(10)}")
+
+            // ── جرب /dl?op=view4 إذا وُجد file_code ─────────────
+            val extraLinks = safeRunResult { tryDlEndpoint(rawHtml, serverUrl, domain, cookieHeader) } ?: emptyList()
+            val allLinks = (videoLinks + extraLinks).distinct()
+
             var extractedAny = false
 
-            for (videoLink in videoLinks) {
-                val finalVideoUrl = fixUrl(videoLink, domain)
-                val isHls = finalVideoUrl.contains(".m3u8") || finalVideoUrl.contains(".txt")
+            for (rawLink in allLinks) {
+                val finalUrl = fixUrl(rawLink, domain)
+                if (!finalUrl.startsWith("http")) continue
 
-                val verifyHeaders = mapOf(
-                    "Referer" to domain,
-                    "Origin" to domain.removeSuffix("/"),
-                    "User-Agent" to DEFAULT_UA
-                )
-                val check = app.get(finalVideoUrl, headers = verifyHeaders, timeout = 10)
-                if (check.code == 200) {
-                    if (isHls) {
-                        val m3u8Links = runCatching {
-                            M3u8Helper.generateM3u8(
-                                source = serverName,
-                                streamUrl = finalVideoUrl,
-                                referer = domain,
-                                headers = verifyHeaders,
-                                name = serverName
-                            )
-                        }.getOrNull()
+                val isHls = isHlsUrl(finalUrl)
+                val isVideo = isDirectVideo(finalUrl)
 
-                        if (!m3u8Links.isNullOrEmpty()) {
-                            m3u8Links.forEach { deduplicatedCallback(it) }
-                            extractedAny = true
-                        } else {
-                            val (qualityVal, qualityName) = parseQualityFromUrl(finalVideoUrl)
-                            deduplicatedCallback(
-                                newExtractorLink(
-                                    source = serverName,
-                                    name = "$serverName $qualityName".trim(),
-                                    url = finalVideoUrl,
-                                    type = ExtractorLinkType.M3U8
-                                ) {
-                                    this.referer = domain
-                                    this.quality = qualityVal
-                                    this.headers = verifyHeaders
-                                }
-                            )
-                            extractedAny = true
-                        }
-                    } else {
-                        val (qualityVal, qualityName) = parseQualityFromUrl(finalVideoUrl)
-                        deduplicatedCallback(
-                            newExtractorLink(
-                                source = serverName,
-                                name = "$serverName [$qualityName]",
-                                url = finalVideoUrl,
-                                type = ExtractorLinkType.VIDEO
-                            ) {
-                                this.referer = domain
-                                this.quality = qualityVal
-                                this.headers = verifyHeaders
-                            }
+                if (!isHls && !isVideo) continue
+
+                val verifyHeaders = buildVerifyHeaders(domain, finalUrl, cookieHeader)
+                val ok = verifyUrl(finalUrl, verifyHeaders)
+                if (!ok) {
+                    Log.d(TAG, "Verify failed for: $finalUrl")
+                    // جرّب UA بديل مرة واحدة
+                    val altHeaders = verifyHeaders + mapOf("User-Agent" to FALLBACK_UA)
+                    if (!verifyUrl(finalUrl, altHeaders)) continue
+                }
+
+                if (isHls) {
+                    val m3u8Links = safeRunResult {
+                        M3u8Helper.generateM3u8(
+                            source = serverName,
+                            streamUrl = finalUrl,
+                            referer = domain,
+                            headers = verifyHeaders,
+                            name = serverName
                         )
+                    }.orEmpty()
+
+                    if (m3u8Links.isNotEmpty()) {
+                        m3u8Links.forEach(dedup)
+                        extractedAny = true
+                    } else {
+                        val (q, qName) = parseQualityFromUrl(finalUrl)
+                        dedup(newExtractorLink(
+                            source = serverName,
+                            name = "$serverName $qName".trim(),
+                            url = finalUrl,
+                            type = ExtractorLinkType.M3U8
+                        ) {
+                            this.referer = domain
+                            this.quality = q
+                            this.headers = verifyHeaders
+                            this.origin = domain.removeSuffix("/")
+                        })
                         extractedAny = true
                     }
+                } else {
+                    val (q, qName) = parseQualityFromUrl(finalUrl)
+                    dedup(newExtractorLink(
+                        source = serverName,
+                        name = "$serverName [$qName]",
+                        url = finalUrl,
+                        type = ExtractorLinkType.VIDEO
+                    ) {
+                        this.referer = domain
+                        this.quality = q
+                        this.headers = verifyHeaders
+                        this.origin = domain.removeSuffix("/")
+                    })
+                    extractedAny = true
                 }
             }
 
             extractedAny
         } catch (e: Exception) {
-            Log.e(TAG, "Extraction failed for $url: ${e.message}")
+            Log.e(TAG, "Extraction failed for $url: ${e.message}", e)
             false
         }
     }
 
-    /**
-     * خوارزمية فك تشفير Dean Edwards Packer
-     */
+    // ═══════════════════════════════════════════════════════════════
+    //  2) مساعدات الشبكة
+    // ═══════════════════════════════════════════════════════════════
+    private suspend fun fetchHtml(
+        url: String,
+        referer: String,
+        cookie: String = ""
+    ): String? {
+        val h = mutableMapOf(
+            "Referer" to referer,
+            "User-Agent" to DEFAULT_UA,
+            "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language" to "en-US,en;q=0.9,ar;q=0.8"
+        )
+        if (cookie.isNotBlank()) h["Cookie"] = cookie
+        return safeRunResult {
+            val r = app.get(url, headers = h, timeout = 20)
+            if (r.code in 200..399) r.text else null
+        }
+    }
+
+    private fun buildVerifyHeaders(domain: String, finalUrl: String, cookie: String): Map<String, String> {
+        val map = mutableMapOf(
+            "Referer" to domain,
+            "Origin" to domain.removeSuffix("/"),
+            "User-Agent" to DEFAULT_UA,
+            "Accept" to "*/*",
+            "Accept-Language" to "en-US,en;q=0.9",
+            "Sec-Fetch-Dest" to "empty",
+            "Sec-Fetch-Mode" to "cors",
+            "Sec-Fetch-Site" to "cross-site",
+            "Range" to "bytes=0-"
+        )
+        if (cookie.isNotBlank()) map["Cookie"] = cookie
+        return map
+    }
+
+    private suspend fun verifyUrl(url: String, headers: Map<String, String>): Boolean {
+        return safeRunResult {
+            val r = app.get(url, headers = headers, timeout = 12, allowRedirects = true)
+            r.code in listOf(200, 206, 301, 302, 304)
+        } ?: false
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  3) استخراج الكوكيز من HTML
+    // ═══════════════════════════════════════════════════════════════
+    private fun extractCookiesFromHtml(html: String): Map<String, String> {
+        val result = mutableMapOf<String, String>()
+        val patterns = listOf(
+            """\$\.cookie\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]*)['"]""",
+            """document\.cookie\s*=\s*['"]([^'"=]+)=([^;'"]+)""",
+            """setCookie\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]*)['"]"""
+        )
+        for (p in patterns) {
+            Regex(p).findAll(html).forEach { m ->
+                if (m.groupValues.size >= 3) {
+                    result[m.groupValues[1]] = m.groupValues[2]
+                }
+            }
+        }
+        return result
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  4) فك Packer (Dean Edwards) — نسخة موسّعة
+    // ═══════════════════════════════════════════════════════════════
     private fun deobfuscatePacker(packed: String): String {
         return try {
-            val packerRegex = """eval\(function\(p,a,c,k,e,[rd]\)\{.*?\}\((['"])(.*?)\1\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])(.*?)\5\.split\(['"]\|['"]\)""".toRegex()
+            val packerRegex = Regex(
+                """eval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*(?:,\s*[a-zA-Z])?\s*\)\s*\{.*?\}\s*\(\s*(['"])(.*?)\1\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])(.*?)\5\.split\s*\(\s*(['"])\|?\7\s*\)""",
+                RegexOption.DOT_MATCHES_ALL
+            )
             val match = packerRegex.find(packed) ?: return ""
-            val (_, p, aStr, cStr, _, kStr) = match.destructured
-            val a = aStr.toIntOrNull() ?: return ""
-            val c = cStr.toIntOrNull() ?: return ""
-            val k = kStr.split('|')
+            val p = match.groupValues[2]
+            val a = match.groupValues[3].toIntOrNull() ?: return ""
+            val c = match.groupValues[4].toIntOrNull() ?: return ""
+            val k = match.groupValues[6].split('|')
 
-            fun getBaseNString(num: Int, base: Int): String {
-                val chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                if (base <= 36) return num.toString(base)
-                var n = num
-                var res = ""
-                while (n > 0) {
-                    res = chars[n % base] + res
-                    n /= base
+            fun toBaseN(num: Int, base: Int): String {
+                if (base == 36) return num.toString(36)
+                if (base == 62) {
+                    val chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                    if (num == 0) return "0"
+                    var n = num
+                    val sb = StringBuilder()
+                    while (n > 0) { sb.append(chars[n % 62]); n /= 62 }
+                    return sb.reverse().toString()
                 }
-                return if (res.isEmpty()) "0" else res
+                if (num == 0) return "0"
+                var n = num
+                val sb = StringBuilder()
+                while (n > 0) { sb.append(Character.forDigit(n % base, base)); n /= base }
+                return sb.reverse().toString()
             }
 
-            val dict = mutableMapOf<String, String>()
+            val dict = HashMap<String, String>(c * 2)
             for (i in 0 until c) {
-                val key = getBaseNString(i, a)
+                val key = toBaseN(i, a)
                 val value = if (i < k.size && k[i].isNotEmpty()) k[i] else key
                 dict[key] = value
             }
 
-            val wordRegex = """\b\w+\b""".toRegex()
-            wordRegex.replace(p) { matchResult ->
-                val word = matchResult.value
-                dict[word] ?: word
+            Regex("""\b\w+\b""").replace(p) { mr ->
+                dict[mr.value] ?: mr.value
             }
         } catch (e: Exception) {
+            Log.w(TAG, "Packer deobfuscation failed: ${e.message}")
             ""
         }
     }
 
-    private fun extractLogic(htmlText: String): String {
-        return try {
-            val startMarker = "eval(function(p,a,c,k,e,"
-            val startIdx = htmlText.indexOf(startMarker)
-            if (startIdx != -1) {
-                val endMarker = ".split('|')))"
-                val endIdx = htmlText.indexOf(endMarker, startIdx)
-                if (endIdx != -1) {
-                    val packedJs = htmlText.substring(startIdx, endIdx + endMarker.length)
-                    val unpacked = deobfuscatePacker(packedJs)
-                    if (unpacked.isNotEmpty()) return unpacked
+    // ═══════════════════════════════════════════════════════════════
+    //  5) فك كل طبقات التشفير (Packer + JSON unescape + URL decode)
+    // ═══════════════════════════════════════════════════════════════
+    private fun extractLogic(html: String): String {
+        var current = html
+        var iter = 0
+        while (iter < 5) {
+            iter++
+            val startIdx = current.indexOf("eval(function(p,a,c,k,e,")
+            if (startIdx == -1) break
+            val endMarkers = listOf(".split('|')))", ".split('|'))", ".split(\"|\")))")
+            var endIdx = -1
+            var endLen = 0
+            for (em in endMarkers) {
+                val i = current.indexOf(em, startIdx)
+                if (i != -1 && (endIdx == -1 || i < endIdx)) {
+                    endIdx = i
+                    endLen = em.length
                 }
             }
-            htmlText
-        } catch (e: Exception) {
-            htmlText
+            if (endIdx == -1) break
+            val packed = current.substring(startIdx, endIdx + endLen)
+            val unpacked = deobfuscatePacker(packed)
+            if (unpacked.isBlank()) break
+            current = current.substring(0, startIdx) + unpacked + current.substring(min(current.length, endIdx + endLen))
         }
+
+        // فك \/ و \u002F
+        current = current.replace("\\/", "/").replace("\\u002F", "/").replace("\\u002f", "/")
+
+        return current
     }
 
-    /**
-     * البحث بالـ Regex عن كل أشكال روابط الفيديو المباشرة والـ JSON
-     */
+    // ═══════════════════════════════════════════════════════════════
+    //  6) استخراج روابط الفيديو — شامل
+    // ═══════════════════════════════════════════════════════════════
     private fun findVideoLinks(text: String): List<String> {
         val found = LinkedHashSet<String>()
-        Regex("""(?:var|let|const)\s+links\s*=\s*(\{[^;]+\})""").find(text)?.groupValues?.get(1)?.let { rawJson ->
-            runCatching {
-                val obj = JSONObject(rawJson)
-                for (k in listOf("hls4", "hls2", "hls3", "hls", "file", "stream")) {
-                    val l = obj.optString(k).trim().replace("\\/", "/")
-                    if (l.startsWith("http")) found.add(l)
+
+        // (أ) أي كائن JS يحتوي مفاتيح hls/file/stream
+        val objectJsonRegex = Regex(
+            """(?:var|let|const)\s+\w+\s*=\s*(\{[^{}]*(?:hls|m3u8|mp4|stream|file)[^{}]*\})""",
+            RegexOption.IGNORE_CASE
+        )
+        objectJsonRegex.findAll(text).forEach { m ->
+            safeRun {
+                val obj = JSONObject(m.groupValues[1])
+                for (key in obj.keys()) {
+                    val v = obj.optString(key).trim()
+                    val u = cleanUrl(v)
+                    if (looksLikeVideoUrl(u)) found.add(u)
                 }
             }
         }
-        Regex("""getElementById\(['"][^'"]+['"]\)\.innerHTML\s*=\s*['"]([^'"]+)['"]\s*\+\s*\(?['"]([^'"]+)['"]\)?""").find(text)?.let { m ->
-            var direct = m.groupValues[1] + m.groupValues[2]
-            if (direct.startsWith("//")) direct = "https:$direct"
-            if (!direct.contains("&stream=")) direct += "&stream=1"
-            found.add(direct)
-        }
-        val fileRegex = """(?:file|sources?|src)\s*[:=]\s*\[?["']([^"']+\.(?:m3u8|mp4)[^"']*)["']\]?""".toRegex(RegexOption.IGNORE_CASE)
-        fileRegex.findAll(text).forEach { m ->
-            var l = m.groupValues[1].trim().replace("\\/", "/")
-            if (l.startsWith("//")) l = "https:$l"
-            if (l.startsWith("http")) found.add(l)
-        }
-        val m3u8Regex = """(https?://[^\s"\'<>]+?\.m3u8[^\s"\'<>?]*(?:\?[^\s"\'<>]*)?)""".toRegex()
-        m3u8Regex.findAll(text).forEach { m ->
-            found.add(m.groupValues[1].trim().replace("\\/", "/"))
-        }
-        val mp4Regex = """(https?://[^\s"\'<>]+?\.mp4[^\s"\'<>?]*(?:\?[^\s"\'<>]*)?)""".toRegex()
-        mp4Regex.findAll(text).forEach { m ->
-            found.add(m.groupValues[1].trim().replace("\\/", "/"))
+
+        // (ب) innerHTML = 'a' + 'b'
+        Regex("""getElementById\(['"][^'"]+['"]\)\.innerHTML\s*=\s*['"]([^'"]+)['"]\s*\+\s*\(?['"]([^'"]+)['"]\)?""")
+            .find(text)?.let { m ->
+                var direct = m.groupValues[1] + m.groupValues[2]
+                if (direct.startsWith("//")) direct = "https:$direct"
+                if (!direct.contains("&stream=")) direct += "&stream=1"
+                if (looksLikeVideoUrl(direct)) found.add(direct)
+            }
+
+        // (ج) file/source/src: '...'
+        Regex("""(?:file|sources?|src|url|stream)\s*[:=]\s*\[?\s*["']([^"']+\.(?:m3u8|mp4|txt|php)[^"']*)["']""", RegexOption.IGNORE_CASE)
+            .findAll(text).forEach { m ->
+                val u = cleanUrl(m.groupValues[1])
+                if (looksLikeVideoUrl(u)) found.add(u)
+            }
+
+        // (د) m3u8 مباشر
+        Regex("""(https?:[^\s"'<>]+?\.m3u8[^\s"'<>?]*(?:\?[^\s"'<>]*)?)""")
+            .findAll(text).forEach { m -> found.add(cleanUrl(m.groupValues[1])) }
+
+        // (هـ) mp4 مباشر
+        Regex("""(https?:[^\s"'<>]+?\.mp4[^\s"'<>?]*(?:\?[^\s"'<>]*)?)""")
+            .findAll(text).forEach { m -> found.add(cleanUrl(m.groupValues[1])) }
+
+        // (و) txt (مثل m3u8 متخفّي)
+        Regex("""(https?:[^\s"'<>]+?/(?:hls|stream|index)[^\s"'<>]*\.txt[^\s"'<>]*)""", RegexOption.IGNORE_CASE)
+            .findAll(text).forEach { m -> found.add(cleanUrl(m.groupValues[1])) }
+
+        // (ز) روابط نسبية تنتهي بـ m3u8
+        Regex("""["'](/[^"']+\.m3u8[^"']*)["']""").findAll(text).forEach { m ->
+            found.add(m.groupValues[1].trim())
         }
 
         return found.toList()
     }
 
-    private fun extractSubtitles(text: String, domain: String, subtitleCallback: (SubtitleFile) -> Unit) {
-        val subRegex = """["'](?:file)?["']?\s*:\s*["']([^"']+\.(?:vtt|srt)[^"']*)["']""".toRegex()
-        subRegex.findAll(text).forEach { match ->
-            var subUrl = match.groupValues[1].trim().replace("\\/", "/")
-            if (subUrl.startsWith("//")) subUrl = "https:$subUrl"
-            if (!subUrl.startsWith("http")) subUrl = URL(URL(domain), subUrl).toString()
+    // ═══════════════════════════════════════════════════════════════
+    //  7) محاولة /dl?op=view4 (نمط hgcloud)
+    // ═══════════════════════════════════════════════════════════════
+    private suspend fun tryDlEndpoint(
+        html: String,
+        baseUrl: String,
+        domain: String,
+        cookie: String
+    ): List<String> {
+        val fileId = Regex("""\$\.cookie\(['"]file_id['"]\s*,\s*['"]([^'"]+)['"]""")
+            .find(html)?.groupValues?.get(1) ?: return emptyList()
 
-            subtitleCallback(
-                SubtitleFile(
-                    lang = "Arabic",
-                    url = subUrl
-                )
-            )
+        val results = mutableListOf<String>()
+        val tries = listOf(
+            "${domain}dl?op=view4&file_code=$fileId&stream=1",
+            "${domain}dl?op=view4&file_code=$fileId",
+            "${domain}dl?op=view&file_code=$fileId"
+        )
+        for (u in tries) {
+            val body = safeRunResult {
+                val r = app.get(u, headers = mapOf(
+                    "Referer" to baseUrl,
+                    "User-Agent" to DEFAULT_UA,
+                    "Accept" to "*/*",
+                    "X-Requested-With" to "XMLHttpRequest",
+                    "Cookie" to cookie
+                ), timeout = 12)
+                if (r.code == 200) r.text else null
+            }
+            if (!body.isNullOrBlank()) {
+                results += findVideoLinks(body)
+                if (results.isNotEmpty()) break
+            }
         }
+        return results.distinct()
     }
 
-    private fun parseQualityFromUrl(url: String): Pair<Int, String> {
-        val lower = url.lowercase()
-        return when {
-            lower.contains("2160") || lower.contains("4k") -> Pair(Qualities.P2160.value, "4K")
-            lower.contains("1440") || lower.contains("2k") -> Pair(Qualities.P1440.value, "2K")
-            lower.contains("1080") || lower.contains("fhd") -> Pair(Qualities.P1080.value, "1080p")
-            lower.contains("720") || lower.contains("hd") -> Pair(Qualities.P720.value, "720p")
-            lower.contains("480") || lower.contains("sd") -> Pair(Qualities.P480.value, "480p")
-            lower.contains("360") -> Pair(Qualities.P360.value, "360p")
-            else -> {
-                val q = getQualityFromName(lower)
-                if (q > 0) Pair(q, "${q}p") else Pair(Qualities.P720.value, "720p")
+    // ═══════════════════════════════════════════════════════════════
+    //  8) الترجمات
+    // ═══════════════════════════════════════════════════════════════
+    private fun extractSubtitles(text: String, domain: String, cb: (SubtitleFile) -> Unit) {
+        val patterns = listOf(
+            """["'](?:file|src|url)["']?\s*:\s*["']([^"']+\.(?:vtt|srt)[^"']*)["']""",
+            """(https?:[^\s"'<>]+\.(?:vtt|srt)[^\s"'<>]*)"""
+        )
+        for (p in patterns) {
+            Regex(p, RegexOption.IGNORE_CASE).findAll(text).forEach { m ->
+                val raw = m.groupValues[1].trim()
+                if (raw.isEmpty()) return@forEach
+                val subUrl = when {
+                    raw.startsWith("//") -> "https:$raw"
+                    raw.startsWith("http") -> raw
+                    raw.startsWith("/") -> "${domain.trimEnd('/')}$raw"
+                    else -> safeRunResult { URL(URL(domain), raw).toString() } ?: raw
+                }
+                val lang = when {
+                    subUrl.contains("ar", true) -> "Arabic"
+                    subUrl.contains("en", true) -> "English"
+                    else -> "Arabic"
+                }
+                safeRun { cb(SubtitleFile(lang, subUrl)) }
             }
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  9) جودة + مساعدات
+    // ═══════════════════════════════════════════════════════════════
+    private fun parseQualityFromUrl(url: String): Pair<Int, String> {
+        val lower = url.lowercase()
+        return when {
+            lower.contains("2160") || lower.contains("4k")   -> Qualities.P2160.value to "4K"
+            lower.contains("1440") || lower.contains("2k")   -> Qualities.P1440.value to "2K"
+            lower.contains("1080") || lower.contains("fhd")  -> Qualities.P1080.value to "1080p"
+            lower.contains("720")  || lower.contains("hd")   -> Qualities.P720.value  to "720p"
+            lower.contains("480")  || lower.contains("sd")   -> Qualities.P480.value  to "480p"
+            lower.contains("360")                            -> Qualities.P360.value  to "360p"
+            else -> {
+                val q = getQualityFromName(lower)
+                if (q > 0) q to "${q}p" else Qualities.P720.value to "720p"
+            }
+        }
+    }
+
+    private fun isHlsUrl(u: String): Boolean {
+        val l = u.lowercase()
+        return l.contains(".m3u8") ||
+               (l.contains(".txt") && (l.contains("hls") || l.contains("index") || l.contains("master")))
+    }
+
+    private fun isDirectVideo(u: String): Boolean {
+        val l = u.lowercase()
+        return l.contains(".mp4") || l.contains(".mkv") || l.contains(".webm") || l.contains(".avi")
+    }
+
+    private fun looksLikeVideoUrl(u: String): Boolean {
+        if (u.isBlank()) return false
+        val l = u.lowercase()
+        return l.startsWith("http") || l.startsWith("/") || l.startsWith("//")
+    }
+
+    private fun cleanUrl(u: String): String {
+        return u.trim()
+            .replace("\\/", "/")
+            .replace("\\u002F", "/")
+            .replace("\\u002f", "/")
+            .replace("&amp;", "&")
+    }
+
+    private fun normalizeForDedup(u: String): String {
+        return u.substringBefore("#").trim()
+    }
+
+    private fun fixUrl(url: String, baseDomain: String = ""): String {
+        var t = url.trim()
+        if (t.startsWith("//")) return "https:$t"
+        if (t.startsWith("/") && baseDomain.isNotBlank()) return "${baseDomain.trimEnd('/')}$t"
+        return t
+    }
+
+    private inline fun <T> safeRun(block: () -> T?): T? =
+        try { block() } catch (e: Exception) { Log.w(TAG, "safeRun: ${e.message}"); null }
+
+    private inline fun <T> safeRunResult(block: () -> T?): T? = safeRun(block)
 }
