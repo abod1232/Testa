@@ -638,27 +638,19 @@ class EgyDead(val context: Context) : MainAPI() {
     if (!allSeenLinks.add(normalized)) return false
 
     var isLoaded = false
-
-    // 1. فحص واستخراج سيرفر Megamax الخاص بـ EgyDead أولاً
     if (normalized.contains("megamax") || normalized.contains("share4max") || normalized.contains("/mirror/") || normalized.contains("/iframe/")) {
         isLoaded = processMegamax(normalized, watchPageUrl, subtitleCallback, callback)
     }
-
-    // 2. تجربة مستخرجات Cloudstream الافتراضية
     if (!isLoaded) {
         try {
             isLoaded = loadExtractor(normalized, data, subtitleCallback, callback)
         } catch (ex: Exception) {}
     }
-
-    // 3. محاولة ثانية مع Megamax إذا كان الرابط الداخلي يفتحه
     if (!isLoaded) {
         try {
             isLoaded = processMegamax(normalized, watchPageUrl, subtitleCallback, callback)
         } catch (ex: Exception) {}
     }
-
-    // 4. (الخطة الشاملة): إرسال أي رابط متبقي لم يُستخرج إلى UniversalExtractor
     if (!isLoaded) {
         try {
             isLoaded = UniversalExtractor.extract(normalized, watchPageUrl, subtitleCallback, callback)
