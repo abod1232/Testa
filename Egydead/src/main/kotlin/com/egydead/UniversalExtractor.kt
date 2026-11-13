@@ -104,7 +104,7 @@ object UniversalExtractor {
                             this.referer = domain
                             this.quality = q
                             this.headers = verifyHeaders
-                            this.origin = domain.removeSuffix("/")
+                            
                         })
                         extractedAny = true
                     }
@@ -119,7 +119,7 @@ object UniversalExtractor {
                         this.referer = domain
                         this.quality = q
                         this.headers = verifyHeaders
-                        this.origin = domain.removeSuffix("/")
+                        
                     })
                     extractedAny = true
                 }
