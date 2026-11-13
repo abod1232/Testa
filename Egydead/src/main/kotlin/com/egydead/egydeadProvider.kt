@@ -408,16 +408,12 @@ class EgyDead(val context: Context) : MainAPI() {
         } catch (e: Exception) {
             return null
         }
-
-        // استخراج صورة وبيانات المسلسل/الفيلم
         val seriesPoster = document.selectFirst("meta[property=og:image]")?.attr("content")
             ?: document.selectFirst("div.single-thumbnail img")?.attr("src")
         val plot = document.selectFirst("div.singleStory")?.text()?.trim()
             ?: document.selectFirst("div.extra-content p")?.text()?.trim()
         val year = document.select("div.LeftBox li:has(span:contains(السنه)) a").text().toIntOrNull()
         val tags = document.select("div.LeftBox li:has(span:contains(النوع)) a").map { it.text() }
-
-        // 1. التعامل مع الأفلام
         if (url.contains("/film/")) {
             val title = document.selectFirst("meta[property=og:title]")?.attr("content")?.trim() ?: "Movie"
             return newMovieLoadResponse(title, url, TvType.Movie, url) {
@@ -432,8 +428,6 @@ class EgyDead(val context: Context) : MainAPI() {
 
         val seriesTitle = document.selectFirst("meta[property=og:title]")?.attr("content")?.trim()
             ?.replace(Regex("""\s*(الموسم|الحلقة)\s+.*"""), "")?.trim() ?: "TV Series"
-
-        // 2. 🌟 الحل الأساسي: استخراج المواسم والحلقات من القالب الجديد السريع بطلب واحد
         val episodeNav = document.selectFirst("section.dead-changes-episode-nav")
         if (episodeNav != null) {
             val groups = episodeNav.select("div.dead-changes-episode-group")
@@ -461,7 +455,6 @@ class EgyDead(val context: Context) : MainAPI() {
                         this.season = seasonNumber
                         this.episode = episodeNumber
                         this.data = normalizedEpUrl
-                        // صورة المسلسل هي صورة الحلقة تلقائياً
                         this.posterUrl = seriesPoster
                     })
                 }
@@ -478,8 +471,6 @@ class EgyDead(val context: Context) : MainAPI() {
                 }
             }
         }
-
-        // 3. 🔄 الحل الثانوي (القديم): يتم تفعيله تلقائياً إذا فشل الحل الأول أو كانت الصفحة لقالب قديم
         var startSeasonUrl: String? = null
         if (url.contains("/episode/")) {
             val bc = document.selectFirst("div.breadcrumbs-single, div.breadcrumbs")
@@ -518,7 +509,6 @@ class EgyDead(val context: Context) : MainAPI() {
                 val eps = extractEpisodesFromSeasonDoc(sUrl, doc)
                 eps.forEach { ep ->
                     ep.season = seasonNumber
-                    // تعيين صورة الموسم أو صورة المسلسل إذا لم تكن موجودة
                     if (ep.posterUrl.isNullOrBlank()) {
                         ep.posterUrl = seasonImage ?: seriesPoster
                     }
@@ -537,8 +527,6 @@ class EgyDead(val context: Context) : MainAPI() {
                 }
             }
         }
-
-        // في حال كان المسلسل موسماً واحداً فقط
         val fallbackEpisodes = extractEpisodesFromSeasonDoc(startSeasonUrl!!, startDoc)
         fallbackEpisodes.forEach { ep ->
             if (ep.posterUrl.isNullOrBlank()) {
