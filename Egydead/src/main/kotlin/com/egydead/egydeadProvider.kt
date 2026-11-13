@@ -23,10 +23,6 @@ import kotlinx.serialization.Serializable
 import java.util.ArrayDeque
 import java.net.URL
 import java.net.URLDecoder
-
-// ==========================================
-// نماذج فك تشفير Megamax / Share4max
-// ==========================================
 @Serializable
 data class MegamaxMirror(
     @SerialName("driver") val driver: String? = null,
@@ -487,10 +483,6 @@ class EgyDead(val context: Context) : MainAPI() {
             this.plot = plotFallback
         }
     }
-
-    // ==========================================
-    // معالجة سيرفرات Megamax / Share4max
-    // ==========================================
     private suspend fun processMegamax(
         targetUrl: String,
         referer: String,
@@ -574,10 +566,6 @@ class EgyDead(val context: Context) : MainAPI() {
             false
         }
     }
-
-    // ==========================================
-    // دوال حل وفك تشفير سيرفرات HgCloud
-    // ==========================================
     private fun customB64Decode(s: String, alphabet: String): String {
         var bc = 0
         var bs = 0
@@ -803,8 +791,6 @@ class EgyDead(val context: Context) : MainAPI() {
                 val normalized = normalizeUrl(linkRaw, watchPageUrl) ?: return false
 
                 if (!allSeenLinks.add(normalized)) return false
-
-                // 🌟 فحص واستخراج الرابط الحقيقي لـ hgcloud مباشرة
                 var targetUrl = normalized
                 if (targetUrl.contains("hgcloud") || (serverName != null && serverName.contains("hgcloud", ignoreCase = true))) {
                     val resolved = resolveHgCloud(targetUrl, watchPageUrl)
@@ -815,27 +801,19 @@ class EgyDead(val context: Context) : MainAPI() {
                 }
 
                 var isLoaded = false
-
-                // 1. فحص سيرفر Megamax الخاص بـ EgyDead
                 if (targetUrl.contains("megamax") || targetUrl.contains("share4max") || targetUrl.contains("/mirror/") || targetUrl.contains("/iframe/")) {
                     isLoaded = processMegamax(targetUrl, watchPageUrl, subtitleCallback, callback)
                 }
-
-                // 2. استخدام المستخرجات العامة
                 if (!isLoaded) {
                     try {
                         isLoaded = loadExtractor(targetUrl, data, subtitleCallback, callback)
                     } catch (ex: Exception) {}
                 }
-
-                // 3. المحاولة بطريقة Megamax كخيار بديل
                 if (!isLoaded) {
                     try {
                         isLoaded = processMegamax(targetUrl, watchPageUrl, subtitleCallback, callback)
                     } catch (ex: Exception) {}
                 }
-
-                // 4. المحاولة الشاملة لفك تشفير أي مشغل مجهول عبر UniversalExtractor
                 if (!isLoaded) {
                     try {
                         isLoaded = UniversalExtractor.extract(targetUrl, watchPageUrl, subtitleCallback, callback)
