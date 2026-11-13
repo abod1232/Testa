@@ -12,6 +12,15 @@ object UniversalExtractor {
     private const val TAG = "UniversalExtractor"
     private const val DEFAULT_UA = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
+    private fun fixUrl(url: String, baseDomain: String = ""): String {
+        val trimmed = url.trim()
+        return when {
+            trimmed.startsWith("//") -> "https:$trimmed"
+            trimmed.startsWith("/") && baseDomain.isNotBlank() -> "${baseDomain.trimEnd('/')}$trimmed"
+            else -> trimmed
+        }
+    }
+
     /**
      * الدالة العامة لاستخراج أي مشغل أو Iframe مجهول
      */
@@ -39,25 +48,33 @@ object UniversalExtractor {
                 "User-Agent" to DEFAULT_UA,
                 "Accept" to "*/*"
             )
+
+            // 1. جلب كود المشغل
             val response = app.get(serverUrl, headers = headers, timeout = 20)
             if (response.code != 200) return false
 
             val rawHtml = response.text
+            // 2. فك تشفير الـ Packer JS إذا وجد
             val unpackedContent = extractLogic(rawHtml)
+
+            // 3. استخراج الترجمات إن وجدت
             extractSubtitles(unpackedContent, domain, subtitleCallback)
+
+            // 4. البحث الشامل عن الروابط بجميع الأنماط
             val videoLinks = findVideoLinks(unpackedContent)
             var extractedAny = false
 
             for (videoLink in videoLinks) {
-                val finalVideoUrl = fixUrl(videoLink)
-                if (emittedUrls.contains(finalVideoUrl.trim())) continue
-
+                val finalVideoUrl = fixUrl(videoLink, domain)
                 val isHls = finalVideoUrl.contains(".m3u8") || finalVideoUrl.contains(".txt")
+
                 val verifyHeaders = mapOf(
                     "Referer" to domain,
                     "Origin" to domain.removeSuffix("/"),
                     "User-Agent" to DEFAULT_UA
                 )
+
+                // التحقق من أن الرابط يعمل
                 val check = app.get(finalVideoUrl, headers = verifyHeaders, timeout = 10)
                 if (check.code == 200) {
                     if (isHls) {
@@ -181,6 +198,8 @@ object UniversalExtractor {
      */
     private fun findVideoLinks(text: String): List<String> {
         val found = LinkedHashSet<String>()
+
+        // 1. var links = {...}
         Regex("""(?:var|let|const)\s+links\s*=\s*(\{[^;]+\})""").find(text)?.groupValues?.get(1)?.let { rawJson ->
             runCatching {
                 val obj = JSONObject(rawJson)
@@ -190,22 +209,30 @@ object UniversalExtractor {
                 }
             }
         }
+
+        // 2. getElementById innerHTML
         Regex("""getElementById\(['"][^'"]+['"]\)\.innerHTML\s*=\s*['"]([^'"]+)['"]\s*\+\s*\(?['"]([^'"]+)['"]\)?""").find(text)?.let { m ->
             var direct = m.groupValues[1] + m.groupValues[2]
             if (direct.startsWith("//")) direct = "https:$direct"
             if (!direct.contains("&stream=")) direct += "&stream=1"
             found.add(direct)
         }
+
+        // 3. file: "..." أو sources: [...]
         val fileRegex = """(?:file|sources?|src)\s*[:=]\s*\[?["']([^"']+\.(?:m3u8|mp4)[^"']*)["']\]?""".toRegex(RegexOption.IGNORE_CASE)
         fileRegex.findAll(text).forEach { m ->
             var l = m.groupValues[1].trim().replace("\\/", "/")
             if (l.startsWith("//")) l = "https:$l"
             if (l.startsWith("http")) found.add(l)
         }
+
+        // 4. استخراج أي رابط m3u8 صريح
         val m3u8Regex = """(https?://[^\s"\'<>]+?\.m3u8[^\s"\'<>?]*(?:\?[^\s"\'<>]*)?)""".toRegex()
         m3u8Regex.findAll(text).forEach { m ->
             found.add(m.groupValues[1].trim().replace("\\/", "/"))
         }
+
+        // 5. استخراج أي رابط mp4 صريح
         val mp4Regex = """(https?://[^\s"\'<>]+?\.mp4[^\s"\'<>?]*(?:\?[^\s"\'<>]*)?)""".toRegex()
         mp4Regex.findAll(text).forEach { m ->
             found.add(m.groupValues[1].trim().replace("\\/", "/"))
