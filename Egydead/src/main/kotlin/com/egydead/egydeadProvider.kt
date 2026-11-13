@@ -414,8 +414,6 @@ class EgyDead(val context: Context) : MainAPI() {
             ?: document.selectFirst("div.extra-content p")?.text()?.trim()
         val year = document.select("div.LeftBox li:has(span:contains(السنه)) a").text().toIntOrNull()
         val tags = document.select("div.LeftBox li:has(span:contains(النوع)) a").map { it.text() }
-
-        // 1. التعامل مع الأفلام
         if (url.contains("/film/")) {
             val title = document.selectFirst("meta[property=og:title]")?.attr("content")?.trim() ?: "Movie"
             return newMovieLoadResponse(title, url, TvType.Movie, url) {
@@ -427,14 +425,10 @@ class EgyDead(val context: Context) : MainAPI() {
                 this.recommendations = parseRecommendations(document, url)
             }
         }
-
-        // 2. 🌟 التحديث الجديد: استخراج جميع الحلقات والمواسم مباشرة من الصفحة الحالية (بسرعة فائقة وبطلب واحد)
         val episodeNav = document.selectFirst("section.dead-changes-episode-nav")
         if (episodeNav != null) {
             val groups = episodeNav.select("div.dead-changes-episode-group")
             val allEpisodes = mutableListOf<CS3Episode>()
-
-            // قلب الترتيب لتبدأ من الموسم الأول بدلاً من الأخير
             groups.reversed().forEachIndexed { index, group ->
                 val groupTitle = group.selectFirst("h3")?.text()?.trim() ?: "الموسم ${index + 1}"
                 val seasonNumber = getSeasonNum(groupTitle).takeIf { it != 9999 } ?: (index + 1)
@@ -476,8 +470,6 @@ class EgyDead(val context: Context) : MainAPI() {
                 }
             }
         }
-
-        // 3. الخطة البديلة (في حال كانت صفحة موسم قديم لا تحتوي على القالب الجديد)
         var startSeasonUrl: String? = null
         if (url.contains("/episode/")) {
             val bc = document.selectFirst("div.breadcrumbs-single, div.breadcrumbs")
