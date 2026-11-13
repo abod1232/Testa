@@ -409,13 +409,15 @@ class EgyDead(val context: Context) : MainAPI() {
             return null
         }
 
-        if (url.contains("/film/")) {
-            val title = document.selectFirst("meta[property=og:title]")?.attr("content")?.trim() ?: return null
-            val poster = document.selectFirst("meta[property=og:image]")?.attr("content")
-            val plot = document.selectFirst("div.singleStory")?.text()?.trim()
-            val year = document.select("div.LeftBox li:has(span:contains(السنه)) a").text().toIntOrNull()
-            val tags = document.select("div.LeftBox li:has(span:contains(النوع)) a").map { it.text() }
+        val poster = document.selectFirst("meta[property=og:image]")?.attr("content")
+        val plot = document.selectFirst("div.singleStory")?.text()?.trim()
+            ?: document.selectFirst("div.extra-content p")?.text()?.trim()
+        val year = document.select("div.LeftBox li:has(span:contains(السنه)) a").text().toIntOrNull()
+        val tags = document.select("div.LeftBox li:has(span:contains(النوع)) a").map { it.text() }
 
+        // 1. التعامل مع الأفلام
+        if (url.contains("/film/")) {
+            val title = document.selectFirst("meta[property=og:title]")?.attr("content")?.trim() ?: "Movie"
             return newMovieLoadResponse(title, url, TvType.Movie, url) {
                 this.posterUrl = poster
                 this.posterHeaders = imageHeaders
@@ -426,11 +428,58 @@ class EgyDead(val context: Context) : MainAPI() {
             }
         }
 
-        val isEpisode = url.contains("/episode/")
-        val isSeason = url.contains("/season/")
-        var startSeasonUrl: String? = null
+        // 2. 🌟 التحديث الجديد: استخراج جميع الحلقات والمواسم مباشرة من الصفحة الحالية (بسرعة فائقة وبطلب واحد)
+        val episodeNav = document.selectFirst("section.dead-changes-episode-nav")
+        if (episodeNav != null) {
+            val groups = episodeNav.select("div.dead-changes-episode-group")
+            val allEpisodes = mutableListOf<CS3Episode>()
 
-        if (isEpisode) {
+            // قلب الترتيب لتبدأ من الموسم الأول بدلاً من الأخير
+            groups.reversed().forEachIndexed { index, group ->
+                val groupTitle = group.selectFirst("h3")?.text()?.trim() ?: "الموسم ${index + 1}"
+                val seasonNumber = getSeasonNum(groupTitle).takeIf { it != 9999 } ?: (index + 1)
+
+                val forms = group.select("div.dead-changes-episode-links form, div.dead-changes-episode-links a")
+                forms.forEachIndexed { epIdx, element ->
+                    val epUrl = if (element.tagName() == "form") element.attr("action") else element.attr("href")
+                    val normalizedEpUrl = normalizeUrl(epUrl, url) ?: return@forEachIndexed
+
+                    val btn = element.selectFirst("button")
+                    val epTitle = btn?.attr("title").takeIf { !it.isNullOrBlank() }
+                        ?: btn?.text()
+                        ?: element.text()
+                        ?: "الحلقة ${epIdx + 1}"
+
+                    val episodeNumber = getEpisodeNum(epTitle).takeIf { it != 9999 } ?: (epIdx + 1)
+
+                    allEpisodes.add(newEpisode(normalizedEpUrl) {
+                        this.name = epTitle.trim()
+                        this.season = seasonNumber
+                        this.episode = episodeNumber
+                        this.data = normalizedEpUrl
+                        this.posterUrl = poster
+                    })
+                }
+            }
+
+            if (allEpisodes.isNotEmpty()) {
+                val seriesTitle = document.selectFirst("meta[property=og:title]")?.attr("content")?.trim()
+                    ?.replace(Regex("""\s*(الموسم|الحلقة)\s+.*"""), "")?.trim() ?: "TV Series"
+
+                return newTvSeriesLoadResponse(seriesTitle, url, TvType.TvSeries, allEpisodes.distinctBy { it.data }) {
+                    this.posterUrl = poster
+                    this.posterHeaders = imageHeaders
+                    this.plot = plot
+                    this.year = year
+                    this.tags = tags
+                    this.recommendations = parseRecommendations(document, url)
+                }
+            }
+        }
+
+        // 3. الخطة البديلة (في حال كانت صفحة موسم قديم لا تحتوي على القالب الجديد)
+        var startSeasonUrl: String? = null
+        if (url.contains("/episode/")) {
             val bc = document.selectFirst("div.breadcrumbs-single, div.breadcrumbs")
             bc?.select("a")?.forEach { a ->
                 val href = a.attr("href")
@@ -438,7 +487,7 @@ class EgyDead(val context: Context) : MainAPI() {
                     startSeasonUrl = normalizeUrl(href, url)
                 }
             }
-        } else if (isSeason) {
+        } else if (url.contains("/season/")) {
             startSeasonUrl = url
         }
 
@@ -461,9 +510,8 @@ class EgyDead(val context: Context) : MainAPI() {
                 allEpisodes.addAll(eps)
             }
 
-            val seriesTitle = startDoc.selectFirst("meta[property=og:title]")?.attr("content")?.trim()?.replace(Regex("""\s*(الموسم|الحلقة)\s+.*"""), "")?.trim() ?: "TV Series"
-            val poster = startDoc.selectFirst("meta[property=og:image]")?.attr("content")
-            val plot = startDoc.selectFirst("div.singleStory")?.text()?.trim()
+            val seriesTitle = startDoc.selectFirst("meta[property=og:title]")?.attr("content")?.trim()
+                ?.replace(Regex("""\s*(الموسم|الحلقة)\s+.*"""), "")?.trim() ?: "TV Series"
 
             return newTvSeriesLoadResponse(seriesTitle, startSeasonUrl!!, TvType.TvSeries, allEpisodes) {
                 this.posterUrl = poster
@@ -474,13 +522,11 @@ class EgyDead(val context: Context) : MainAPI() {
 
         val fallbackEpisodes = extractEpisodesFromSeasonDoc(startSeasonUrl!!, startDoc)
         val seriesTitleFallback = startDoc.selectFirst("meta[property=og:title]")?.attr("content")?.trim() ?: "TV Series"
-        val posterFallback = startDoc.selectFirst("meta[property=og:image]")?.attr("content")?.let { normalizeUrl(it, startSeasonUrl!!) }
-        val plotFallback = startDoc.selectFirst("div.singleStory")?.text()?.trim()
 
         return newTvSeriesLoadResponse(seriesTitleFallback, startSeasonUrl!!, TvType.TvSeries, fallbackEpisodes) {
-            this.posterUrl = posterFallback
+            this.posterUrl = poster
             this.posterHeaders = imageHeaders
-            this.plot = plotFallback
+            this.plot = plot
         }
     }
     private suspend fun processMegamax(
