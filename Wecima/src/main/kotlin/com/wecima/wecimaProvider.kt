@@ -13,7 +13,7 @@ import okhttp3.Interceptor
 import org.jsoup.Jsoup
 
 class WecimaProvider : MainAPI() {
-    override var mainUrl = "https://wecima.ac"
+    override var mainUrl = "https://wecima.lifestyle"
     override var name = "We Cima"
     override val hasMainPage = true
     override var lang = "ar"
