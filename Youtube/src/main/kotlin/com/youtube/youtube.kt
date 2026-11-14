@@ -100,8 +100,6 @@ class YoutubeProvider(
     }
 
     private val ytInterceptor = YouTubeInterceptor(sharedPref)
-
-    // Downloader احتياطي لـ NewPipe في حال لم يقم Cloudstream بتهيئته مسبقاً
     private class SimpleNewPipeDownloader(
         private val ytInterceptor: Interceptor
     ) : Downloader() {
@@ -174,8 +172,6 @@ class YoutubeProvider(
             Localization.DEFAULT
         }
     }
-
-    // ==================== القائمة الرئيسية ====================
 
     override val mainPage: List<MainPageData>
         get() {
@@ -340,8 +336,6 @@ class YoutubeProvider(
         }
     }
 
-    // ==================== البحث ====================
-
     override suspend fun search(query: String): List<SearchResponse> {
         return search(query, 1)?.items ?: emptyList()
     }
@@ -427,14 +421,11 @@ class YoutubeProvider(
         }
     }
 
-    // ==================== تحميل التفاصيل ====================
-
     override suspend fun load(url: String): LoadResponse {
         ensureNewPipeInitialized()
         Log.d(TAG, "load START -> url=$url")
 
         try {
-            // 1. الـ Shorts Feed
             if (url.contains("/shorts/")) {
                 val videoId = url.extractYoutubeId() ?: "video"
                 val useSearchList = url.contains("&ctx=search")
@@ -461,8 +452,6 @@ class YoutubeProvider(
             }
 
             val maxPages = sharedPref?.getInt("channel_pages_limit", 6) ?: 6
-
-            // 2. القنوات
             if (url.contains("/@") || url.contains("/channel/") || url.contains("/c/") || url.contains("/user/")) {
                 val cleanChannelUrl = normalizeChannelUrl(url)
                 Log.d(TAG, "load Channel -> $cleanChannelUrl, maxPages=$maxPages")
@@ -521,8 +510,6 @@ class YoutubeProvider(
                     this.tags = listOf(title, "Channel")
                 }
             }
-
-            // 3. قوائم التشغيل
             if (url.contains("list=")) {
                 val playlistUrl = normalizePlaylistUrl(url)
                 Log.d(TAG, "load Playlist -> $playlistUrl, maxPages=$maxPages")
@@ -568,8 +555,6 @@ class YoutubeProvider(
                     this.tags = listOf(author)
                 }
             }
-
-            // 4. فيديو مفرد
             val videoId = url.extractYoutubeId() ?: throw ErrorLoadingException("Invalid YouTube URL: $url")
             val watchUrl = "$mainUrl/watch?v=$videoId"
             Log.d(TAG, "load Video -> $watchUrl")
@@ -626,8 +611,6 @@ class YoutubeProvider(
             throw e
         }
     }
-
-    // ==================== استخراج الروابط والترجمات ====================
 
     override suspend fun loadLinks(
         data: String,
@@ -731,8 +714,6 @@ class YoutubeProvider(
 
         return true
     }
-
-    // ==================== دوال التحويل المساعدة لـ NewPipe ====================
 
     private fun convertInfoItem(
         item: InfoItem,
@@ -863,8 +844,6 @@ class YoutubeProvider(
         val regex = Regex("""(?:v=|/videos/|embed/|youtu\.be/|shorts/)([A-Za-z0-9_-]{11})""")
         return regex.find(this)?.groupValues?.getOrNull(1)
     }
-
-    // ==================== قسم الخلاصة الشخصية / الاحتياطي ====================
 
     private suspend fun fetchPersonalizedHome(
         page: Int,
