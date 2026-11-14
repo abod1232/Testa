@@ -43,8 +43,6 @@ class YoutubeProvider(
         private val homeShorts: MutableList<Episode> = Collections.synchronizedList(mutableListOf())
         private val searchShorts: MutableList<Episode> = Collections.synchronizedList(mutableListOf())
     }
-
-    // تخزين صفحات NewPipe للتصفح (Pagination)
     private data class PagedExtractorState(
         val extractor: ListExtractor<out InfoItem>,
         val nextPage: Page
@@ -52,8 +50,6 @@ class YoutubeProvider(
 
     private val homePageStates = ConcurrentHashMap<String, PagedExtractorState>()
     private var searchPageState: PagedExtractorState? = null
-
-    // متغيرات خلاصة الصفحة الرئيسية المخصصة (عند تسجيل الدخول)
     private val personalizedTokens = ConcurrentHashMap<String, String>()
     private var savedVisitorData: String? = null
     private var savedApiKey: String? = null
@@ -99,8 +95,6 @@ class YoutubeProvider(
         } catch (_: Exception) {
         }
     }
-
-    // ==================== القائمة الرئيسية ====================
 
     override val mainPage: List<MainPageData>
         get() {
@@ -162,9 +156,7 @@ class YoutubeProvider(
                 !sharedPref?.getString("SID", null).isNullOrBlank()
 
             if (isLoggedInHome) {
-                // إذا كان المستخدم مسجلاً دخوله، نستخدم الخلاصة الشخصية عبر الكوكيز
                 hasNext = fetchPersonalizedHome(page, requestData, results, seenUrls)
-                // في حال فشل الخلاصة الشخصية في الصفحة الأولى، نرجع للترند عبر NewPipe
                 if (page == 1 && results.isEmpty()) {
                     hasNext = fetchNewPipeMainSection(page, requestData, results, seenUrls)
                 }
@@ -236,8 +228,6 @@ class YoutubeProvider(
             }
         }
     }
-
-    // ==================== البحث ====================
 
     override suspend fun search(query: String): List<SearchResponse> {
         return search(query, 1)?.items ?: emptyList()
@@ -312,13 +302,9 @@ class YoutubeProvider(
         }
     }
 
-    // ==================== تحميل التفاصيل ====================
-
     override suspend fun load(url: String): LoadResponse {
         syncNewPipeLocalization()
         Log.d(name, "load called for url=$url")
-
-        // 1. الـ Shorts Feed
         if (url.contains("/shorts/")) {
             val videoId = url.extractYoutubeId() ?: "video"
             val useSearchList = url.contains("&ctx=search")
@@ -344,8 +330,6 @@ class YoutubeProvider(
         }
 
         val maxPages = sharedPref?.getInt("channel_pages_limit", 6) ?: 6
-
-        // 2. القنوات
         if (url.contains("/@") || url.contains("/channel/") || url.contains("/c/") || url.contains("/user/")) {
             val cleanChannelUrl = normalizeChannelUrl(url)
             val channelExtractor = ServiceList.YouTube.getChannelExtractor(cleanChannelUrl)
@@ -397,8 +381,6 @@ class YoutubeProvider(
                 this.tags = listOf(title, "Channel")
             }
         }
-
-        // 3. قوائم التشغيل (مع دعم Pagination)
         if (url.contains("list=")) {
             val playlistUrl = normalizePlaylistUrl(url)
             val playlistExtractor = ServiceList.YouTube.getPlaylistExtractor(playlistUrl)
@@ -440,8 +422,6 @@ class YoutubeProvider(
                 this.tags = listOf(author)
             }
         }
-
-        // 4. فيديو مفرد
         val videoId = url.extractYoutubeId() ?: throw ErrorLoadingException("Invalid YouTube URL")
         val watchUrl = "$mainUrl/watch?v=$videoId"
 
@@ -491,8 +471,6 @@ class YoutubeProvider(
         }
     }
 
-    // ==================== استخراج الروابط والترجمات ====================
-
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -514,8 +492,6 @@ class YoutubeProvider(
         } else {
             YoutubeExtractor().getUrl(fullUrl, null, subtitleCallback, callback)
         }
-
-        // جلب الترجمات والترجمة الآلية عبر innertube player API (خفيف وسريع دون إعادة جلب صفحة الفيديو)
         try {
             val apiUrl = "$mainUrl/youtubei/v1/player"
             val payload = mapOf(
@@ -565,7 +541,6 @@ class YoutubeProvider(
                     }
 
                     if (baseUrl.isNotEmpty()) {
-                        // وضع اللغات الأكثر استخداماً في المقدمة لتسهيل الاختيار
                         val autoLangs = listOf(
                             "ar", "en", "fr", "es", "de", "tr", "ru", "ja", "ko", "zh-Hans",
                             "it", "pt", "hi", "id", "ur", "fa", "nl", "pl", "sv", "uk"
@@ -586,8 +561,6 @@ class YoutubeProvider(
 
         return true
     }
-
-    // ==================== دوال التحويل المساعدة لـ NewPipe ====================
 
     private fun convertInfoItem(
         item: InfoItem,
@@ -718,8 +691,6 @@ class YoutubeProvider(
         val regex = Regex("""(?:v=|/videos/|embed/|youtu\.be/|shorts/)([A-Za-z0-9_-]{11})""")
         return regex.find(this)?.groupValues?.getOrNull(1)
     }
-
-    // ==================== قسم الخلاصة الشخصية بالكوكيز فقط ====================
 
     private suspend fun fetchPersonalizedHome(
         page: Int,
