@@ -99,8 +99,6 @@ class YoutubeProvider(
         }
     }
 
-    // ==================== القائمة الرئيسية ====================
-
     override val mainPage: List<MainPageData>
         get() {
             val list = mutableListOf<MainPageData>()
@@ -235,8 +233,6 @@ class YoutubeProvider(
         }
     }
 
-    // ==================== البحث ====================
-
     override suspend fun search(query: String): List<SearchResponse> {
         return search(query, 1)?.items ?: emptyList()
     }
@@ -310,12 +306,8 @@ class YoutubeProvider(
         }
     }
 
-    // ==================== تحميل التفاصيل ====================
-
     override suspend fun load(url: String): LoadResponse {
         Log.d(name, "load called for url=$url")
-
-        // 1. الـ Shorts Feed
         if (url.contains("/shorts/")) {
             val videoId = url.extractYoutubeId() ?: "video"
             val useSearchList = url.contains("&ctx=search")
@@ -341,8 +333,6 @@ class YoutubeProvider(
         }
 
         val maxPages = sharedPref?.getInt("channel_pages_limit", 6) ?: 6
-
-        // 2. القنوات
         if (url.contains("/@") || url.contains("/channel/") || url.contains("/c/") || url.contains("/user/")) {
             val cleanChannelUrl = normalizeChannelUrl(url)
             val channelExtractor = ServiceList.YouTube.getChannelExtractor(cleanChannelUrl)
@@ -397,8 +387,6 @@ class YoutubeProvider(
                 this.tags = listOf(title, "Channel")
             }
         }
-
-        // 3. قوائم التشغيل
         if (url.contains("list=")) {
             val playlistUrl = normalizePlaylistUrl(url)
             val playlistExtractor = ServiceList.YouTube.getPlaylistExtractor(playlistUrl)
@@ -442,8 +430,6 @@ class YoutubeProvider(
                 this.tags = listOf(author)
             }
         }
-
-        // 4. فيديو مفرد
         val videoId = url.extractYoutubeId() ?: throw ErrorLoadingException("Invalid YouTube URL")
         val watchUrl = "$mainUrl/watch?v=$videoId"
 
@@ -493,8 +479,6 @@ class YoutubeProvider(
             this.recommendations = recommendations
         }
     }
-
-    // ==================== استخراج الروابط والترجمات ====================
 
     override suspend fun loadLinks(
         data: String,
@@ -587,8 +571,6 @@ class YoutubeProvider(
 
         return true
     }
-
-    // ==================== دوال التحويل المساعدة لـ NewPipe ====================
 
     private fun convertInfoItem(
         item: InfoItem,
@@ -719,8 +701,6 @@ class YoutubeProvider(
         val regex = Regex("""(?:v=|/videos/|embed/|youtu\.be/|shorts/)([A-Za-z0-9_-]{11})""")
         return regex.find(this)?.groupValues?.getOrNull(1)
     }
-
-    // ==================== قسم الخلاصة الشخصية بالكوكيز فقط ====================
 
     private suspend fun fetchPersonalizedHome(
         page: Int,
