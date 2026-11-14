@@ -518,13 +518,14 @@ class EgyDead(val context: Context) : MainAPI() {
                 "Accept-Language" to "ar-IQ,ar;q=0.9,en-US;q=0.8,en;q=0.7",
                 "Upgrade-Insecure-Requests" to "1"
             )
-            val initialRes = app.get(iframeUrl, headers = reqHeaders, timeout = 10)
-            val doc = initialRes.document
 
-            val rawJson = doc.selectFirst("script[data-page=app]")?.data()
-                ?: doc.selectFirst("script[data-page=app]")?.html()
-                ?: Regex("""<script[^>]*data-page=["']app["'][^>]*>(.*?)</script>""", RegexOption.DOT_MATCHES_ALL)
-                    .find(initialRes.text)?.groupValues?.get(1)
+            // 1. طلب خفيف وسريع لجلب صفحة الـ Iframe
+            val initialRes = app.get(iframeUrl, headers = reqHeaders, timeout = 10)
+            if (initialRes.code != 200) return false
+
+            // استخدام Regex مباشر وسريع جداً لتفادي بطء Jsoup
+            val rawJson = Regex("""<script[^>]*data-page=["']app["'][^>]*>(.*?)</script>""", RegexOption.DOT_MATCHES_ALL)
+                .find(initialRes.text)?.groupValues?.get(1)
                 ?: return false
 
             val pageData = try {
@@ -550,27 +551,44 @@ class EgyDead(val context: Context) : MainAPI() {
             )
             xsrfToken?.let { inertiaHeaders["X-XSRF-TOKEN"] = it }
 
+            // 2. جلب مصفوفة السيرفرات والجودات
             val streamRes = app.get(
                 iframeUrl,
                 headers = inertiaHeaders,
                 cookies = initialRes.cookies,
                 timeout = 10
             )
+            if (streamRes.code != 200) return false
 
             val streamJson = parseJson<MegamaxInertiaResponse>(streamRes.text)
-            var extractedAny = false
-
+            
+            // تجميع كافة روابط السيرفرات الفرعية (10 إلى 15 سيرفر)
+            val mirrorLinks = mutableListOf<String>()
             streamJson.props?.streams?.data?.forEach { quality ->
                 quality.mirrors?.forEach { mirror ->
-                    var mirrorLink = mirror.link ?: return@forEach
-                    if (mirrorLink.startsWith("//")) mirrorLink = "https:$mirrorLink"
-
-                    try {
-                        val loaded = loadExtractor(mirrorLink, iframeUrl, subtitleCallback, callback)
-                        if (loaded) extractedAny = true
-                    } catch (e: Exception) {}
+                    var link = mirror.link ?: return@forEach
+                    if (link.startsWith("//")) link = "https:$link"
+                    mirrorLinks.add(link)
                 }
             }
+
+            // إزالة أي روابط مكررة بين الجودات
+            val uniqueMirrors = mirrorLinks.distinct()
+            var extractedAny = false
+
+            // ⚡⚡ السرعة القصوى: إطلاق جميع سيرفرات Megamax في نفس اللحظة بالتوازي التام ⚡⚡
+            coroutineScope {
+                uniqueMirrors.map { mirrorUrl ->
+                    async(Dispatchers.IO) {
+                        try {
+                            if (loadExtractor(mirrorUrl, iframeUrl, subtitleCallback, callback)) {
+                                extractedAny = true
+                            }
+                        } catch (e: Exception) {}
+                    }
+                }.awaitAll()
+            }
+
             extractedAny
         } catch (e: Exception) {
             false
