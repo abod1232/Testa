@@ -505,10 +505,6 @@ class EgyDead(val context: Context) : MainAPI() {
             this.recommendations = parseRecommendations(document, url)
         }
     }
-
-    // ==========================================
-    // معالجة سيرفرات Megamax / Share4max (الأصلية المسرّعة)
-    // ==========================================
     private suspend fun processMegamax(
         targetUrl: String,
         referer: String,
@@ -536,8 +532,6 @@ class EgyDead(val context: Context) : MainAPI() {
 
             val initialRes = app.get(iframeUrl, headers = reqHeaders, timeout = 15)
             val doc = initialRes.document
-
-            // نُبقي نفس طرق البحث المضمونة لـ Jsoup والـ Regex معاً
             val rawJson = doc.selectFirst("script[data-page=app]")?.data()
                 ?: doc.selectFirst("script[data-page=app]")?.html()
                 ?: Regex("""<script[^>]*data-page=["']app["'][^>]*>(.*?)</script>""", RegexOption.DOT_MATCHES_ALL)
@@ -576,8 +570,6 @@ class EgyDead(val context: Context) : MainAPI() {
 
             val streamJson = parseJson<MegamaxInertiaResponse>(streamRes.text)
             var extractedAny = false
-
-            // تجميع المرايا لفحصها بالتوازي بدلاً من الانتظار التتابعي
             val mirrorLinks = mutableListOf<String>()
             streamJson.props?.streams?.data?.forEach { quality ->
                 quality.mirrors?.forEach { mirror ->
@@ -586,8 +578,6 @@ class EgyDead(val context: Context) : MainAPI() {
                     mirrorLinks.add(mirrorLink)
                 }
             }
-
-            // فحص جميع مرايا Megamax بالتوازي الفوري
             coroutineScope {
                 mirrorLinks.distinct().map { mirrorLink ->
                     async(Dispatchers.IO) {
@@ -768,8 +758,6 @@ class EgyDead(val context: Context) : MainAPI() {
     ): Boolean {
         try {
             val watchPageUrl = if (!data.contains("?view=watch")) "$data?view=watch" else data
-            
-            // فتح صفحة المشاهدة بطلب POST فوري
             val document = try {
                 httpPost(watchPageUrl, data = mapOf("View" to "1"), referer = data)
             } catch (e: Exception) {
@@ -782,14 +770,10 @@ class EgyDead(val context: Context) : MainAPI() {
             fun addCandidate(raw: String?, name: String?) {
                 if (raw.isNullOrBlank()) return
                 val normalized = normalizeUrl(raw, watchPageUrl)?.trimEnd('/') ?: return
-
-                // منع التكرار الفوري: الرابط لا يُضاف إلى القائمة إلا مرة واحدة فقط
                 if (allSeenLinks.add(normalized)) {
                     rawCandidates.add(Pair(normalized, name))
                 }
             }
-
-            // 1. استخراج سيرفرات المشاهدة
             val watchSelectors = listOf("ul.serversList li", "ul.servers-list li", "div.serversList li")
             for (sel in watchSelectors) {
                 for (li in document.select(sel)) {
@@ -801,8 +785,6 @@ class EgyDead(val context: Context) : MainAPI() {
                     addCandidate(candidate, serverName)
                 }
             }
-
-            // 2. استخراج سيرفرات التحميل (بدون تكرار)
             val downloadSelectors = listOf("ul.donwload-servers-list li", "ul.download-servers-list li")
             for (sel in downloadSelectors) {
                 for (li in document.select(sel)) {
@@ -812,15 +794,11 @@ class EgyDead(val context: Context) : MainAPI() {
                 }
             }
 
-            // حُذفت حلقة [data-link] العشوائية لمنع تكرار الروابط
-
             val candidates = rawCandidates.toList()
             val semaphore = Semaphore(12)
 
             suspend fun prepareAndSendParallel(linkRaw: String, serverName: String?): Boolean {
                 var targetUrl = linkRaw
-
-                // ⚡ حل hgcloud إن وجد
                 if (targetUrl.contains("hgcloud") || (serverName != null && serverName.contains("hgcloud", ignoreCase = true))) {
                     val resolved = resolveHgCloud(targetUrl, watchPageUrl)
                     if (!resolved.isNullOrBlank()) {
@@ -829,32 +807,22 @@ class EgyDead(val context: Context) : MainAPI() {
                 }
 
                 var isLoaded = false
-
-                // التحقق مما إذا كان الرابط يخص Megamax صراحة
                 val isExplicitMegamax = targetUrl.contains("megamax") || targetUrl.contains("share4max") || 
                                         targetUrl.contains("/mirror/") || targetUrl.contains("/iframe/") ||
                                         (serverName != null && serverName.contains("megamax", ignoreCase = true))
-
-                // 1. إذا كان Megamax صريح يُفحص بـ processMegamax أولاً
                 if (isExplicitMegamax) {
                     isLoaded = processMegamax(targetUrl, watchPageUrl, subtitleCallback, callback)
                 }
-
-                // 2. تجربة loadExtractor
                 if (!isLoaded) {
                     try {
                         isLoaded = loadExtractor(targetUrl, data, subtitleCallback, callback)
                     } catch (ex: Exception) {}
                 }
-
-                // 3. 🌟 خطة بديلة لـ Megamax: إذا فشل وكان الرابط بدومين مجهول (مثل q7v3k8m2p1) يتم فحصه بـ Megamax
                 if (!isLoaded && !isExplicitMegamax) {
                     try {
                         isLoaded = processMegamax(targetUrl, watchPageUrl, subtitleCallback, callback)
                     } catch (ex: Exception) {}
                 }
-
-                // 4. خطة بديلة شاملة لأي سيرفر غامض
                 if (!isLoaded) {
                     try {
                         isLoaded = UniversalExtractor.extract(targetUrl, watchPageUrl, subtitleCallback, callback)
@@ -863,8 +831,6 @@ class EgyDead(val context: Context) : MainAPI() {
 
                 return isLoaded
             }
-
-            // تشغيل جميع السيرفرات بالتوازي الكامل
             coroutineScope {
                 candidates.map { pair ->
                     async(Dispatchers.IO) {
