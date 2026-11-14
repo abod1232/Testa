@@ -23,10 +23,6 @@ import kotlinx.serialization.Serializable
 import java.util.ArrayDeque
 import java.net.URL
 import java.net.URLDecoder
-
-// ==========================================
-// نماذج فك تشفير Megamax / Share4max
-// ==========================================
 @Serializable
 data class MegamaxMirror(
     @SerialName("driver") val driver: String? = null,
@@ -382,8 +378,6 @@ class EgyDead(val context: Context) : MainAPI() {
 
         val seriesTitle = document.selectFirst("meta[property=og:title]")?.attr("content")?.trim()
             ?.replace(Regex("""\s*(الموسم|الحلقة)\s+.*"""), "")?.trim() ?: "TV Series"
-
-        // 🌟 الحل الأساسي السريع من القالب الجديد بطلب واحد
         val episodeNav = document.selectFirst("section.dead-changes-episode-nav")
         if (episodeNav != null) {
             val groups = episodeNav.select("div.dead-changes-episode-group")
@@ -427,8 +421,6 @@ class EgyDead(val context: Context) : MainAPI() {
                 }
             }
         }
-
-        // 🔄 الحل الثانوي القديم
         var startSeasonUrl: String? = null
         if (url.contains("/episode/")) {
             val bc = document.selectFirst("div.breadcrumbs-single, div.breadcrumbs")
@@ -502,10 +494,6 @@ class EgyDead(val context: Context) : MainAPI() {
             this.recommendations = parseRecommendations(document, url)
         }
     }
-
-    // ==========================================
-    // معالجة سيرفرات Megamax / Share4max
-    // ==========================================
     private suspend fun processMegamax(
         targetUrl: String,
         referer: String,
@@ -530,8 +518,6 @@ class EgyDead(val context: Context) : MainAPI() {
                 "Accept-Language" to "ar-IQ,ar;q=0.9,en-US;q=0.8,en;q=0.7",
                 "Upgrade-Insecure-Requests" to "1"
             )
-
-            // مهلة منخفضة (10 ثوانٍ) لمنع التجميد
             val initialRes = app.get(iframeUrl, headers = reqHeaders, timeout = 10)
             val doc = initialRes.document
 
@@ -590,10 +576,6 @@ class EgyDead(val context: Context) : MainAPI() {
             false
         }
     }
-
-    // ==========================================
-    // دوال حل وفك تشفير سيرفرات HgCloud
-    // ==========================================
     private fun customB64Decode(s: String, alphabet: String): String {
         var bc = 0
         var bs = 0
@@ -747,10 +729,6 @@ class EgyDead(val context: Context) : MainAPI() {
             null
         }
     }
-
-    // ==========================================
-    // دالة استخراج الروابط السريعة بالتوازي الكامل
-    // ==========================================
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -759,8 +737,6 @@ class EgyDead(val context: Context) : MainAPI() {
     ): Boolean {
         try {
             val watchPageUrl = if (!data.contains("?view=watch")) "$data?view=watch" else data
-
-            // طلب صفحة المشاهدة مباشرة بالـ POST دون إضاعة الوقت في GET
             val document = try {
                 httpPost(watchPageUrl, data = mapOf("View" to "1"), referer = data)
             } catch (e: Exception) {
@@ -775,8 +751,6 @@ class EgyDead(val context: Context) : MainAPI() {
                 val normalized = normalizeUrl(raw, watchPageUrl) ?: return
                 rawCandidates.add(Pair(normalized, name))
             }
-
-            // 1. استخراج سيرفرات المشاهدة أولاً (هي الأهم والأسرع)
             val watchSelectors = listOf("ul.serversList li", "ul.servers-list li", "div.serversList li")
             for (sel in watchSelectors) {
                 for (li in document.select(sel)) {
@@ -788,8 +762,6 @@ class EgyDead(val context: Context) : MainAPI() {
                     addCandidate(candidate, serverName)
                 }
             }
-
-            // 2. استخراج سيرفرات التحميل
             val downloadSelectors = listOf("ul.donwload-servers-list li", "ul.download-servers-list li")
             for (sel in downloadSelectors) {
                 for (li in document.select(sel)) {
@@ -798,54 +770,38 @@ class EgyDead(val context: Context) : MainAPI() {
                     addCandidate(href, serverName)
                 }
             }
-
-            // 3. استخراج وسوم data-link الأخرى
             for (el in document.select("[data-link]")) {
                 val serverName = el.attr("data-name").takeIf { it.isNotBlank() } ?: el.attr("data-provider")
                 addCandidate(el.attr("data-link"), serverName)
             }
-
-            // 4. استبعاد التكرار المسبق لتقليل عدد المهام
             val candidates = rawCandidates.distinctBy { it.first }
-
-            // رفع التوازي إلى 16 رابطاً في نفس اللحظة عبر Dispatchers.IO
             val semaphore = Semaphore(16)
 
             suspend fun processLinkParallel(url: String, serverName: String?): Boolean {
                 if (!allSeenLinks.add(url)) return false
 
                 var targetUrl = url
-
-                // ⚡ إذا كان الرابط hgcloud نحله فوراً
                 if (targetUrl.contains("hgcloud") || (serverName != null && serverName.contains("hgcloud", ignoreCase = true))) {
                     val resolved = resolveHgCloud(targetUrl, watchPageUrl)
                     if (!resolved.isNullOrBlank()) {
                         targetUrl = resolved
                     }
                 }
-
-                // ⚡ توجيه ذكي مباشر: لا تجعل الرابط يجرب كل المستخرجات بالتتابع!
                 return when {
-                    // إذا كان الرابط هو سيرفر Megamax يذهب مباشرة لمستخرج Megamax فقط
                     targetUrl.contains("megamax") || targetUrl.contains("share4max") || targetUrl.contains("/mirror/") || targetUrl.contains("/iframe/") -> {
                         processMegamax(targetUrl, watchPageUrl, subtitleCallback, callback)
                     }
-
-                    // السيرفرات الأخرى تجرب loadExtractor أولاً
                     else -> {
                         val loaded = try {
                             loadExtractor(targetUrl, watchPageUrl, subtitleCallback, callback)
                         } catch (e: Exception) { false }
 
                         if (!loaded) {
-                            // إذا فشل المستخرج العادي، نجرب فك التشفير الشامل فوراً
                             UniversalExtractor.extract(targetUrl, watchPageUrl, subtitleCallback, callback)
                         } else true
                     }
                 }
             }
-
-            // تشغيل جميع الروابط بالتوازي التام فوراً دون انتظار أحد
             coroutineScope {
                 candidates.map { pair ->
                     async(Dispatchers.IO) {
