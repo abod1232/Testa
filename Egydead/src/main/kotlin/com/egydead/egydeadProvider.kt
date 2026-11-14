@@ -518,12 +518,8 @@ class EgyDead(val context: Context) : MainAPI() {
                 "Accept-Language" to "ar-IQ,ar;q=0.9,en-US;q=0.8,en;q=0.7",
                 "Upgrade-Insecure-Requests" to "1"
             )
-
-            // 1. طلب خفيف وسريع لجلب صفحة الـ Iframe
             val initialRes = app.get(iframeUrl, headers = reqHeaders, timeout = 10)
             if (initialRes.code != 200) return false
-
-            // استخدام Regex مباشر وسريع جداً لتفادي بطء Jsoup
             val rawJson = Regex("""<script[^>]*data-page=["']app["'][^>]*>(.*?)</script>""", RegexOption.DOT_MATCHES_ALL)
                 .find(initialRes.text)?.groupValues?.get(1)
                 ?: return false
@@ -550,8 +546,6 @@ class EgyDead(val context: Context) : MainAPI() {
                 "Accept" to "text/html, application/xhtml+xml"
             )
             xsrfToken?.let { inertiaHeaders["X-XSRF-TOKEN"] = it }
-
-            // 2. جلب مصفوفة السيرفرات والجودات
             val streamRes = app.get(
                 iframeUrl,
                 headers = inertiaHeaders,
@@ -561,8 +555,6 @@ class EgyDead(val context: Context) : MainAPI() {
             if (streamRes.code != 200) return false
 
             val streamJson = parseJson<MegamaxInertiaResponse>(streamRes.text)
-            
-            // تجميع كافة روابط السيرفرات الفرعية (10 إلى 15 سيرفر)
             val mirrorLinks = mutableListOf<String>()
             streamJson.props?.streams?.data?.forEach { quality ->
                 quality.mirrors?.forEach { mirror ->
@@ -571,12 +563,8 @@ class EgyDead(val context: Context) : MainAPI() {
                     mirrorLinks.add(link)
                 }
             }
-
-            // إزالة أي روابط مكررة بين الجودات
             val uniqueMirrors = mirrorLinks.distinct()
             var extractedAny = false
-
-            // ⚡⚡ السرعة القصوى: إطلاق جميع سيرفرات Megamax في نفس اللحظة بالتوازي التام ⚡⚡
             coroutineScope {
                 uniqueMirrors.map { mirrorUrl ->
                     async(Dispatchers.IO) {
