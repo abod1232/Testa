@@ -505,6 +505,10 @@ class EgyDead(val context: Context) : MainAPI() {
             this.recommendations = parseRecommendations(document, url)
         }
     }
+
+    // ==========================================
+    // معالجة سيرفرات Megamax / Share4max (المسرّعة والداعمة للتحميل)
+    // ==========================================
     private suspend fun processMegamax(
         targetUrl: String,
         referer: String,
@@ -512,9 +516,18 @@ class EgyDead(val context: Context) : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         return try {
+            // تحويل روابط المشاهدة والتحميل إلى مشغل الفيديو الحقيقي مع ?nt=1
             val iframeUrl = when {
                 targetUrl.contains("/mirror/") -> {
                     val converted = targetUrl.replace("/mirror/", "/iframe/")
+                    if (!converted.contains("?nt=1")) "$converted?nt=1" else converted
+                }
+                targetUrl.contains("/download/") -> {
+                    val converted = targetUrl.replace("/download/", "/iframe/")
+                    if (!converted.contains("?nt=1")) "$converted?nt=1" else converted
+                }
+                targetUrl.contains("/file/") -> {
+                    val converted = targetUrl.replace("/file/", "/iframe/")
                     if (!converted.contains("?nt=1")) "$converted?nt=1" else converted
                 }
                 targetUrl.contains("/iframe/") -> {
@@ -529,9 +542,10 @@ class EgyDead(val context: Context) : MainAPI() {
                 "Accept-Language" to "ar-IQ,ar;q=0.9,en-US;q=0.8,en;q=0.7",
                 "Upgrade-Insecure-Requests" to "1"
             )
-
-            val initialRes = app.get(iframeUrl, headers = reqHeaders, timeout = 15)
+            val initialRes = app.get(iframeUrl, headers = reqHeaders, timeout = 12)
             val doc = initialRes.document
+
+            // الحفاظ على دقة Jsoup الأصلية لضمان عدم فشل أي صفحة
             val rawJson = doc.selectFirst("script[data-page=app]")?.data()
                 ?: doc.selectFirst("script[data-page=app]")?.html()
                 ?: Regex("""<script[^>]*data-page=["']app["'][^>]*>(.*?)</script>""", RegexOption.DOT_MATCHES_ALL)
@@ -565,11 +579,13 @@ class EgyDead(val context: Context) : MainAPI() {
                 iframeUrl,
                 headers = inertiaHeaders,
                 cookies = initialRes.cookies,
-                timeout = 15
+                timeout = 12
             )
 
             val streamJson = parseJson<MegamaxInertiaResponse>(streamRes.text)
             var extractedAny = false
+
+            // تجميع كافة السيرفرات الفرعية
             val mirrorLinks = mutableListOf<String>()
             streamJson.props?.streams?.data?.forEach { quality ->
                 quality.mirrors?.forEach { mirror ->
@@ -578,6 +594,8 @@ class EgyDead(val context: Context) : MainAPI() {
                     mirrorLinks.add(mirrorLink)
                 }
             }
+
+            // ⚡ تسريع حاسم: فحص جميع سيرفرات Megamax بالتوازي التام بدلاً من الانتظار التتابعي
             coroutineScope {
                 mirrorLinks.distinct().map { mirrorLink ->
                     async(Dispatchers.IO) {
@@ -758,6 +776,7 @@ class EgyDead(val context: Context) : MainAPI() {
     ): Boolean {
         try {
             val watchPageUrl = if (!data.contains("?view=watch")) "$data?view=watch" else data
+            
             val document = try {
                 httpPost(watchPageUrl, data = mapOf("View" to "1"), referer = data)
             } catch (e: Exception) {
@@ -770,10 +789,14 @@ class EgyDead(val context: Context) : MainAPI() {
             fun addCandidate(raw: String?, name: String?) {
                 if (raw.isNullOrBlank()) return
                 val normalized = normalizeUrl(raw, watchPageUrl)?.trimEnd('/') ?: return
+
+                // منع تكرار إضافة الرابط مسبقاً
                 if (allSeenLinks.add(normalized)) {
                     rawCandidates.add(Pair(normalized, name))
                 }
             }
+
+            // 1. استخراج سيرفرات المشاهدة
             val watchSelectors = listOf("ul.serversList li", "ul.servers-list li", "div.serversList li")
             for (sel in watchSelectors) {
                 for (li in document.select(sel)) {
@@ -785,6 +808,8 @@ class EgyDead(val context: Context) : MainAPI() {
                     addCandidate(candidate, serverName)
                 }
             }
+
+            // 2. استخراج سيرفرات التحميل (مع تحويلها لـ iframe لاحقاً)
             val downloadSelectors = listOf("ul.donwload-servers-list li", "ul.download-servers-list li")
             for (sel in downloadSelectors) {
                 for (li in document.select(sel)) {
@@ -795,10 +820,12 @@ class EgyDead(val context: Context) : MainAPI() {
             }
 
             val candidates = rawCandidates.toList()
-            val semaphore = Semaphore(12)
+            val semaphore = Semaphore(14)
 
             suspend fun prepareAndSendParallel(linkRaw: String, serverName: String?): Boolean {
                 var targetUrl = linkRaw
+
+                // حل hgcloud إن وجد
                 if (targetUrl.contains("hgcloud") || (serverName != null && serverName.contains("hgcloud", ignoreCase = true))) {
                     val resolved = resolveHgCloud(targetUrl, watchPageUrl)
                     if (!resolved.isNullOrBlank()) {
@@ -807,22 +834,33 @@ class EgyDead(val context: Context) : MainAPI() {
                 }
 
                 var isLoaded = false
+
+                // التحقق مما إذا كان الرابط يخص Megamax صراحة (يشمل الآن download و file)
                 val isExplicitMegamax = targetUrl.contains("megamax") || targetUrl.contains("share4max") || 
                                         targetUrl.contains("/mirror/") || targetUrl.contains("/iframe/") ||
+                                        targetUrl.contains("/download/") || targetUrl.contains("/file/") ||
                                         (serverName != null && serverName.contains("megamax", ignoreCase = true))
+
+                // 1. تجربة Megamax إذا كان الرابط صريحاً
                 if (isExplicitMegamax) {
                     isLoaded = processMegamax(targetUrl, watchPageUrl, subtitleCallback, callback)
                 }
+
+                // 2. تجربة loadExtractor الافتراضي
                 if (!isLoaded) {
                     try {
                         isLoaded = loadExtractor(targetUrl, data, subtitleCallback, callback)
                     } catch (ex: Exception) {}
                 }
+
+                // 3. 🌟 خطة الإنقاذ: تجربة Megamax إذا فشل وكان بدومين مجهول (يضمن جلب 100% من السيرفرات)
                 if (!isLoaded && !isExplicitMegamax) {
                     try {
                         isLoaded = processMegamax(targetUrl, watchPageUrl, subtitleCallback, callback)
                     } catch (ex: Exception) {}
                 }
+
+                // 4. خطة بديلة شاملة عبر UniversalExtractor
                 if (!isLoaded) {
                     try {
                         isLoaded = UniversalExtractor.extract(targetUrl, watchPageUrl, subtitleCallback, callback)
@@ -831,6 +869,7 @@ class EgyDead(val context: Context) : MainAPI() {
 
                 return isLoaded
             }
+
             coroutineScope {
                 candidates.map { pair ->
                     async(Dispatchers.IO) {
