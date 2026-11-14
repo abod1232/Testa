@@ -519,9 +519,12 @@ class EgyDead(val context: Context) : MainAPI() {
                 "Upgrade-Insecure-Requests" to "1"
             )
             val initialRes = app.get(iframeUrl, headers = reqHeaders, timeout = 10)
-            if (initialRes.code != 200) return false
-            val rawJson = Regex("""<script[^>]*data-page=["']app["'][^>]*>(.*?)</script>""", RegexOption.DOT_MATCHES_ALL)
-                .find(initialRes.text)?.groupValues?.get(1)
+            val doc = initialRes.document
+
+            val rawJson = doc.selectFirst("script[data-page=app]")?.data()
+                ?: doc.selectFirst("script[data-page=app]")?.html()
+                ?: Regex("""<script[^>]*data-page=["']app["'][^>]*>(.*?)</script>""", RegexOption.DOT_MATCHES_ALL)
+                    .find(initialRes.text)?.groupValues?.get(1)
                 ?: return false
 
             val pageData = try {
@@ -546,37 +549,28 @@ class EgyDead(val context: Context) : MainAPI() {
                 "Accept" to "text/html, application/xhtml+xml"
             )
             xsrfToken?.let { inertiaHeaders["X-XSRF-TOKEN"] = it }
+
             val streamRes = app.get(
                 iframeUrl,
                 headers = inertiaHeaders,
                 cookies = initialRes.cookies,
                 timeout = 10
             )
-            if (streamRes.code != 200) return false
 
             val streamJson = parseJson<MegamaxInertiaResponse>(streamRes.text)
-            val mirrorLinks = mutableListOf<String>()
+            var extractedAny = false
+
             streamJson.props?.streams?.data?.forEach { quality ->
                 quality.mirrors?.forEach { mirror ->
-                    var link = mirror.link ?: return@forEach
-                    if (link.startsWith("//")) link = "https:$link"
-                    mirrorLinks.add(link)
+                    var mirrorLink = mirror.link ?: return@forEach
+                    if (mirrorLink.startsWith("//")) mirrorLink = "https:$mirrorLink"
+
+                    try {
+                        val loaded = loadExtractor(mirrorLink, iframeUrl, subtitleCallback, callback)
+                        if (loaded) extractedAny = true
+                    } catch (e: Exception) {}
                 }
             }
-            val uniqueMirrors = mirrorLinks.distinct()
-            var extractedAny = false
-            coroutineScope {
-                uniqueMirrors.map { mirrorUrl ->
-                    async(Dispatchers.IO) {
-                        try {
-                            if (loadExtractor(mirrorUrl, iframeUrl, subtitleCallback, callback)) {
-                                extractedAny = true
-                            }
-                        } catch (e: Exception) {}
-                    }
-                }.awaitAll()
-            }
-
             extractedAny
         } catch (e: Exception) {
             false
@@ -750,22 +744,11 @@ class EgyDead(val context: Context) : MainAPI() {
             }
 
             val allSeenLinks = java.util.Collections.synchronizedSet(mutableSetOf<String>())
-            val seenServerCodes = java.util.Collections.synchronizedSet(mutableSetOf<String>())
             val rawCandidates = mutableListOf<Pair<String, String?>>()
 
             fun addCandidate(raw: String?, name: String?) {
                 if (raw.isNullOrBlank()) return
-                val normalized = normalizeUrl(raw, watchPageUrl)?.trimEnd('/') ?: return
-                try {
-                    val u = URL(normalized)
-                    val host = u.host.replace("www.", "")
-                    val fileCode = u.path.trimEnd('/').substringAfterLast('/')
-                    val uniqueKey = "${host}_$fileCode"
-                    if (!seenServerCodes.add(uniqueKey)) {
-                        return // تم تجاهل الرابط لأنه لنفس الفيديو مسبقاً
-                    }
-                } catch (e: Exception) {}
-
+                val normalized = normalizeUrl(raw, watchPageUrl) ?: return
                 rawCandidates.add(Pair(normalized, name))
             }
             val watchSelectors = listOf("ul.serversList li", "ul.servers-list li", "div.serversList li")
@@ -787,9 +770,12 @@ class EgyDead(val context: Context) : MainAPI() {
                     addCandidate(href, serverName)
                 }
             }
+            for (el in document.select("[data-link]")) {
+                val serverName = el.attr("data-name").takeIf { it.isNotBlank() } ?: el.attr("data-provider")
+                addCandidate(el.attr("data-link"), serverName)
+            }
             val candidates = rawCandidates.distinctBy { it.first }
-
-            val semaphore = Semaphore(12)
+            val semaphore = Semaphore(16)
 
             suspend fun processLinkParallel(url: String, serverName: String?): Boolean {
                 if (!allSeenLinks.add(url)) return false
@@ -816,7 +802,6 @@ class EgyDead(val context: Context) : MainAPI() {
                     }
                 }
             }
-
             coroutineScope {
                 candidates.map { pair ->
                     async(Dispatchers.IO) {
