@@ -43,6 +43,7 @@ class YoutubeProvider(
         private val homeShorts: MutableList<Episode> = Collections.synchronizedList(mutableListOf())
         private val searchShorts: MutableList<Episode> = Collections.synchronizedList(mutableListOf())
     }
+
     private data class PagedExtractorState(
         val extractor: ListExtractor<out InfoItem>,
         val nextPage: Page
@@ -50,6 +51,7 @@ class YoutubeProvider(
 
     private val homePageStates = ConcurrentHashMap<String, PagedExtractorState>()
     private var searchPageState: PagedExtractorState? = null
+
     private val personalizedTokens = ConcurrentHashMap<String, String>()
     private var savedVisitorData: String? = null
     private var savedApiKey: String? = null
@@ -89,12 +91,15 @@ class YoutubeProvider(
 
     private val ytInterceptor = YouTubeInterceptor(sharedPref)
 
-    private fun syncNewPipeLocalization() {
-        try {
-            ServiceList.YouTube.localization = Localization.fromLocale(Locale(lang))
+    private fun getNewPipeLocalization(): Localization {
+        return try {
+            Localization.fromLocale(Locale(lang))
         } catch (_: Exception) {
+            Localization.DEFAULT
         }
     }
+
+    // ==================== القائمة الرئيسية ====================
 
     override val mainPage: List<MainPageData>
         get() {
@@ -141,7 +146,6 @@ class YoutubeProvider(
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        syncNewPipeLocalization()
         val requestData = request.data
         val results = mutableListOf<SearchResponse>()
         val seenUrls = mutableSetOf<String>()
@@ -189,6 +193,7 @@ class YoutubeProvider(
                 else -> {
                     val channelUrl = normalizeChannelUrl(requestData)
                     val channelExtractor = ServiceList.YouTube.getChannelExtractor(channelUrl)
+                    channelExtractor.forceLocalization(getNewPipeLocalization())
                     channelExtractor.fetchPage()
                     val videosTab = channelExtractor.tabs.firstOrNull {
                         it.contentFilters.contains(ChannelTabs.VIDEOS)
@@ -198,6 +203,7 @@ class YoutubeProvider(
                 }
             }
 
+            extractor.forceLocalization(getNewPipeLocalization())
             extractor.fetchPage()
             val initial = extractor.initialPage
             initial.items.forEach { item ->
@@ -229,12 +235,13 @@ class YoutubeProvider(
         }
     }
 
+    // ==================== البحث ====================
+
     override suspend fun search(query: String): List<SearchResponse> {
         return search(query, 1)?.items ?: emptyList()
     }
 
     override suspend fun search(query: String, page: Int): SearchResponseList? {
-        syncNewPipeLocalization()
         val results = mutableListOf<SearchResponse>()
         val seenUrls = mutableSetOf<String>()
 
@@ -256,6 +263,7 @@ class YoutubeProvider(
             if (page == 1) {
                 val filters = if (playlistMode) listOf("playlists") else emptyList()
                 val searchExtractor = ServiceList.YouTube.getSearchExtractor(actualQuery, filters, "")
+                searchExtractor.forceLocalization(getNewPipeLocalization())
                 searchExtractor.fetchPage()
 
                 val initial = searchExtractor.initialPage
@@ -302,9 +310,12 @@ class YoutubeProvider(
         }
     }
 
+    // ==================== تحميل التفاصيل ====================
+
     override suspend fun load(url: String): LoadResponse {
-        syncNewPipeLocalization()
         Log.d(name, "load called for url=$url")
+
+        // 1. الـ Shorts Feed
         if (url.contains("/shorts/")) {
             val videoId = url.extractYoutubeId() ?: "video"
             val useSearchList = url.contains("&ctx=search")
@@ -330,9 +341,12 @@ class YoutubeProvider(
         }
 
         val maxPages = sharedPref?.getInt("channel_pages_limit", 6) ?: 6
+
+        // 2. القنوات
         if (url.contains("/@") || url.contains("/channel/") || url.contains("/c/") || url.contains("/user/")) {
             val cleanChannelUrl = normalizeChannelUrl(url)
             val channelExtractor = ServiceList.YouTube.getChannelExtractor(cleanChannelUrl)
+            channelExtractor.forceLocalization(getNewPipeLocalization())
             channelExtractor.fetchPage()
 
             val title = channelExtractor.name.ifBlank { "YouTube Channel" }
@@ -348,6 +362,7 @@ class YoutubeProvider(
 
             if (videosTab != null) {
                 val tabExtractor = ServiceList.YouTube.getChannelTabExtractor(videosTab)
+                tabExtractor.forceLocalization(getNewPipeLocalization())
                 tabExtractor.fetchPage()
 
                 var currentPage = tabExtractor.initialPage
@@ -368,9 +383,10 @@ class YoutubeProvider(
 
                 collectTabItems(currentPage.items)
 
-                while (currentPage.hasNextPage() && currentPage.nextPage != null && pagesFetched < maxPages) {
+                while (currentPage.hasNextPage() && pagesFetched < maxPages) {
+                    val next = currentPage.nextPage ?: break
                     pagesFetched++
-                    currentPage = tabExtractor.getPage(currentPage.nextPage)
+                    currentPage = tabExtractor.getPage(next)
                     collectTabItems(currentPage.items)
                 }
             }
@@ -381,9 +397,12 @@ class YoutubeProvider(
                 this.tags = listOf(title, "Channel")
             }
         }
+
+        // 3. قوائم التشغيل
         if (url.contains("list=")) {
             val playlistUrl = normalizePlaylistUrl(url)
             val playlistExtractor = ServiceList.YouTube.getPlaylistExtractor(playlistUrl)
+            playlistExtractor.forceLocalization(getNewPipeLocalization())
             playlistExtractor.fetchPage()
 
             val title = playlistExtractor.name.ifBlank { "YouTube Playlist" }
@@ -410,9 +429,10 @@ class YoutubeProvider(
 
             collectPlaylistItems(currentPage.items)
 
-            while (currentPage.hasNextPage() && currentPage.nextPage != null && pagesFetched < maxPages) {
+            while (currentPage.hasNextPage() && pagesFetched < maxPages) {
+                val next = currentPage.nextPage ?: break
                 pagesFetched++
-                currentPage = playlistExtractor.getPage(currentPage.nextPage)
+                currentPage = playlistExtractor.getPage(next)
                 collectPlaylistItems(currentPage.items)
             }
 
@@ -422,10 +442,13 @@ class YoutubeProvider(
                 this.tags = listOf(author)
             }
         }
+
+        // 4. فيديو مفرد
         val videoId = url.extractYoutubeId() ?: throw ErrorLoadingException("Invalid YouTube URL")
         val watchUrl = "$mainUrl/watch?v=$videoId"
 
         val streamExtractor = ServiceList.YouTube.getStreamExtractor(watchUrl)
+        streamExtractor.forceLocalization(getNewPipeLocalization())
         streamExtractor.fetchPage()
 
         val title = streamExtractor.name.ifBlank { "YouTube Video" }
@@ -471,6 +494,8 @@ class YoutubeProvider(
         }
     }
 
+    // ==================== استخراج الروابط والترجمات ====================
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -492,6 +517,7 @@ class YoutubeProvider(
         } else {
             YoutubeExtractor().getUrl(fullUrl, null, subtitleCallback, callback)
         }
+
         try {
             val apiUrl = "$mainUrl/youtubei/v1/player"
             val payload = mapOf(
@@ -561,6 +587,8 @@ class YoutubeProvider(
 
         return true
     }
+
+    // ==================== دوال التحويل المساعدة لـ NewPipe ====================
 
     private fun convertInfoItem(
         item: InfoItem,
@@ -691,6 +719,8 @@ class YoutubeProvider(
         val regex = Regex("""(?:v=|/videos/|embed/|youtu\.be/|shorts/)([A-Za-z0-9_-]{11})""")
         return regex.find(this)?.groupValues?.getOrNull(1)
     }
+
+    // ==================== قسم الخلاصة الشخصية بالكوكيز فقط ====================
 
     private suspend fun fetchPersonalizedHome(
         page: Int,
