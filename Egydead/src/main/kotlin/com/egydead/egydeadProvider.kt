@@ -744,11 +744,22 @@ class EgyDead(val context: Context) : MainAPI() {
             }
 
             val allSeenLinks = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+            val seenServerCodes = java.util.Collections.synchronizedSet(mutableSetOf<String>())
             val rawCandidates = mutableListOf<Pair<String, String?>>()
 
             fun addCandidate(raw: String?, name: String?) {
                 if (raw.isNullOrBlank()) return
-                val normalized = normalizeUrl(raw, watchPageUrl) ?: return
+                val normalized = normalizeUrl(raw, watchPageUrl)?.trimEnd('/') ?: return
+                try {
+                    val u = URL(normalized)
+                    val host = u.host.replace("www.", "")
+                    val fileCode = u.path.trimEnd('/').substringAfterLast('/')
+                    val uniqueKey = "${host}_$fileCode"
+                    if (!seenServerCodes.add(uniqueKey)) {
+                        return // تم تجاهل الرابط لأنه لنفس الفيديو مسبقاً
+                    }
+                } catch (e: Exception) {}
+
                 rawCandidates.add(Pair(normalized, name))
             }
             val watchSelectors = listOf("ul.serversList li", "ul.servers-list li", "div.serversList li")
@@ -770,12 +781,9 @@ class EgyDead(val context: Context) : MainAPI() {
                     addCandidate(href, serverName)
                 }
             }
-            for (el in document.select("[data-link]")) {
-                val serverName = el.attr("data-name").takeIf { it.isNotBlank() } ?: el.attr("data-provider")
-                addCandidate(el.attr("data-link"), serverName)
-            }
             val candidates = rawCandidates.distinctBy { it.first }
-            val semaphore = Semaphore(16)
+
+            val semaphore = Semaphore(12)
 
             suspend fun processLinkParallel(url: String, serverName: String?): Boolean {
                 if (!allSeenLinks.add(url)) return false
@@ -802,6 +810,7 @@ class EgyDead(val context: Context) : MainAPI() {
                     }
                 }
             }
+
             coroutineScope {
                 candidates.map { pair ->
                     async(Dispatchers.IO) {
