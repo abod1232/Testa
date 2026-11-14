@@ -737,6 +737,8 @@ class EgyDead(val context: Context) : MainAPI() {
     ): Boolean {
         try {
             val watchPageUrl = if (!data.contains("?view=watch")) "$data?view=watch" else data
+
+            // طلب صفحة المشاهدة مباشرة
             val document = try {
                 httpPost(watchPageUrl, data = mapOf("View" to "1"), referer = data)
             } catch (e: Exception) {
@@ -750,10 +752,14 @@ class EgyDead(val context: Context) : MainAPI() {
             fun addCandidate(raw: String?, name: String?) {
                 if (raw.isNullOrBlank()) return
                 val normalized = normalizeUrl(raw, watchPageUrl)?.trimEnd('/') ?: return
+
+                // استخراج كود الفيديو والدومين لمنع تكرار نفس السيرفر (مثل /v/ و /file/)
                 try {
                     val u = URL(normalized)
                     val host = u.host.replace("www.", "")
                     val fileCode = u.path.trimEnd('/').substringAfterLast('/')
+                    
+                    // مفتاح فريد يجمع اسم السيرفر وكود الملف
                     val uniqueKey = "${host}_$fileCode"
                     if (!seenServerCodes.add(uniqueKey)) {
                         return // تم تجاهل الرابط لأنه لنفس الفيديو مسبقاً
@@ -762,6 +768,8 @@ class EgyDead(val context: Context) : MainAPI() {
 
                 rawCandidates.add(Pair(normalized, name))
             }
+
+            // 1. استخراج سيرفرات المشاهدة أولاً (الأهم)
             val watchSelectors = listOf("ul.serversList li", "ul.servers-list li", "div.serversList li")
             for (sel in watchSelectors) {
                 for (li in document.select(sel)) {
@@ -773,6 +781,8 @@ class EgyDead(val context: Context) : MainAPI() {
                     addCandidate(candidate, serverName)
                 }
             }
+
+            // 2. استخراج سيرفرات التحميل (فقط إذا لم تكن موجودة في المشاهدة)
             val downloadSelectors = listOf("ul.donwload-servers-list li", "ul.download-servers-list li")
             for (sel in downloadSelectors) {
                 for (li in document.select(sel)) {
@@ -781,6 +791,8 @@ class EgyDead(val context: Context) : MainAPI() {
                     addCandidate(href, serverName)
                 }
             }
+
+            // قائمة مصفاة تماماً بدون أي تكرار
             val candidates = rawCandidates.distinctBy { it.first }
 
             val semaphore = Semaphore(12)
@@ -789,12 +801,16 @@ class EgyDead(val context: Context) : MainAPI() {
                 if (!allSeenLinks.add(url)) return false
 
                 var targetUrl = url
+
+                // حل hgcloud
                 if (targetUrl.contains("hgcloud") || (serverName != null && serverName.contains("hgcloud", ignoreCase = true))) {
                     val resolved = resolveHgCloud(targetUrl, watchPageUrl)
                     if (!resolved.isNullOrBlank()) {
                         targetUrl = resolved
                     }
                 }
+
+                // توجيه ذكي مباشر
                 return when {
                     targetUrl.contains("megamax") || targetUrl.contains("share4max") || targetUrl.contains("/mirror/") || targetUrl.contains("/iframe/") -> {
                         processMegamax(targetUrl, watchPageUrl, subtitleCallback, callback)
