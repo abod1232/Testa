@@ -174,8 +174,6 @@ class WecimaProvider : MainAPI() {
     val year = titleElement?.selectFirst("span.year")?.text()?.let {
         Regex("(\\d{4})").find(it)?.groupValues?.get(1)?.toIntOrNull()
     }
-
-    // أخذ العنوان من title الخاص بالرابط لأنه غير مقصوص، أو من strong كبديل
     val title = anchor.attr("title").ifBlank {
         titleElement?.text()
     }?.trim() ?: return null
