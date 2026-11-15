@@ -2135,7 +2135,7 @@ object UniversalExtractor {
         return results.distinct()
     }
 
-    private fun extractSubtitles(text: String, domain: String, cb: (SubtitleFile) -> Unit) {
+    private suspend fun extractSubtitles(text: String, domain: String, cb: (SubtitleFile) -> Unit) {
         val patterns = listOf(
             """["'](?:file|src|url)["']?\s*:\s*["']([^"']+\.(?:vtt|srt)[^"']*)["']""",
             """(https?:[^\s"'<>]+\.(?:vtt|srt)[^\s"'<>]*)"""
