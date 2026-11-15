@@ -192,15 +192,14 @@ class WecimaProvider : MainAPI() {
 
             val trendingItems = document.select("wecimaactivities inner--wecimaactivities a").mapNotNull { a ->
                 val href = fixUrl(a.attr("href")).takeIf { it.startsWith("http") } ?: return@mapNotNull null
-                val pEl = a.selectFirst("p")
-                val title = pEl?.ownText()?.trim()?.ifBlank { null }
-                    ?: pEl?.text()?.replace(Regex("\\(\\s*\\d{4}\\s*\\)"), "")?.trim()
-                    ?: return@mapNotNull null
+                val pEl = a.selectFirst("p") ?: return@mapNotNull null
+val title = pEl.ownText().trim().ifBlank { null }
+    ?: pEl.text().replace(Regex("\\(\\s*\\d{4}\\s*\\)"), "").trim().ifBlank { null }
+    ?: return@mapNotNull null
 
-                val year = pEl.selectFirst("span.year")?.text()?.let {
-                    Regex("(\\d{4})").find(it)?.groupValues?.get(1)?.toIntOrNull()
-                }
-
+val year = pEl.selectFirst("span.year")?.text()?.let {
+    Regex("(\\d{4})").find(it)?.groupValues?.get(1)?.toIntOrNull()
+}
                 val styleAttr = a.attr("style")
                 val rawPoster = Regex("url\\(['\"]?(.*?)['\"]?\\)").find(styleAttr)?.groupValues?.get(1)?.trim()
                 val posterUrl = rawPoster?.takeIf { it.isNotBlank() }?.let { fixUrl(it) }
