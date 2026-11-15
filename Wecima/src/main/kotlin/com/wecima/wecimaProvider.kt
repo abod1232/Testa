@@ -167,22 +167,27 @@ class WecimaProvider : MainAPI() {
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
-        val titleElement = this.selectFirst("h2, strong") ?: return null
-        val title = titleElement.text().trim()
-        val anchor = this.selectFirst("a") ?: return null
-        val href = anchor.attr("href")
+    val titleElement = this.selectFirst("h2, strong") ?: return null
+    val title = titleElement.text().trim()
+    val anchor = this.selectFirst("a") ?: return null
+    val href = anchor.attr("href")
 
-        val posterSpan = this.selectFirst("span.BG--GridItem")
-        val posterUrl = posterSpan?.attr("data-src")?.ifBlank { null }
-            ?: posterSpan?.attr("style")?.let { style ->
-                Regex("url\\((.*?)\\)").find(style)?.groupValues?.get(1)
-            }?.let { fixUrl(it) }
+    val posterSpan = this.selectFirst("span.BG--GridItem")
+    val styleAttr = posterSpan?.attr("data-lazy-style")?.ifBlank { null }
+        ?: posterSpan?.attr("style")?.ifBlank { null }
 
-        return newMovieSearchResponse(title, href, TvType.Movie) {
-            this.posterUrl = posterUrl
-            this.posterHeaders = imageHeaders() // cf_clearance فقط
-        }
+    val rawPosterUrl = posterSpan?.attr("data-src")?.ifBlank { null }
+        ?: styleAttr?.let { style ->
+            Regex("url\\(['\"]?(.*?)['\"]?\\)").find(style)?.groupValues?.get(1)
+        }?.trim()?.ifBlank { null }
+
+    val posterUrl = rawPosterUrl?.let { fixUrl(it) }
+
+    return newMovieSearchResponse(title, href, TvType.Movie) {
+        this.posterUrl = posterUrl
+        this.posterHeaders = imageHeaders()
     }
+}
 
     private fun imageHeaders(): Map<String, String> {
         return currentCfCookie?.let {
