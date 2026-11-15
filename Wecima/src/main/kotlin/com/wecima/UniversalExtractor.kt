@@ -1771,8 +1771,6 @@ object UniversalExtractor {
                     }
                 }
             }
-
-            // إذا لم تجد الطريقة العامة أي رابط، يتم مطابقة اسم السيرفر (بغض النظر عن اللاحقة) أو بصمة الـ HTML
             if (!extractedAny) {
                 runFallbackByHostOrSignature(
                     url = serverUrl,
@@ -1805,7 +1803,6 @@ object UniversalExtractor {
         val serverBaseName = h.removePrefix("www.").substringBefore(".")
 
         val extractor: ExtractorApi? = when {
-            // StreamWish وعائلته أياً كانت نهاية النطاق (.fun, .to, .com, ...)
             h.contains("streamwish") || h.contains("wishembed") || h.contains("wishfast") ||
                 h.contains("dwish") || h.contains("embedwish") || h.contains("strwish") ->
                 ArabicStreamWishExtractor("StreamWish", origin)
@@ -1824,8 +1821,6 @@ object UniversalExtractor {
 
             h.contains("hanerix") ->
                 ArabicStreamWishExtractor("Hanerix", origin)
-
-            // DoodStream والمرايا الخاصة به
             h.contains("dood") || h.contains("d0o0d") || h.contains("do0od") ||
                 h.contains("dsvplay") || h.contains("ds2play") || h.contains("doply") ->
                 ArabicDoodExtractor("DoodStream", origin)
@@ -1835,8 +1830,6 @@ object UniversalExtractor {
 
             h.contains("myvidplay") ->
                 ArabicDoodExtractor("MyVidPlay", origin)
-
-            // Vidstack / UPNShare / RPMShare / StreamP2P
             h.contains("upns") || h.contains("uns.") ->
                 ArabicVidstackExtractor("UPNShare", origin)
 
@@ -1845,19 +1838,13 @@ object UniversalExtractor {
 
             h.contains("rpmplay") || h.contains("rpmshare") ->
                 ArabicVidstackExtractor("RPMShare", origin)
-
-            // MegaMax / Share4Max
             h.contains("megamax") ->
                 ArabicMegaMaxExtractor("MegaMax", origin)
 
             h.contains("share4max") ->
                 ArabicMegaMaxExtractor("Share4Max", origin)
-
-            // Byse
             h.contains("byse") ->
                 ArabicByseExtractor("Byse", origin)
-
-            // LuluStream & Packer
             h.contains("lulu") ->
                 LuluStreamExtractor().apply { mainUrl = origin }
 
@@ -1872,8 +1859,6 @@ object UniversalExtractor {
 
             h.contains("lolololu") || h.contains("tuktuk") ->
                 TukTukVipExtractor().apply { mainUrl = origin }
-
-            // باقي السيرفرات بغض النظر عن اللاحقة
             h.contains("streamtape") || h.contains("shavetape") ->
                 ArabicStreamTapeExtractor()
 
@@ -1918,8 +1903,6 @@ object UniversalExtractor {
 
             h.contains("gofile") ->
                 ArabicGoFileExtractor()
-
-            // بصمات HTML كحل أخير إذا كان الدومين جديداً ومجهول الاسم
             html.contains("/pass_md5/") ->
                 ArabicDoodExtractor("DoodStream", origin)
 
