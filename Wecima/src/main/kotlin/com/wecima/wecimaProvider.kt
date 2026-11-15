@@ -173,16 +173,12 @@ class WecimaProvider : MainAPI() {
         }
 
         val homePageList = ArrayList<HomePageList>()
-
-        // 1. القسم الرئيسي: جديد ماي سيما (يدعم التمرير والصفحات التالية)
         val mainItems = document.select("div#MainFiltar div.GridItem").mapNotNull {
             it.toSearchResult()
         }
         if (mainItems.isNotEmpty()) {
             homePageList.add(HomePageList("جديد ماي سيما", mainItems))
         }
-
-        // 2. السلايدر وقسم الشائع (يُجلبان في الصفحة الأولى فقط من نفس الطلب دون تكرار عند التمرير)
         if (page == 1) {
             val sliderItems = document.select("wecimabegin div.Slides--Main div.GridItem").mapNotNull {
                 it.toSearchResult()
