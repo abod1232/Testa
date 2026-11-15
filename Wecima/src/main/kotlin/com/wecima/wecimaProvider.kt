@@ -618,7 +618,7 @@ class WecimaProvider : MainAPI() {
             }
 
             candidates.addAll(hgFallbackDomains)
-            val uniqueCandidates = candidates.distinct().take(4)
+            val uniqueCandidates = candidates.distinct().take(2)
 
             for (dest in uniqueCandidates) {
                 if (dest.equals(currentHost, ignoreCase = true)) continue
