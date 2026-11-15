@@ -295,118 +295,183 @@ class WecimaProvider : MainAPI() {
         }
         return initialResults
     }
+    private fun parseSeasonNumber(text: String): Int? {
+    Regex("(\\d+)").find(text)?.groupValues?.get(1)?.toIntOrNull()?.let { return it }
+
+    val normalized = text
+        .replace("أ", "ا")
+        .replace("إ", "ا")
+        .replace("آ", "ا")
+        .trim()
+
+    val ordinals = listOf(
+        "الحادي عشر" to 11,
+        "الثاني عشر" to 12,
+        "الثالث عشر" to 13,
+        "الرابع عشر" to 14,
+        "الخامس عشر" to 15,
+        "السادس عشر" to 16,
+        "السابع عشر" to 17,
+        "الثامن عشر" to 18,
+        "التاسع عشر" to 19,
+        "العشرون" to 20,
+        "العاشر" to 10,
+        "الاول" to 1,
+        "الثاني" to 2,
+        "الثالث" to 3,
+        "الرابع" to 4,
+        "الخامس" to 5,
+        "السادس" to 6,
+        "السابع" to 7,
+        "الثامن" to 8,
+        "التاسع" to 9
+    )
+
+    return ordinals.firstOrNull { normalized.contains(it.first) }?.second
+}
 
     override suspend fun load(url: String): LoadResponse {
-        Log.d(logTag, "load() initiated with URL: $url")
-        val document = httpGet(url)
+    Log.d(logTag, "load() initiated with URL: $url")
+    val document = httpGet(url)
 
-        val isTvSeriesPage = url.contains("/series/") || document.selectFirst(".List--Seasons--Episodes") != null
-        val isEpisodePage = url.contains("/watch/") && document.selectFirst(".Breadcrumb--UX a[href*='/series/']") != null
+    val isSeries = url.contains("/series/") ||
+        document.selectFirst("div.Seasons--Episodes, div.SeasonsList, singlesection.Series--Section") != null
 
-        Log.d(logTag, "isTvSeriesPage: $isTvSeriesPage, isEpisodePage: $isEpisodePage")
+    if (isSeries) {
+        val seriesUrl = document.selectFirst("singlesection.Series--Section > a")?.attr("href")
+            ?.let { fixUrl(it) }
+            ?: url
 
-        if (isTvSeriesPage || isEpisodePage) {
-            val seriesUrl = if (isEpisodePage) {
-                document.selectFirst(".Breadcrumb--UX a[href*='/series/']")?.attr("href")
-                    ?: throw ErrorLoadingException("Could not find series URL from episode page")
-            } else {
-                url
-            }
+        val title = document.selectFirst("singlesection.Series--Section h2")?.text()
+            ?.replace("حلقات ", "")
+            ?.trim()
+            ?: document.selectFirst("div.Title--Content--Single-begin h1")?.text()?.trim()
+            ?: "TV Series Title"
 
-            val seriesDocument = if (isEpisodePage) httpGet(seriesUrl) else document
+        val posterUrl = document.selectFirst("wecima.separated--top")?.attr("style")?.let {
+            Regex("--img:url\\((.*?)\\)").find(it)?.groupValues?.get(1)
+        }?.ifBlank { null } ?: document.selectFirst("meta[property=og:image]")?.attr("content")?.ifBlank { null }
 
-            val title = seriesDocument.selectFirst("div.Title--Content--Single-begin h1")?.text()?.trim() ?: "TV Series Title"
-            val posterUrl = seriesDocument.selectFirst("wecima.separated--top")?.attr("style")?.let {
-                Regex("--img:url\\((.*?)\\)").find(it)?.groupValues?.get(1)
-            }
-            val plot = seriesDocument.selectFirst("div.StoryMovieContent")?.text()?.trim()
-            val year = seriesDocument.select("ul.Terms--Content--Single-begin li")
+        val plot = document.selectFirst("div.StoryMovieContent")?.text()?.trim()
+
+        val year = document.selectFirst("div.Title--Content--Single-begin a[href*='/release-year/']")?.text()
+            ?.trim()?.toIntOrNull()
+            ?: document.select("ul.Terms--Content--Single-begin li")
                 .find { it.selectFirst("span")?.text()?.contains("السنة") == true }
-                ?.selectFirst("p")?.text()?.toIntOrNull()
+                ?.selectFirst("p")?.text()?.trim()?.toIntOrNull()
 
-            Log.d(logTag, "Loading TV Series: $title")
+        val htmlText = document.html()
+        val ajaxBase = Regex("""var\s+AjaxtURL\s*=\s*"([^"]+)"""")
+            .find(htmlText)?.groupValues?.get(1)
+            ?: "$mainUrl/wp-content/themes/mycima/Ajaxt/"
 
-            val episodes = mutableListOf<Episode>()
-            val seasonElements = seriesDocument.select("div.List--Seasons--Episodes a.SeasonsEpisodes")
+        val postId = Regex("""Single/Episodes\.php.*?post_id:\s*['"](\d+)['"]""", RegexOption.DOT_MATCHES_ALL)
+            .find(htmlText)?.groupValues?.get(1)
+            ?: document.selectFirst("link[rel=shortlink]")?.attr("href")
+                ?.let { Regex("p=(\\d+)").find(it)?.groupValues?.get(1) }
+            ?: ""
 
-            if (seasonElements.isNotEmpty()) {
-                Log.d(logTag, "Found ${seasonElements.size} seasons. Processing...")
-                seasonElements.amap { seasonEl ->
-                    val seasonNum =
-                        Regex("الموسم (\\d+)").find(seasonEl.text())?.groupValues?.get(1)
-                            ?.toIntOrNull()
-                    val dataId = seasonEl.attr("data-id")
-                    val dataSeason = seasonEl.attr("data-season")
-                    try {
-                        val seasonHtml = httpPost(
-                            "$mainUrl/ajax/Episode",
-                            data = mapOf("post_id" to dataId, "season" to dataSeason),
-                            referer = seriesUrl
+        val episodes = mutableListOf<Episode>()
+        val seasonElements = document.select("div.SeasonsList ul li a")
+
+        if (seasonElements.isNotEmpty()) {
+            Log.d(logTag, "Found ${seasonElements.size} seasons. Processing...")
+            seasonElements.amapIndexed { idx, seasonEl ->
+                val seasonNum = parseSeasonNumber(seasonEl.text()) ?: (idx + 1)
+                val dataSeason = seasonEl.attr("data-season")
+
+                try {
+                    val seasonHtml = httpPost(
+                        "${ajaxBase.trimEnd('/')}/Single/Episodes.php",
+                        data = mapOf("season" to dataSeason, "post_id" to postId),
+                        referer = url
+                    )
+                    val seasonDoc = Jsoup.parse(seasonHtml)
+                    // نستخدم a مباشرة لأن الحلقة النشطة قد لا تحتوي على class hoverable activable
+                    seasonDoc.select("a").forEach { epEl ->
+                        val epHref = epEl.attr("href").ifBlank { return@forEach }
+                        val epName = epEl.selectFirst("episodetitle")?.text()?.trim()
+                            ?: epEl.text().trim()
+                        val epNum = Regex("(\\d+)").find(epName)?.groupValues?.get(1)?.toIntOrNull()
+
+                        episodes.add(
+                            newEpisode(fixUrl(epHref)) {
+                                this.name = epName
+                                this.season = seasonNum
+                                this.episode = epNum
+                                this.posterUrl = posterUrl
+                            }
                         )
-                        val seasonDoc = Jsoup.parse(seasonHtml)
-                        seasonDoc.select("a.hoverable.activable").forEach { epEl ->
+                    }
+                } catch (e: Exception) {
+                    logError(e)
+                    // احتياطي للموسم النشط الموجود أصلاً في الصفحة إذا فشل طلب AJAX
+                    if (seasonEl.parent()?.hasClass("active") == true) {
+                        document.select("div.EpisodesList a").forEach { epEl ->
+                            val epHref = epEl.attr("href").ifBlank { return@forEach }
+                            val epName = epEl.selectFirst("episodetitle")?.text()?.trim()
+                            val epNum = Regex("(\\d+)").find(epName ?: "")?.groupValues?.get(1)?.toIntOrNull()
                             episodes.add(
-                                newEpisode(epEl.attr("href")) {
-                                    name = epEl.selectFirst("episodetitle")?.text()
-                                    season = seasonNum
-                                    episode =
-                                        Regex("الحلقة (\\d+)").find(name ?: "")?.groupValues?.get(1)
-                                            ?.toIntOrNull()
+                                newEpisode(fixUrl(epHref)) {
+                                    this.name = epName
+                                    this.season = seasonNum
+                                    this.episode = epNum
                                     this.posterUrl = posterUrl
-
                                 }
                             )
                         }
-                    } catch (e: Exception) {
-                        logError(e)
                     }
                 }
-            } else {
-                Log.d(logTag, "No multi-season list found. Fallback to single-season logic.")
-                seriesDocument.select(".EpisodesList.Full--Width a").forEach { epEl ->
-                    episodes.add(
-                        newEpisode(epEl.attr("href")) {
-                            name = epEl.selectFirst("episodetitle")?.text()
-                            this.season = 1
-                            this.episode = Regex("الحلقة (\\d+)").find(name ?: "")?.groupValues?.get(1)?.toIntOrNull()
-                            this.posterUrl = posterUrl
-                        }
-                    )
-                }
             }
-
-            Log.d(logTag, "Finished loading ${episodes.size} episodes.")
-            return newTvSeriesLoadResponse(title, seriesUrl, TvType.TvSeries, episodes.sortedWith(compareBy({ it.season }, { it.episode }))) {
-                this.posterUrl = posterUrl
-                this.posterHeaders = imageHeaders()
-                this.plot = plot
-                this.year = year
-            }
-
         } else {
-            val title = document.selectFirst("div.Title--Content--Single-begin h1")?.text()?.trim() ?: "Movie Title"
-            val posterUrl = document.select("meta[property=og:image]").attr("content").ifBlank {
-                document.selectFirst("wecima.separated--top")?.let { element ->
-                    val style = element.attr("data-lazy-style").ifBlank { element.attr("style") }
-                    Regex("url\\((.*?)\\)").find(style)?.groupValues?.get(1)
-                }
-            }
-
-            val plot = document.selectFirst("div.StoryMovieContent")?.text()?.trim()
-            val year = document.select("ul.Terms--Content--Single-begin li")
-                .find { it.selectFirst("span")?.text()?.contains("السنة") == true }
-                ?.selectFirst("p")?.text()?.toIntOrNull()
-
-            Log.d(logTag, "Loading Movie: $title")
-
-            return newMovieLoadResponse(title, url, TvType.Movie, url) {
-                this.posterUrl = posterUrl
-                this.posterHeaders = imageHeaders()
-                this.plot = plot
-                this.year = year
+            document.select("div.EpisodesList a").forEach { epEl ->
+                val epHref = epEl.attr("href").ifBlank { return@forEach }
+                val epName = epEl.selectFirst("episodetitle")?.text()?.trim()
+                val epNum = Regex("(\\d+)").find(epName ?: "")?.groupValues?.get(1)?.toIntOrNull()
+                episodes.add(
+                    newEpisode(fixUrl(epHref)) {
+                        this.name = epName
+                        this.season = 1
+                        this.episode = epNum
+                        this.posterUrl = posterUrl
+                    }
+                )
             }
         }
+
+        val sortedEpisodes = episodes
+            .distinctBy { it.data }
+            .sortedWith(compareBy({ it.season }, { it.episode }))
+
+        return newTvSeriesLoadResponse(title, seriesUrl, TvType.TvSeries, sortedEpisodes) {
+            this.posterUrl = posterUrl
+            this.posterHeaders = imageHeaders()
+            this.plot = plot
+            this.year = year
+        }
+    } else {
+        val title = document.selectFirst("div.Title--Content--Single-begin h1")?.text()?.trim() ?: "Movie Title"
+        val posterUrl = document.select("meta[property=og:image]").attr("content").ifBlank {
+            document.selectFirst("wecima.separated--top")?.let { element ->
+                val style = element.attr("data-lazy-style").ifBlank { element.attr("style") }
+                Regex("url\\((.*?)\\)").find(style)?.groupValues?.get(1)
+            }
+        }
+        val plot = document.selectFirst("div.StoryMovieContent")?.text()?.trim()
+        val year = document.selectFirst("div.Title--Content--Single-begin a[href*='/release-year/']")?.text()
+            ?.trim()?.toIntOrNull()
+            ?: document.select("ul.Terms--Content--Single-begin li")
+                .find { it.selectFirst("span")?.text()?.contains("السنة") == true }
+                ?.selectFirst("p")?.text()?.trim()?.toIntOrNull()
+
+        return newMovieLoadResponse(title, url, TvType.Movie, url) {
+            this.posterUrl = posterUrl
+            this.posterHeaders = imageHeaders()
+            this.plot = plot
+            this.year = year
+        }
     }
+}
     private fun decodeWecimaUrl(encodedStr: String): String? {
         return try {
             if (encodedStr.isBlank()) return null
