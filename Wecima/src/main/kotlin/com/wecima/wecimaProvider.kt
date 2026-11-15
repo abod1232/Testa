@@ -472,50 +472,56 @@ class WecimaProvider : MainAPI() {
     }
 
     override suspend fun loadLinks(
-        data: String,
-        isCasting: Boolean,
-        subtitleCallback: (SubtitleFile) -> Unit,
-        callback: (ExtractorLink) -> Unit
-    ): Boolean {
-        Log.d(logTag, "🔗 loadLinks initiated for: $data")
-        val document = httpGet(data)
-        val collectedUrls = linkedSetOf<String>()
-        document.select("ul#watch li[data-watch]").forEach { serverEl ->
-            val watchUrl = serverEl.attr("data-watch").trim()
-            if (watchUrl.startsWith("http")) {
-                Log.d(logTag, "📺 Watch URL: $watchUrl")
-                collectedUrls.add(watchUrl)
-            }
-        }
-        document.select("ul.List--Download--Wecima--Single li a[href]").forEach { downloadEl ->
-            val downloadUrl = downloadEl.attr("href").trim()
-            if (downloadUrl.startsWith("http")) {
-                Log.d(logTag, "📥 Download URL: $downloadUrl")
-                collectedUrls.add(downloadUrl)
-            }
-        }
-        document.select("ul.WatchServersList li btn[data-url]").forEach { serverBtn ->
-            decodeWecimaUrl(serverBtn.attr("data-url"))?.let { decodedUrl ->
-                if (decodedUrl.startsWith("http")) {
-                    Log.d(logTag, "📺 Decoded Watch URL: $decodedUrl")
-                    collectedUrls.add(decodedUrl)
-                }
-            }
-        }
+    data: String,
+    isCasting: Boolean,
+    subtitleCallback: (SubtitleFile) -> Unit,
+    callback: (ExtractorLink) -> Unit
+): Boolean {
+    Log.d(logTag, "🔗 loadLinks initiated for: $data")
+    val document = httpGet(data)
+    val collectedUrls = linkedSetOf<String>()
 
-        document.select(".openLinkDown[data-href]").forEach { downloadBtn ->
-            decodeWecimaUrl(downloadBtn.attr("data-href"))?.let { decodedUrl ->
-                if (decodedUrl.startsWith("http")) {
-                    Log.d(logTag, "📥 Decoded Download URL: $decodedUrl")
-                    collectedUrls.add(decodedUrl)
-                }
-            }
+    // 1. سيرفرات المشاهدة المباشرة
+    document.select("ul#watch li[data-watch]").forEach { serverEl ->
+        val watchUrl = serverEl.attr("data-watch").trim()
+        if (watchUrl.startsWith("http")) {
+            Log.d(logTag, "📺 Watch URL: $watchUrl")
+            collectedUrls.add(watchUrl)
         }
-
-        collectedUrls.amap { link ->
-            loadExtractor(link, mainUrl, subtitleCallback, callback)
-        }
-
-        return collectedUrls.isNotEmpty()
     }
+
+    // 2. سيرفرات التحميل المباشرة
+    document.select("ul.List--Download--Wecima--Single li a[href]").forEach { downloadEl ->
+        val downloadUrl = downloadEl.attr("href").trim()
+        if (downloadUrl.startsWith("http")) {
+            Log.d(logTag, "📥 Download URL: $downloadUrl")
+            collectedUrls.add(downloadUrl)
+        }
+    }
+
+    // 3. احتياطي للروابط المشفرة بالطريقة القديمة (إن وجدت)
+    document.select("ul.WatchServersList li btn[data-url]").forEach { serverBtn ->
+        decodeWecimaUrl(serverBtn.attr("data-url"))?.let { decodedUrl ->
+            if (decodedUrl.startsWith("http")) {
+                Log.d(logTag, "📺 Decoded Watch URL: $decodedUrl")
+                collectedUrls.add(decodedUrl)
+            }
+        }
+    }
+
+    document.select(".openLinkDown[data-href]").forEach { downloadBtn ->
+        decodeWecimaUrl(downloadBtn.attr("data-href"))?.let { decodedUrl ->
+            if (decodedUrl.startsWith("http")) {
+                Log.d(logTag, "📥 Decoded Download URL: $decodedUrl")
+                collectedUrls.add(decodedUrl)
+            }
+        }
+    }
+
+    collectedUrls.toList().amap { link ->
+        loadExtractor(link, mainUrl, subtitleCallback, callback)
+    }
+
+    return collectedUrls.isNotEmpty()
+}
 }
