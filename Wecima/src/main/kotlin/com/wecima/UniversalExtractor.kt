@@ -1656,89 +1656,310 @@ object UniversalExtractor {
         "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     private const val FALLBACK_UA =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-    override suspend fun loadLinks(
-        data: String,
-        isCasting: Boolean,
+    suspend fun extract(
+        url: String,
+        referer: String? = null,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit,
+        serverName: String? = null
+    ): Boolean {
+        return try {
+            val serverUrl = fixUrl(url)
+            if (serverUrl.isBlank()) return false
+
+            val uri = runCatching { URL(serverUrl) }.getOrNull() ?: return false
+            val domain = "${uri.protocol}://${uri.host}/"
+            val host = uri.host.lowercase()
+            val displayName = serverName?.takeIf { it.isNotBlank() }
+                ?: host.removePrefix("www.").substringBefore(".")
+
+            val emittedUrls = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+            var extractedAny = false
+            val dedup: (ExtractorLink) -> Unit = { link ->
+                val key = normalizeForDedup(link.url)
+                if (emittedUrls.add(key)) {
+                    extractedAny = true
+                    callback(link)
+                }
+            }
+
+            var rawHtml = fetchHtml(serverUrl, referer ?: domain)
+            var unpacked = ""
+
+            if (!rawHtml.isNullOrBlank()) {
+                val cookieMap = extractCookiesFromHtml(rawHtml)
+                val cookieHeader = cookieMap.entries.joinToString("; ") { "${it.key}=${it.value}" }
+                Log.d(TAG, "Cookies found: $cookieMap")
+                if (cookieMap.isNotEmpty()) {
+                    val withCookies = fetchHtml(serverUrl, referer ?: domain, cookieHeader)
+                    if (!withCookies.isNullOrBlank() && withCookies.length >= rawHtml.length) {
+                        rawHtml = withCookies
+                    }
+                }
+                unpacked = extractLogic(rawHtml)
+                if (unpacked.length > rawHtml.length) {
+                    Log.d(TAG, "Unpacked content expanded: ${rawHtml.length} → ${unpacked.length}")
+                }
+                try {
+                    extractSubtitles(unpacked, domain, subtitleCallback)
+                } catch (_: Exception) {}
+
+                val videoLinks = findVideoLinks(unpacked)
+                    .map { fixUrl(it, domain) }
+                    .filter { it.isNotBlank() && (it.startsWith("http") || it.startsWith("/")) }
+                    .distinct()
+
+                Log.d(TAG, "Candidate video links (${videoLinks.size}): ${videoLinks.take(10)}")
+                val extraLinks = safeRunResult { tryDlEndpoint(rawHtml, serverUrl, domain, cookieHeader) } ?: emptyList()
+                val allLinks = (videoLinks + extraLinks).distinct()
+
+                for (rawLink in allLinks) {
+                    val finalUrl = fixUrl(rawLink, domain)
+                    if (!finalUrl.startsWith("http")) continue
+
+                    val isHls = isHlsUrl(finalUrl)
+                    val isVideo = isDirectVideo(finalUrl)
+
+                    if (!isHls && !isVideo) continue
+
+                    val verifyHeaders = buildVerifyHeaders(domain, finalUrl, cookieHeader)
+                    val ok = verifyUrl(finalUrl, verifyHeaders)
+                    if (!ok) {
+                        Log.d(TAG, "Verify failed for: $finalUrl")
+                        val altHeaders = verifyHeaders + mapOf("User-Agent" to FALLBACK_UA)
+                        if (!verifyUrl(finalUrl, altHeaders)) continue
+                    }
+
+                    if (isHls) {
+                        val m3u8Links = safeRunResult {
+                            M3u8Helper.generateM3u8(
+                                source = displayName,
+                                streamUrl = finalUrl,
+                                referer = domain,
+                                headers = verifyHeaders,
+                                name = displayName
+                            )
+                        }.orEmpty()
+
+                        if (m3u8Links.isNotEmpty()) {
+                            m3u8Links.forEach(dedup)
+                        } else {
+                            val (q, qName) = parseQualityFromUrl(finalUrl)
+                            dedup(
+                                newExtractorLink(
+                                    source = displayName,
+                                    name = "$displayName $qName".trim(),
+                                    url = finalUrl,
+                                    type = ExtractorLinkType.M3U8
+                                ) {
+                                    this.referer = domain
+                                    this.quality = q
+                                    this.headers = verifyHeaders
+                                }
+                            )
+                        }
+                    } else {
+                        val (q, qName) = parseQualityFromUrl(finalUrl)
+                        dedup(
+                            newExtractorLink(
+                                source = displayName,
+                                name = "$displayName [$qName]",
+                                url = finalUrl,
+                                type = ExtractorLinkType.VIDEO
+                            ) {
+                                this.referer = domain
+                                this.quality = q
+                                this.headers = verifyHeaders
+                            }
+                        )
+                    }
+                }
+            }
+
+            if (!extractedAny) {
+                runFallbackByHostOrSignature(
+                    url = serverUrl,
+                    host = host,
+                    serverName = serverName,
+                    origin = domain.removeSuffix("/"),
+                    referer = referer,
+                    html = unpacked.ifBlank { rawHtml.orEmpty() },
+                    subtitleCallback = subtitleCallback,
+                    callback = dedup
+                )
+            }
+
+            extractedAny
+        } catch (e: Exception) {
+            Log.e(TAG, "Extraction failed for $url: ${e.message}", e)
+            false
+        }
+    }
+
+    private suspend fun runFallbackByHostOrSignature(
+        url: String,
+        host: String,
+        serverName: String?,
+        origin: String,
+        referer: String?,
+        html: String,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
-    ): Boolean {
-        Log.d(logTag, "🔗 loadLinks initiated for: $data")
-        val document = httpGet(data)
-        val collectedLinks = linkedMapOf<String, String?>()
+    ) {
+        val h = host.lowercase()
+        val n = serverName.orEmpty().lowercase().trim()
+        val target = "$h $n"
+        val serverBaseName = h.removePrefix("www.").substringBefore(".")
 
-        fun addLink(rawUrl: String?, serverName: String?) {
-            val cleanUrl = rawUrl?.trim().orEmpty()
-            if (!cleanUrl.startsWith("http")) return
-            val cleanName = serverName?.trim()?.takeIf { it.isNotBlank() }
-            if (!collectedLinks.containsKey(cleanUrl)) {
-                collectedLinks[cleanUrl] = cleanName
-            } else if (collectedLinks[cleanUrl].isNullOrBlank() && cleanName != null) {
-                collectedLinks[cleanUrl] = cleanName
-            }
-        }
-        document.select("ul#watch li[data-watch]").forEach { serverEl ->
-            val watchUrl = serverEl.attr("data-watch")
-            val serverName = serverEl.text().trim()
-            Log.d(logTag, "📺 Watch URL: $watchUrl ($serverName)")
-            addLink(watchUrl, serverName)
-        }
-        document.select("ul.List--Download--Wecima--Single li a[href]").forEach { downloadEl ->
-            val downloadUrl = downloadEl.attr("href")
-            val serverName = downloadEl.selectFirst("quality")?.text()?.trim()
-                ?: downloadEl.text().trim()
-            Log.d(logTag, "📥 Download URL: $downloadUrl ($serverName)")
-            addLink(downloadUrl, serverName)
-        }
-        document.select("ul.WatchServersList li btn[data-url]").forEach { serverBtn ->
-            decodeWecimaUrl(serverBtn.attr("data-url"))?.let { decodedUrl ->
-                val serverName = serverBtn.text().trim().ifBlank { serverBtn.parent()?.text()?.trim() }
-                addLink(decodedUrl, serverName)
-            }
+        val extractor: ExtractorApi? = when {
+            // StreamWish وعائلته (من الرابط أو اسم السيرفر بغض النظر عن اللاحقة)
+            target.contains("streamwish") || target.contains("wishembed") || target.contains("wishfast") ||
+                target.contains("dwish") || target.contains("embedwish") || target.contains("strwish") ->
+                ArabicStreamWishExtractor("StreamWish", origin)
+
+            target.contains("vidhide") ->
+                ArabicStreamWishExtractor("VidHide", origin)
+
+            target.contains("filelions") || target.contains("lion") ->
+                ArabicStreamWishExtractor("Filelions", origin)
+
+            target.contains("morencius") || target.contains("earnvids") ->
+                ArabicStreamWishExtractor("EarnVids", origin)
+
+            target.contains("vibuxer") || target.contains("streamhg") || target.contains("hgcloud") ->
+                ArabicStreamWishExtractor("StreamHG", origin)
+
+            target.contains("hanerix") ->
+                ArabicStreamWishExtractor("Hanerix", origin)
+
+            // DoodStream والمرايا الخاصة به
+            target.contains("dood") || target.contains("d0o0d") || target.contains("do0od") ||
+                target.contains("dsvplay") || target.contains("ds2play") || target.contains("doply") ->
+                ArabicDoodExtractor("DoodStream", origin)
+
+            target.contains("playmogo") ->
+                ArabicDoodExtractor("Playmogo", origin)
+
+            target.contains("myvidplay") ->
+                ArabicDoodExtractor("MyVidPlay", origin)
+
+            // Vidstack / UPNShare / RPMShare / StreamP2P
+            target.contains("upns") || target.contains("uns.") || target.contains("upnshare") ->
+                ArabicVidstackExtractor("UPNShare", origin)
+
+            target.contains("strp2p") || target.contains("p2pstream") || target.contains("streamp2p") ->
+                ArabicVidstackExtractor("StreamP2P", origin)
+
+            target.contains("rpmplay") || target.contains("rpmshare") ->
+                ArabicVidstackExtractor("RPMShare", origin)
+
+            // MegaMax / Share4Max
+            target.contains("megamax") ->
+                ArabicMegaMaxExtractor("MegaMax", origin)
+
+            target.contains("share4max") ->
+                ArabicMegaMaxExtractor("Share4Max", origin)
+
+            // Byse
+            target.contains("byse") ->
+                ArabicByseExtractor("Byse", origin)
+
+            // LuluStream & Packer & UpStream
+            target.contains("lulu") ->
+                LuluStreamExtractor().apply { mainUrl = origin }
+
+            target.contains("videoland") ->
+                ArabicPackerExtractor("Videoland", origin)
+
+            target.contains("updown") ->
+                ArabicPackerExtractor("UpDown", origin)
+
+            target.contains("okstream") ->
+                ArabicPackerExtractor("OkStream", origin)
+
+            target.contains("upstream") ->
+                ArabicPackerExtractor("UpStream", origin)
+
+            target.contains("lolololu") || target.contains("tuktuk") ->
+                TukTukVipExtractor().apply { mainUrl = origin }
+
+            // باقي السيرفرات بغض النظر عن اللاحقة
+            target.contains("streamtape") || target.contains("shavetape") ->
+                ArabicStreamTapeExtractor()
+
+            serverBaseName == "voe" || h.contains("voe.") || n == "voe" || n.contains("voe") ->
+                ArabicVoeExtractor()
+
+            target.contains("mixdrop") ->
+                ArabicMixdropExtractor()
+
+            target.contains("mp4upload") ->
+                ArabicMp4UploadExtractor()
+
+            target.contains("firestream") ->
+                ArabicFireStreamExtractor()
+
+            target.contains("vidara") ->
+                ArabicVidaraExtractor()
+
+            target.contains("yonaplay") || target.contains("dotplay") ->
+                ArabicYonaPlayExtractor()
+
+            target.contains("videas") ->
+                ArabicVideasExtractor()
+
+            serverBaseName == "videa" || h.contains("videa.") || n == "videa" ->
+                ArabicVideaExtractor()
+
+            h.contains("ok.ru") || h.contains("odnoklassniki") || n == "ok" || n == "ok.ru" ->
+                ArabicOkRuExtractor()
+
+            h.contains("vk.com") || h.contains("vkvideo") || h.contains("vk.ru") || n == "vk" || n.contains("vk video") ->
+                ArabicVkExtractor()
+
+            target.contains("mediafire") ->
+                ArabicMediaFireExtractor()
+
+            target.contains("pixeldrain") ->
+                ArabicPixelDrainExtractor()
+
+            target.contains("4shared") ->
+                ArabicFourSharedExtractor()
+
+            target.contains("gofile") ->
+                ArabicGoFileExtractor()
+
+            // بصمات HTML كحل أخير
+            html.contains("/pass_md5/") ->
+                ArabicDoodExtractor("DoodStream", origin)
+
+            html.contains("var links") || html.contains("hls4") ->
+                ArabicStreamWishExtractor(displayNameIfNeeded(serverName, serverBaseName), origin)
+
+            html.contains("MDCore.wurl") ->
+                ArabicMixdropExtractor()
+
+            html.contains("ideoolink") || html.contains("robotlink") ->
+                ArabicStreamTapeExtractor()
+
+            html.contains("key_parts") && html.contains("playback") ->
+                ArabicByseExtractor("Byse", origin)
+
+            html.contains("data-options") && html.contains("flashvars") ->
+                ArabicOkRuExtractor()
+
+            else -> null
         }
 
-        document.select(".openLinkDown[data-href]").forEach { downloadBtn ->
-            decodeWecimaUrl(downloadBtn.attr("data-href"))?.let { decodedUrl ->
-                val serverName = downloadBtn.selectFirst("quality")?.text()?.trim()
-                addLink(decodedUrl, serverName)
-            }
+        if (extractor != null) {
+            Log.d(TAG, "Fallback matched [${extractor.name}] for host=$host, serverName=$serverName")
+            safeRun { extractor.getUrl(url, referer, subtitleCallback, callback) }
         }
+    }
 
-        collectedLinks.entries.toList().amap { (link, serverName) ->
-            var targetUrl = link
-            if (targetUrl.contains("hgcloud", ignoreCase = true) ||
-                serverName?.contains("hgcloud", ignoreCase = true) == true
-            ) {
-                val resolved = resolveHgCloud(targetUrl, data)
-                if (!resolved.isNullOrBlank()) {
-                    Log.d(logTag, "🔄 Resolved hgcloud: $targetUrl -> $resolved")
-                    targetUrl = resolved
-                }
-            }
-
-            var isLoaded = false
-            try {
-                isLoaded = UniversalExtractor.extract(
-                    url = targetUrl,
-                    referer = data,
-                    subtitleCallback = subtitleCallback,
-                    callback = callback,
-                    serverName = serverName
-                )
-            } catch (e: Exception) {
-                logError(e)
-            }
-
-            if (!isLoaded) {
-                try {
-                    isLoaded = loadExtractor(targetUrl, data, subtitleCallback, callback)
-                } catch (e: Exception) {
-                    logError(e)
-                }
-            }
-            isLoaded
-        }
-
-        return collectedLinks.isNotEmpty()
+    private fun displayNameIfNeeded(serverName: String?, fallback: String): String {
+        return serverName?.trim()?.takeIf { it.isNotBlank() }
+            ?: fallback.ifBlank { "StreamWish" }
     }
 
 
