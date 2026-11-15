@@ -24,15 +24,11 @@ class WecimaProvider : MainAPI() {
 
     private val streamWishPreferredDomains = listOf(
         "vibuxer.com",
-        "hanerix.com"
-    )
-
-    private val hgFallbackDomains = listOf(
-        "vibuxer.com",
         "hanerix.com",
-        "streamwish.to",
-        "streamhg.com",
-        "wishembed.pro"
+        "niramirus.com",
+        "hglamioz.com",
+        "playnixes.com",
+        "medixiru.com"
     )
 
     @Volatile
@@ -308,13 +304,40 @@ class WecimaProvider : MainAPI() {
         Regex("(\\d+)").find(text)?.groupValues?.get(1)?.toIntOrNull()?.let { return it }
 
         val normalized = text
-            .replace("أ", "ا")
-            .replace("إ", "ا")
-            .replace("آ", "ا")
+            .replace(Regex("[\u064B-\u065F\u0670\u0640]"), "") // إزالة التشكيل والتطويل
+            .replace('أ', 'ا')
+            .replace('إ', 'ا')
+            .replace('آ', 'ا')
+            .replace('ٱ', 'ا')
+            .replace('ى', 'ي')
+            .replace('ؤ', 'و')
+            .replace('ئ', 'ي')
+            .replace(Regex("\\s+"), " ")
             .trim()
 
         val ordinals = listOf(
-            "الحادي عشر" to 11,
+            // 31 - 35 (الأرقام المركبة أولاً لتجنب التطابق الجزئي)
+            "الحادي والثلاثون" to 31, "الحادي والثلاثين" to 31, "الواحد والثلاثون" to 31, "الواحد والثلاثين" to 31,
+            "الثاني والثلاثون" to 32, "الثاني والثلاثين" to 32,
+            "الثالث والثلاثون" to 33, "الثالث والثلاثين" to 33,
+            "الرابع والثلاثون" to 34, "الرابع والثلاثين" to 34,
+            "الخامس والثلاثون" to 35, "الخامس والثلاثين" to 35,
+            "الثلاثون" to 30, "الثلاثين" to 30,
+
+            // 21 - 29
+            "الحادي والعشرون" to 21, "الحادي والعشرين" to 21, "الواحد والعشرون" to 21, "الواحد والعشرين" to 21,
+            "الثاني والعشرون" to 22, "الثاني والعشرين" to 22,
+            "الثالث والعشرون" to 23, "الثالث والعشرين" to 23,
+            "الرابع والعشرون" to 24, "الرابع والعشرين" to 24,
+            "الخامس والعشرون" to 25, "الخامس والعشرين" to 25,
+            "السادس والعشرون" to 26, "السادس والعشرين" to 26,
+            "السابع والعشرون" to 27, "السابع والعشرين" to 27,
+            "الثامن والعشرون" to 28, "الثامن والعشرين" to 28,
+            "التاسع والعشرون" to 29, "التاسع والعشرين" to 29,
+            "العشرون" to 20, "العشرين" to 20,
+
+            // 11 - 19
+            "الحادي عشر" to 11, "الواحد عشر" to 11,
             "الثاني عشر" to 12,
             "الثالث عشر" to 13,
             "الرابع عشر" to 14,
@@ -323,8 +346,9 @@ class WecimaProvider : MainAPI() {
             "السابع عشر" to 17,
             "الثامن عشر" to 18,
             "التاسع عشر" to 19,
-            "العشرون" to 20,
             "العاشر" to 10,
+
+            // 1 - 9
             "الاول" to 1,
             "الثاني" to 2,
             "الثالث" to 3,
@@ -411,8 +435,29 @@ class WecimaProvider : MainAPI() {
 
             val episodes: List<Episode> = if (seasonElements.isNotEmpty()) {
                 Log.d(logTag, "Found ${seasonElements.size} seasons. Processing...")
+
+                // 1. استخراج أرقام المواسم المعروفة أولاً
+                val parsedSeasonNums = seasonElements.map { parseSeasonNumber(it.text()) }
+                val usedNumbers = parsedSeasonNums.filterNotNull().toMutableSet()
+
+                // 2. إسناد الأرقام الناقصة بالترتيب لأي موسم لم يتم التعرف على اسمه
+                var nextMissing = 1
+                val resolvedSeasonNums = parsedSeasonNums.map { knownNum ->
+                    if (knownNum != null) {
+                        knownNum
+                    } else {
+                        while (usedNumbers.contains(nextMissing)) {
+                            nextMissing++
+                        }
+                        val assigned = nextMissing
+                        usedNumbers.add(assigned)
+                        nextMissing++
+                        assigned
+                    }
+                }
+
                 seasonElements.mapIndexed { idx, el -> idx to el }.amap { (idx, seasonEl) ->
-                    val seasonNum = parseSeasonNumber(seasonEl.text()) ?: (idx + 1)
+                    val seasonNum = resolvedSeasonNums[idx]
                     val seasonTitle = seasonEl.text()
                         .replace(Regex("\\s*(مترجم|مدبلج).*"), "")
                         .trim()
@@ -640,6 +685,8 @@ class WecimaProvider : MainAPI() {
             val uri = URL(r1.url)
             val currentHost = uri.host
             val candidates = mutableListOf<String>()
+
+            // النطاقات الستة المفضلة أولاً
             candidates.addAll(streamWishPreferredDomains)
 
             if (jsPathMatch != null) {
@@ -655,8 +702,7 @@ class WecimaProvider : MainAPI() {
                 }
             }
 
-            candidates.addAll(hgFallbackDomains)
-            val uniqueCandidates = candidates.distinct().take(6)
+            val uniqueCandidates = candidates.distinct().take(8)
 
             for (dest in uniqueCandidates) {
                 if (dest.equals(currentHost, ignoreCase = true)) continue
@@ -696,12 +742,16 @@ class WecimaProvider : MainAPI() {
                 collectedLinks[cleanUrl] = cleanName
             }
         }
+
+        // 1. سيرفرات المشاهدة المباشرة
         document.select("ul#watch li[data-watch]").forEach { serverEl ->
             val watchUrl = serverEl.attr("data-watch")
             val serverName = serverEl.text().trim()
             Log.d(logTag, "📺 Watch URL: $watchUrl ($serverName)")
             addLink(watchUrl, serverName)
         }
+
+        // 2. سيرفرات التحميل المباشرة
         document.select("ul.List--Download--Wecima--Single li a[href]").forEach { downloadEl ->
             val downloadUrl = downloadEl.attr("href")
             val serverName = downloadEl.selectFirst("quality")?.text()?.trim()
@@ -709,6 +759,8 @@ class WecimaProvider : MainAPI() {
             Log.d(logTag, "📥 Download URL: $downloadUrl ($serverName)")
             addLink(downloadUrl, serverName)
         }
+
+        // 3. احتياطي للروابط المشفرة بالطريقة القديمة (إن وجدت)
         document.select("ul.WatchServersList li btn[data-url]").forEach { serverBtn ->
             decodeWecimaUrl(serverBtn.attr("data-url"))?.let { decodedUrl ->
                 val serverName = serverBtn.text().trim().ifBlank { serverBtn.parent()?.text()?.trim() }
@@ -741,6 +793,8 @@ class WecimaProvider : MainAPI() {
                     targetUrl = resolved
                 }
             }
+
+            // 1. نبدأ بـ loadExtractor مع mainUrl ونراقب هل أرجع روابط فعلاً
             var emittedByBuiltIn = false
             val builtInCallback: (ExtractorLink) -> Unit = { extractorLink ->
                 emittedByBuiltIn = true
@@ -752,6 +806,8 @@ class WecimaProvider : MainAPI() {
             } catch (e: Exception) {
                 logError(e)
             }
+
+            // 2. إذا لم يجلب loadExtractor أي رابط فعلي، نرسل لـ UniversalExtractor مع الاسم والرابط
             if (!emittedByBuiltIn) {
                 try {
                     UniversalExtractor.extract(
