@@ -649,42 +649,56 @@ class WecimaProvider : MainAPI() {
     ): Boolean {
         Log.d(logTag, "🔗 loadLinks initiated for: $data")
         val document = httpGet(data)
-        val collectedUrls = linkedSetOf<String>()
+        val collectedLinks = linkedMapOf<String, String?>()
+
+        fun addLink(rawUrl: String?, serverName: String?) {
+            val cleanUrl = rawUrl?.trim().orEmpty()
+            if (!cleanUrl.startsWith("http")) return
+            val cleanName = serverName?.trim()?.takeIf { it.isNotBlank() }
+            if (!collectedLinks.containsKey(cleanUrl)) {
+                collectedLinks[cleanUrl] = cleanName
+            } else if (collectedLinks[cleanUrl].isNullOrBlank() && cleanName != null) {
+                collectedLinks[cleanUrl] = cleanName
+            }
+        }
+
+        // 1. سيرفرات المشاهدة المباشرة
         document.select("ul#watch li[data-watch]").forEach { serverEl ->
-            val watchUrl = serverEl.attr("data-watch").trim()
-            if (watchUrl.startsWith("http")) {
-                Log.d(logTag, "📺 Watch URL: $watchUrl")
-                collectedUrls.add(watchUrl)
-            }
+            val watchUrl = serverEl.attr("data-watch")
+            val serverName = serverEl.text().trim()
+            Log.d(logTag, "📺 Watch URL: $watchUrl ($serverName)")
+            addLink(watchUrl, serverName)
         }
+
+        // 2. سيرفرات التحميل المباشرة
         document.select("ul.List--Download--Wecima--Single li a[href]").forEach { downloadEl ->
-            val downloadUrl = downloadEl.attr("href").trim()
-            if (downloadUrl.startsWith("http")) {
-                Log.d(logTag, "📥 Download URL: $downloadUrl")
-                collectedUrls.add(downloadUrl)
-            }
+            val downloadUrl = downloadEl.attr("href")
+            val serverName = downloadEl.selectFirst("quality")?.text()?.trim()
+                ?: downloadEl.text().trim()
+            Log.d(logTag, "📥 Download URL: $downloadUrl ($serverName)")
+            addLink(downloadUrl, serverName)
         }
+
+        // 3. احتياطي للروابط المشفرة بالطريقة القديمة (إن وجدت)
         document.select("ul.WatchServersList li btn[data-url]").forEach { serverBtn ->
             decodeWecimaUrl(serverBtn.attr("data-url"))?.let { decodedUrl ->
-                if (decodedUrl.startsWith("http")) {
-                    Log.d(logTag, "📺 Decoded Watch URL: $decodedUrl")
-                    collectedUrls.add(decodedUrl)
-                }
+                val serverName = serverBtn.text().trim().ifBlank { serverBtn.parent()?.text()?.trim() }
+                addLink(decodedUrl, serverName)
             }
         }
 
         document.select(".openLinkDown[data-href]").forEach { downloadBtn ->
             decodeWecimaUrl(downloadBtn.attr("data-href"))?.let { decodedUrl ->
-                if (decodedUrl.startsWith("http")) {
-                    Log.d(logTag, "📥 Decoded Download URL: $decodedUrl")
-                    collectedUrls.add(decodedUrl)
-                }
+                val serverName = downloadBtn.selectFirst("quality")?.text()?.trim()
+                addLink(decodedUrl, serverName)
             }
         }
 
-        collectedUrls.toList().amap { link ->
+        collectedLinks.entries.toList().amap { (link, serverName) ->
             var targetUrl = link
-            if (targetUrl.contains("hgcloud", ignoreCase = true)) {
+            if (targetUrl.contains("hgcloud", ignoreCase = true) ||
+                serverName?.contains("hgcloud", ignoreCase = true) == true
+            ) {
                 val resolved = resolveHgCloud(targetUrl, data)
                 if (!resolved.isNullOrBlank()) {
                     Log.d(logTag, "🔄 Resolved hgcloud: $targetUrl -> $resolved")
@@ -694,14 +708,20 @@ class WecimaProvider : MainAPI() {
 
             var isLoaded = false
             try {
-                isLoaded = loadExtractor(targetUrl, data, subtitleCallback, callback)
+                isLoaded = UniversalExtractor.extract(
+                    url = targetUrl,
+                    referer = data,
+                    subtitleCallback = subtitleCallback,
+                    callback = callback,
+                    serverName = serverName
+                )
             } catch (e: Exception) {
                 logError(e)
             }
 
             if (!isLoaded) {
                 try {
-                    isLoaded = UniversalExtractor.extract(targetUrl, data, subtitleCallback, callback)
+                    isLoaded = loadExtractor(targetUrl, data, subtitleCallback, callback)
                 } catch (e: Exception) {
                     logError(e)
                 }
@@ -709,6 +729,6 @@ class WecimaProvider : MainAPI() {
             isLoaded
         }
 
-        return collectedUrls.isNotEmpty()
+        return collectedLinks.isNotEmpty()
     }
 }
