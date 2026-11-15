@@ -1676,16 +1676,12 @@ object UniversalExtractor {
                 collectedLinks[cleanUrl] = cleanName
             }
         }
-
-        // 1. سيرفرات المشاهدة المباشرة
         document.select("ul#watch li[data-watch]").forEach { serverEl ->
             val watchUrl = serverEl.attr("data-watch")
             val serverName = serverEl.text().trim()
             Log.d(logTag, "📺 Watch URL: $watchUrl ($serverName)")
             addLink(watchUrl, serverName)
         }
-
-        // 2. سيرفرات التحميل المباشرة
         document.select("ul.List--Download--Wecima--Single li a[href]").forEach { downloadEl ->
             val downloadUrl = downloadEl.attr("href")
             val serverName = downloadEl.selectFirst("quality")?.text()?.trim()
@@ -1693,8 +1689,6 @@ object UniversalExtractor {
             Log.d(logTag, "📥 Download URL: $downloadUrl ($serverName)")
             addLink(downloadUrl, serverName)
         }
-
-        // 3. احتياطي للروابط المشفرة بالطريقة القديمة (إن وجدت)
         document.select("ul.WatchServersList li btn[data-url]").forEach { serverBtn ->
             decodeWecimaUrl(serverBtn.attr("data-url"))?.let { decodedUrl ->
                 val serverName = serverBtn.text().trim().ifBlank { serverBtn.parent()?.text()?.trim() }
