@@ -1812,7 +1812,6 @@ object UniversalExtractor {
         val serverBaseName = h.removePrefix("www.").substringBefore(".")
 
         val extractor: ExtractorApi? = when {
-            // StreamWish وعائلته (من الرابط أو اسم السيرفر بغض النظر عن اللاحقة)
             target.contains("streamwish") || target.contains("wishembed") || target.contains("wishfast") ||
                 target.contains("dwish") || target.contains("embedwish") || target.contains("strwish") ->
                 ArabicStreamWishExtractor("StreamWish", origin)
@@ -1831,8 +1830,6 @@ object UniversalExtractor {
 
             target.contains("hanerix") ->
                 ArabicStreamWishExtractor("Hanerix", origin)
-
-            // DoodStream والمرايا الخاصة به
             target.contains("dood") || target.contains("d0o0d") || target.contains("do0od") ||
                 target.contains("dsvplay") || target.contains("ds2play") || target.contains("doply") ->
                 ArabicDoodExtractor("DoodStream", origin)
@@ -1842,8 +1839,6 @@ object UniversalExtractor {
 
             target.contains("myvidplay") ->
                 ArabicDoodExtractor("MyVidPlay", origin)
-
-            // Vidstack / UPNShare / RPMShare / StreamP2P
             target.contains("upns") || target.contains("uns.") || target.contains("upnshare") ->
                 ArabicVidstackExtractor("UPNShare", origin)
 
@@ -1852,19 +1847,13 @@ object UniversalExtractor {
 
             target.contains("rpmplay") || target.contains("rpmshare") ->
                 ArabicVidstackExtractor("RPMShare", origin)
-
-            // MegaMax / Share4Max
             target.contains("megamax") ->
                 ArabicMegaMaxExtractor("MegaMax", origin)
 
             target.contains("share4max") ->
                 ArabicMegaMaxExtractor("Share4Max", origin)
-
-            // Byse
             target.contains("byse") ->
                 ArabicByseExtractor("Byse", origin)
-
-            // LuluStream & Packer & UpStream
             target.contains("lulu") ->
                 LuluStreamExtractor().apply { mainUrl = origin }
 
@@ -1882,8 +1871,6 @@ object UniversalExtractor {
 
             target.contains("lolololu") || target.contains("tuktuk") ->
                 TukTukVipExtractor().apply { mainUrl = origin }
-
-            // باقي السيرفرات بغض النظر عن اللاحقة
             target.contains("streamtape") || target.contains("shavetape") ->
                 ArabicStreamTapeExtractor()
 
@@ -1928,8 +1915,6 @@ object UniversalExtractor {
 
             target.contains("gofile") ->
                 ArabicGoFileExtractor()
-
-            // بصمات HTML كحل أخير
             html.contains("/pass_md5/") ->
                 ArabicDoodExtractor("DoodStream", origin)
 
