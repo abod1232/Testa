@@ -640,8 +640,6 @@ class WecimaProvider : MainAPI() {
             val uri = URL(r1.url)
             val currentHost = uri.host
             val candidates = mutableListOf<String>()
-
-            // تجربة النطاقين المفضلين أولاً
             candidates.addAll(streamWishPreferredDomains)
 
             if (jsPathMatch != null) {
@@ -698,16 +696,12 @@ class WecimaProvider : MainAPI() {
                 collectedLinks[cleanUrl] = cleanName
             }
         }
-
-        // 1. سيرفرات المشاهدة المباشرة
         document.select("ul#watch li[data-watch]").forEach { serverEl ->
             val watchUrl = serverEl.attr("data-watch")
             val serverName = serverEl.text().trim()
             Log.d(logTag, "📺 Watch URL: $watchUrl ($serverName)")
             addLink(watchUrl, serverName)
         }
-
-        // 2. سيرفرات التحميل المباشرة
         document.select("ul.List--Download--Wecima--Single li a[href]").forEach { downloadEl ->
             val downloadUrl = downloadEl.attr("href")
             val serverName = downloadEl.selectFirst("quality")?.text()?.trim()
@@ -715,8 +709,6 @@ class WecimaProvider : MainAPI() {
             Log.d(logTag, "📥 Download URL: $downloadUrl ($serverName)")
             addLink(downloadUrl, serverName)
         }
-
-        // 3. احتياطي للروابط المشفرة بالطريقة القديمة (إن وجدت)
         document.select("ul.WatchServersList li btn[data-url]").forEach { serverBtn ->
             decodeWecimaUrl(serverBtn.attr("data-url"))?.let { decodedUrl ->
                 val serverName = serverBtn.text().trim().ifBlank { serverBtn.parent()?.text()?.trim() }
@@ -749,8 +741,6 @@ class WecimaProvider : MainAPI() {
                     targetUrl = resolved
                 }
             }
-
-            // 1. نبدأ بـ loadExtractor مع mainUrl ونراقب هل أرجع روابط فعلاً
             var emittedByBuiltIn = false
             val builtInCallback: (ExtractorLink) -> Unit = { extractorLink ->
                 emittedByBuiltIn = true
@@ -762,8 +752,6 @@ class WecimaProvider : MainAPI() {
             } catch (e: Exception) {
                 logError(e)
             }
-
-            // 2. إذا لم يجلب loadExtractor أي رابط فعلي، نرسل لـ UniversalExtractor مع الاسم والرابط
             if (!emittedByBuiltIn) {
                 try {
                     UniversalExtractor.extract(
