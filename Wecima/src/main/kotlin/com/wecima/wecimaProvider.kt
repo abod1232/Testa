@@ -23,11 +23,8 @@ class WecimaProvider : MainAPI() {
     private val logTag = "WecimaProvider1"
 
     private val hgFallbackDomains = listOf(
-        "streamwish.to",
-        "streamhg.com",
-        "wishembed.pro",
-        "dwish.net",
-        "embedwish.com"
+        "vibuxer.com",
+        "hanerix.com"
     )
 
     @Volatile
