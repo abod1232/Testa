@@ -78,12 +78,7 @@ class WecimaProvider : MainAPI() {
     }
 
     override val mainPage = mainPageOf(
-        "$mainUrl/seriestv" to "أحدث المسلسلات",
-        "$mainUrl/movies" to "أحدث الأفلام",
-        "$mainUrl/category/arabic-movies" to "أفلام عربية",
-        "$mainUrl/category/foreign-movies" to "أفلام أجنبية",
-        "$mainUrl/category/arabic-series" to "مسلسلات عربية",
-        "$mainUrl/category/foreign-series" to "مسلسلات أجنبية"
+        "$mainUrl/" to "جديد ماي سيما"
     )
 
     override var sequentialMainPage = true
@@ -167,12 +162,70 @@ class WecimaProvider : MainAPI() {
         page: Int,
         request: MainPageRequest
     ): HomePageResponse {
-        val url = if (page > 1) "${request.data.trimEnd('/')}/page/$page/" else request.data
-        val document = httpGet(url)
-        val home = document.select("div#MainFiltar div.GridItem").mapNotNull {
+        val baseUrl = mainUrl.trimEnd('/')
+        val requestUrl = if (page > 1) "$baseUrl/page/$page/" else "$baseUrl/"
+
+        val document = try {
+            httpGet(requestUrl, referer = "$baseUrl/")
+        } catch (e: Exception) {
+            logError(e)
+            return newHomePageResponse(emptyList())
+        }
+
+        val homePageList = ArrayList<HomePageList>()
+
+        // 1. القسم الرئيسي: جديد ماي سيما (يدعم التمرير والصفحات التالية)
+        val mainItems = document.select("div#MainFiltar div.GridItem").mapNotNull {
             it.toSearchResult()
         }
-        return newHomePageResponse(request.name, home)
+        if (mainItems.isNotEmpty()) {
+            homePageList.add(HomePageList("جديد ماي سيما", mainItems))
+        }
+
+        // 2. السلايدر وقسم الشائع (يُجلبان في الصفحة الأولى فقط من نفس الطلب دون تكرار عند التمرير)
+        if (page == 1) {
+            val sliderItems = document.select("wecimabegin div.Slides--Main div.GridItem").mapNotNull {
+                it.toSearchResult()
+            }
+            if (sliderItems.isNotEmpty()) {
+                homePageList.add(HomePageList("مختارات ماي سيما", sliderItems))
+            }
+
+            val trendingTitle = document.selectFirst("wecimaactivities title--wecimaactivities")
+                ?.text()?.trim()?.ifBlank { null } ?: "شائع فى ماي سيما"
+
+            val trendingItems = document.select("wecimaactivities inner--wecimaactivities a").mapNotNull { a ->
+                val href = fixUrl(a.attr("href")).takeIf { it.startsWith("http") } ?: return@mapNotNull null
+                val pEl = a.selectFirst("p")
+                val title = pEl?.ownText()?.trim()?.ifBlank { null }
+                    ?: pEl?.text()?.replace(Regex("\\(\\s*\\d{4}\\s*\\)"), "")?.trim()
+                    ?: return@mapNotNull null
+
+                val year = pEl.selectFirst("span.year")?.text()?.let {
+                    Regex("(\\d{4})").find(it)?.groupValues?.get(1)?.toIntOrNull()
+                }
+
+                val styleAttr = a.attr("style")
+                val rawPoster = Regex("url\\(['\"]?(.*?)['\"]?\\)").find(styleAttr)?.groupValues?.get(1)?.trim()
+                val posterUrl = rawPoster?.takeIf { it.isNotBlank() }?.let { fixUrl(it) }
+
+                val isSeries = title.contains("مسلسل") ||
+                    title.contains("الحلقة") ||
+                    title.contains("انمي")
+
+                newMovieSearchResponse(title, href, if (isSeries) TvType.TvSeries else TvType.Movie) {
+                    this.posterUrl = posterUrl
+                    this.year = year
+                    this.posterHeaders = imageHeaders()
+                }
+            }
+            if (trendingItems.isNotEmpty()) {
+                homePageList.add(HomePageList(trendingTitle, trendingItems))
+            }
+        }
+
+        val hasNext = document.selectFirst("div.pagination a.next") != null
+        return newHomePageResponse(homePageList, hasNext = hasNext)
     }
 
     private fun Element.toSearchResult(): SearchResponse? {
