@@ -10,6 +10,8 @@ import okhttp3.Interceptor
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import java.net.URL
+import java.net.URLDecoder
 
 class WecimaProvider : MainAPI() {
     override var mainUrl = "https://wecima.lifestyle"
@@ -19,6 +21,19 @@ class WecimaProvider : MainAPI() {
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
 
     private val logTag = "WecimaProvider1"
+
+    private val streamWishPreferredDomains = listOf(
+        "vibuxer.com",
+        "hanerix.com"
+    )
+
+    private val hgFallbackDomains = listOf(
+        "vibuxer.com",
+        "hanerix.com",
+        "streamwish.to",
+        "streamhg.com",
+        "wishembed.pro"
+    )
 
     @Volatile
     private var resolvedSearchBase: String? = null
@@ -77,8 +92,11 @@ class WecimaProvider : MainAPI() {
 
     override var sequentialMainPage = true
 
+    private val userAgent =
+        "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Mobile Safari/537.36"
+
     private val standardHeaders = mapOf(
-        "User-Agent" to "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Mobile Safari/537.36",
+        "User-Agent" to userAgent,
         "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
         "Accept-Language" to "ar-EG,ar;q=0.9,en-US;q=0.8,en;q=0.7",
         "Referer" to "$mainUrl/"
@@ -199,7 +217,7 @@ class WecimaProvider : MainAPI() {
 
     private fun imageHeaders(): Map<String, String> {
         val headers = mutableMapOf(
-            "User-Agent" to (standardHeaders["User-Agent"] ?: ""),
+            "User-Agent" to userAgent,
             "Referer" to "$mainUrl/"
         )
         currentCfCookie?.let { headers["Cookie"] = it }
@@ -471,51 +489,298 @@ class WecimaProvider : MainAPI() {
         }
     }
 
+    private fun customB64Decode(s: String, alphabet: String): String {
+        var bc = 0
+        var bs = 0
+        val out = mutableListOf<Byte>()
+        for (ch in s) {
+            val idx = alphabet.indexOf(ch)
+            if (idx == -1) continue
+            bs = if (bc % 4 != 0) (bs * 64 + idx) else idx
+            if (bc % 4 != 0) {
+                out.add((0xff and (bs shr ((-2 * (bc + 1)) and 6))).toByte())
+            }
+            bc++
+        }
+        return try {
+            val pct = out.joinToString("") { "%02x".format(it) }
+            URLDecoder.decode("%$pct".replace("%", "%25").replace("%25", "%"), "UTF-8")
+        } catch (e: Exception) {
+            String(out.toByteArray(), Charsets.UTF_8)
+        }
+    }
+
+    private fun rc4(s: String, key: String): String {
+        val sbox = IntArray(256) { it }
+        var j = 0
+        for (i in 0 until 256) {
+            j = (j + sbox[i] + key[i % key.length].code) % 256
+            val temp = sbox[i]; sbox[i] = sbox[j]; sbox[j] = temp
+        }
+        var i = 0
+        j = 0
+        val res = StringBuilder()
+        for (ch in s) {
+            i = (i + 1) % 256
+            j = (j + sbox[i]) % 256
+            val temp = sbox[i]; sbox[i] = sbox[j]; sbox[j] = temp
+            res.append((ch.code xor sbox[(sbox[i] + sbox[j]) % 256]).toChar())
+        }
+        return res.toString()
+    }
+
+    private fun deobfuscateJs(jsCode: String): String {
+        val jsId = """[a-zA-Z_$][\w$]*"""
+        val decRegex = Regex("""function\s+($jsId)\s*\(\s*($jsId)(?:\s*,\s*$jsId)?\s*\)\s*\{\s*\2\s*=\s*\2\s*([-+])\s*([^;]+);\s*(?:const|let|var)\s+$jsId\s*=\s*($jsId)\s*\(\s*\)\s*;""")
+        val mDec = decRegex.find(jsCode) ?: return jsCode
+
+        val decFn = mDec.groupValues[1]
+        val op = mDec.groupValues[3]
+        val offsetVal = mDec.groupValues[4].trim().toIntOrNull() ?: 0
+        val offset = if (op == "+") -offsetVal else offsetVal
+        val arrFn = mDec.groupValues[5]
+
+        val arrRegex = Regex("""function\s+${Regex.escape(arrFn)}\s*\(\s*\)\s*\{\s*(?:const|let|var)\s+$jsId\s*=\s*(\[.*?\])\s*;""", RegexOption.DOT_MATCHES_ALL)
+        val mArr = arrRegex.find(jsCode) ?: return jsCode
+        val rawArrStr = mArr.groupValues[1]
+
+        val arr = Regex("""['"]([^'"]+)['"]""").findAll(rawArrStr).map { it.groupValues[1] }.toMutableList()
+        val alphabetMatch = Regex("""['"]([A-Za-z0-9+/=]{64,65})['"]""").find(jsCode)
+        val alphabet = alphabetMatch?.groupValues?.get(1)
+            ?: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/="
+
+        fun decodeItem(idx: Int, key: String): String {
+            val realIdx = idx - offset
+            if (realIdx !in arr.indices) return ""
+            val raw = arr[realIdx]
+            return try {
+                if (key.isNotEmpty()) {
+                    rc4(customB64Decode(raw, alphabet), key)
+                } else {
+                    customB64Decode(raw, alphabet)
+                }
+            } catch (e: Exception) {
+                raw
+            }
+        }
+
+        val callRegex = Regex("""\b${Regex.escape(decFn)}\(\s*(0x[0-9a-fA-F]+|\d+)(?:\s*,\s*['"]([^'"]*)['"])?\s*\)""")
+        return callRegex.replace(jsCode) { m ->
+            val numStr = m.groupValues[1]
+            val idx = if (numStr.startsWith("0x")) numStr.substring(2).toInt(16) else numStr.toInt()
+            val key = m.groupValues.getOrNull(2) ?: ""
+            "\"${decodeItem(idx, key)}\""
+        }
+    }
+
+    private fun extractDomains(decodedJs: String, currentHost: String): List<String> {
+        val domains = mutableListOf<String>()
+        val listRegex = Regex("""\b(?:main|dmca)\s*=\s*\[([^\]]+)\]""")
+        listRegex.findAll(decodedJs).forEach { match ->
+            val content = match.groupValues[1]
+            Regex("""['"]([a-zA-Z0-9.-]+\.[a-z]{2,})['"]""").findAll(content).forEach { d ->
+                domains.add(d.groupValues[1])
+            }
+        }
+        if (domains.isEmpty()) {
+            val domainRegex = Regex("""['"]([a-zA-Z0-9.-]+\.[a-z]{2,})['"]""")
+            domainRegex.findAll(decodedJs).forEach { d ->
+                val dom = d.groupValues[1]
+                if (!dom.contains("google") && !dom.contains("cloudflare") && !dom.endsWith(currentHost)) {
+                    domains.add(dom)
+                }
+            }
+        }
+        return domains.distinct()
+    }
+
+    private suspend fun replaceStreamWishDomain(targetUrl: String, referer: String? = null): String {
+        return try {
+            val uri = URL(targetUrl)
+            val query = if (!uri.query.isNullOrBlank()) "?${uri.query}" else ""
+            val path = uri.path
+
+            for (domain in streamWishPreferredDomains) {
+                val candidateUrl = "https://$domain$path$query"
+                try {
+                    val check = app.get(
+                        candidateUrl,
+                        headers = mapOf(
+                            "User-Agent" to userAgent,
+                            "Referer" to (referer ?: "https://$domain/")
+                        ),
+                        timeout = 6
+                    )
+                    if (check.code == 200 && !check.text.contains("loading", ignoreCase = true)) {
+                        return candidateUrl
+                    }
+                } catch (_: Exception) {}
+            }
+
+            "https://${streamWishPreferredDomains.first()}$path$query"
+        } catch (e: Exception) {
+            targetUrl
+        }
+    }
+
+    private suspend fun resolveHgCloud(targetUrl: String, referer: String? = null): String? {
+        return try {
+            val headers = mapOf(
+                "User-Agent" to userAgent,
+                "Referer" to (referer ?: targetUrl)
+            )
+
+            val r1 = app.get(targetUrl, headers = headers, timeout = 8)
+            if (r1.code != 200) return null
+
+            val html = r1.text
+            val jsPathMatch = Regex("""<script[^>]+src=["']([^"']*main\.js[^"']*)["']""").find(html)
+                ?: if (html.lowercase().contains("loading")) Regex("""<script[^>]+src=["'](/[^"']+\.js[^"']*)["']""").find(html) else null
+
+            val uri = URL(r1.url)
+            val currentHost = uri.host
+            val candidates = mutableListOf<String>()
+
+            // تجربة النطاقين المفضلين أولاً
+            candidates.addAll(streamWishPreferredDomains)
+
+            if (jsPathMatch != null) {
+                val jsRelative = jsPathMatch.groupValues[1]
+                val jsUrl = if (jsRelative.startsWith("http")) jsRelative else "${uri.protocol}://${uri.host}$jsRelative"
+
+                val r2 = app.get(jsUrl, headers = headers, timeout = 8)
+                if (r2.code == 200) {
+                    try {
+                        val decodedJs = deobfuscateJs(r2.text)
+                        candidates.addAll(extractDomains(decodedJs, currentHost))
+                    } catch (e: Exception) {}
+                }
+            }
+
+            candidates.addAll(hgFallbackDomains)
+            val uniqueCandidates = candidates.distinct().take(6)
+
+            for (dest in uniqueCandidates) {
+                if (dest.equals(currentHost, ignoreCase = true)) continue
+                val query = if (!uri.query.isNullOrBlank()) "?${uri.query}" else ""
+                val testUrl = "https://$dest${uri.path}$query"
+
+                try {
+                    val check = app.get(testUrl, headers = mapOf("User-Agent" to userAgent, "Referer" to r1.url), timeout = 5)
+                    if (check.code == 200 && !check.text.contains("loading", ignoreCase = true)) {
+                        return testUrl
+                    }
+                } catch (e: Exception) {}
+            }
+            null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     override suspend fun loadLinks(
-    data: String,
-    isCasting: Boolean,
-    subtitleCallback: (SubtitleFile) -> Unit,
-    callback: (ExtractorLink) -> Unit
-): Boolean {
-    Log.d(logTag, "🔗 loadLinks initiated for: $data")
-    val document = httpGet(data)
-    val collectedUrls = linkedSetOf<String>()
-    document.select("ul#watch li[data-watch]").forEach { serverEl ->
-        val watchUrl = serverEl.attr("data-watch").trim()
-        if (watchUrl.startsWith("http")) {
-            Log.d(logTag, "📺 Watch URL: $watchUrl")
-            collectedUrls.add(watchUrl)
-        }
-    }
-    document.select("ul.List--Download--Wecima--Single li a[href]").forEach { downloadEl ->
-        val downloadUrl = downloadEl.attr("href").trim()
-        if (downloadUrl.startsWith("http")) {
-            Log.d(logTag, "📥 Download URL: $downloadUrl")
-            collectedUrls.add(downloadUrl)
-        }
-    }
-    document.select("ul.WatchServersList li btn[data-url]").forEach { serverBtn ->
-        decodeWecimaUrl(serverBtn.attr("data-url"))?.let { decodedUrl ->
-            if (decodedUrl.startsWith("http")) {
-                Log.d(logTag, "📺 Decoded Watch URL: $decodedUrl")
-                collectedUrls.add(decodedUrl)
+        data: String,
+        isCasting: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        Log.d(logTag, "🔗 loadLinks initiated for: $data")
+        val document = httpGet(data)
+        val collectedLinks = linkedMapOf<String, String?>()
+
+        fun addLink(rawUrl: String?, serverName: String?) {
+            val cleanUrl = rawUrl?.trim().orEmpty()
+            if (!cleanUrl.startsWith("http")) return
+            val cleanName = serverName?.trim()?.takeIf { it.isNotBlank() }
+            if (!collectedLinks.containsKey(cleanUrl)) {
+                collectedLinks[cleanUrl] = cleanName
+            } else if (collectedLinks[cleanUrl].isNullOrBlank() && cleanName != null) {
+                collectedLinks[cleanUrl] = cleanName
             }
         }
-    }
 
-    document.select(".openLinkDown[data-href]").forEach { downloadBtn ->
-        decodeWecimaUrl(downloadBtn.attr("data-href"))?.let { decodedUrl ->
-            if (decodedUrl.startsWith("http")) {
-                Log.d(logTag, "📥 Decoded Download URL: $decodedUrl")
-                collectedUrls.add(decodedUrl)
+        // 1. سيرفرات المشاهدة المباشرة
+        document.select("ul#watch li[data-watch]").forEach { serverEl ->
+            val watchUrl = serverEl.attr("data-watch")
+            val serverName = serverEl.text().trim()
+            Log.d(logTag, "📺 Watch URL: $watchUrl ($serverName)")
+            addLink(watchUrl, serverName)
+        }
+
+        // 2. سيرفرات التحميل المباشرة
+        document.select("ul.List--Download--Wecima--Single li a[href]").forEach { downloadEl ->
+            val downloadUrl = downloadEl.attr("href")
+            val serverName = downloadEl.selectFirst("quality")?.text()?.trim()
+                ?: downloadEl.text().trim()
+            Log.d(logTag, "📥 Download URL: $downloadUrl ($serverName)")
+            addLink(downloadUrl, serverName)
+        }
+
+        // 3. احتياطي للروابط المشفرة بالطريقة القديمة (إن وجدت)
+        document.select("ul.WatchServersList li btn[data-url]").forEach { serverBtn ->
+            decodeWecimaUrl(serverBtn.attr("data-url"))?.let { decodedUrl ->
+                val serverName = serverBtn.text().trim().ifBlank { serverBtn.parent()?.text()?.trim() }
+                addLink(decodedUrl, serverName)
             }
         }
-    }
 
-    collectedUrls.toList().amap { link ->
-        loadExtractor(link, mainUrl, subtitleCallback, callback)
-    }
+        document.select(".openLinkDown[data-href]").forEach { downloadBtn ->
+            decodeWecimaUrl(downloadBtn.attr("data-href"))?.let { decodedUrl ->
+                val serverName = downloadBtn.selectFirst("quality")?.text()?.trim()
+                addLink(decodedUrl, serverName)
+            }
+        }
 
-    return collectedUrls.isNotEmpty()
-}
+        collectedLinks.entries.toList().amap { (link, serverName) ->
+            var targetUrl = link
+            val isStreamWishOrHg = targetUrl.contains("hgcloud", ignoreCase = true) ||
+                targetUrl.contains("streamwish", ignoreCase = true) ||
+                serverName?.contains("hgcloud", ignoreCase = true) == true ||
+                serverName?.contains("streamwish", ignoreCase = true) == true
+
+            if (isStreamWishOrHg) {
+                val resolved = if (targetUrl.contains("hgcloud", ignoreCase = true)) {
+                    resolveHgCloud(targetUrl, mainUrl) ?: replaceStreamWishDomain(targetUrl, mainUrl)
+                } else {
+                    replaceStreamWishDomain(targetUrl, mainUrl)
+                }
+                if (resolved.isNotBlank()) {
+                    Log.d(logTag, "🔄 Replaced StreamWish/hgcloud: $targetUrl -> $resolved")
+                    targetUrl = resolved
+                }
+            }
+
+            // 1. نبدأ بـ loadExtractor مع mainUrl ونراقب هل أرجع روابط فعلاً
+            var emittedByBuiltIn = false
+            val builtInCallback: (ExtractorLink) -> Unit = { extractorLink ->
+                emittedByBuiltIn = true
+                callback(extractorLink)
+            }
+
+            try {
+                loadExtractor(targetUrl, mainUrl, subtitleCallback, builtInCallback)
+            } catch (e: Exception) {
+                logError(e)
+            }
+
+            // 2. إذا لم يجلب loadExtractor أي رابط فعلي، نرسل لـ UniversalExtractor مع الاسم والرابط
+            if (!emittedByBuiltIn) {
+                try {
+                    UniversalExtractor.extract(
+                        url = targetUrl,
+                        referer = mainUrl,
+                        subtitleCallback = subtitleCallback,
+                        callback = callback,
+                        serverName = serverName
+                    )
+                } catch (e: Exception) {
+                    logError(e)
+                }
+            }
+
+            true
+        }
+
+        return collectedLinks.isNotEmpty()
+    }
 }
