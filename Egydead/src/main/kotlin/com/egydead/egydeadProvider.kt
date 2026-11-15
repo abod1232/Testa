@@ -209,7 +209,11 @@ class EgyDead(val context: Context) : MainAPI() {
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val requestUrl = fixUrlSlash(mainUrl)
+    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        // بناء الرابط ليكون mainUrl/h2/ مع دعم الصفحات
+        val baseUrl = "${mainUrl.trimEnd('/')}/h2"
+        val requestUrl = if (page > 1) "$baseUrl/page/$page/" else "$baseUrl/"
+
         val document = try {
             httpGet(requestUrl)
         } catch (e: Exception) {
