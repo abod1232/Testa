@@ -650,8 +650,6 @@ class WecimaProvider : MainAPI() {
         Log.d(logTag, "🔗 loadLinks initiated for: $data")
         val document = httpGet(data)
         val collectedUrls = linkedSetOf<String>()
-
-        // 1. سيرفرات المشاهدة المباشرة
         document.select("ul#watch li[data-watch]").forEach { serverEl ->
             val watchUrl = serverEl.attr("data-watch").trim()
             if (watchUrl.startsWith("http")) {
@@ -659,8 +657,6 @@ class WecimaProvider : MainAPI() {
                 collectedUrls.add(watchUrl)
             }
         }
-
-        // 2. سيرفرات التحميل المباشرة
         document.select("ul.List--Download--Wecima--Single li a[href]").forEach { downloadEl ->
             val downloadUrl = downloadEl.attr("href").trim()
             if (downloadUrl.startsWith("http")) {
@@ -668,8 +664,6 @@ class WecimaProvider : MainAPI() {
                 collectedUrls.add(downloadUrl)
             }
         }
-
-        // 3. احتياطي للروابط المشفرة بالطريقة القديمة (إن وجدت)
         document.select("ul.WatchServersList li btn[data-url]").forEach { serverBtn ->
             decodeWecimaUrl(serverBtn.attr("data-url"))?.let { decodedUrl ->
                 if (decodedUrl.startsWith("http")) {
