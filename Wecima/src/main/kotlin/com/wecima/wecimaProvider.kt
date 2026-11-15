@@ -156,21 +156,29 @@ class WecimaProvider : MainAPI() {
 
 
     override suspend fun getMainPage(
-        page: Int,
-        request: MainPageRequest
-    ): HomePageResponse {
-        val document = httpGet(request.data)
-        val home = document.select("div.Grid--WecimaPosts div.GridItem").mapNotNull {
-            it.toSearchResult()
-        }
-        return newHomePageResponse(request.name, home)
+    page: Int,
+    request: MainPageRequest
+): HomePageResponse {
+    val url = if (page > 1) "${request.data.trimEnd('/')}/page/$page/" else request.data
+    val document = httpGet(url)
+    val home = document.select("div#MainFiltar div.GridItem").mapNotNull {
+        it.toSearchResult()
+    }
+    return newHomePageResponse(request.name, home)
+}
+    private fun Element.toSearchResult(): SearchResponse? {
+    val anchor = this.selectFirst("a") ?: return null
+    val href = fixUrl(anchor.attr("href"))
+
+    val titleElement = this.selectFirst("h2, strong")
+    val year = titleElement?.selectFirst("span.year")?.text()?.let {
+        Regex("(\\d{4})").find(it)?.groupValues?.get(1)?.toIntOrNull()
     }
 
-    private fun Element.toSearchResult(): SearchResponse? {
-    val titleElement = this.selectFirst("h2, strong") ?: return null
-    val title = titleElement.text().trim()
-    val anchor = this.selectFirst("a") ?: return null
-    val href = anchor.attr("href")
+    // أخذ العنوان من title الخاص بالرابط لأنه غير مقصوص، أو من strong كبديل
+    val title = anchor.attr("title").ifBlank {
+        titleElement?.text()
+    }?.trim() ?: return null
 
     val posterSpan = this.selectFirst("span.BG--GridItem")
     val styleAttr = posterSpan?.attr("data-lazy-style")?.ifBlank { null }
@@ -183,12 +191,18 @@ class WecimaProvider : MainAPI() {
 
     val posterUrl = rawPosterUrl?.let { fixUrl(it) }
 
-    return newMovieSearchResponse(title, href, TvType.Movie) {
+    val isSeries = this.selectFirst(".Episode--number") != null ||
+        title.contains("مسلسل") ||
+        title.contains("الحلقة")
+
+    val type = if (isSeries) TvType.TvSeries else TvType.Movie
+
+    return newMovieSearchResponse(title, href, type) {
         this.posterUrl = posterUrl
+        this.year = year
         this.posterHeaders = imageHeaders()
     }
 }
-
     private fun imageHeaders(): Map<String, String> {
         return currentCfCookie?.let {
             mapOf("Cookie" to it)
@@ -255,50 +269,26 @@ class WecimaProvider : MainAPI() {
         }
     }
     private suspend fun performSearch(query: String): List<SearchResponse> {
-        val activeUrl = getFreshDomainAndCookies()
+    val activeUrl = getFreshDomainAndCookies()
 
-        if (mainUrl != activeUrl) {
-            mainUrl = activeUrl
-        }
-
-        val url = "$activeUrl/search"
-        Log.d(logTag, "🚀 Executing Search POST to: $url with query: $query")
-
-        val responseText = httpPost(
-            url,
-            data = mapOf("q" to query),
-            referer = activeUrl
-        )
-
-        return try {
-            val parsed = AppUtils.parseJson<WecimaSearchResponseJson>(responseText)
-
-            parsed.results?.mapNotNull { item ->
-                val title = item.title ?: return@mapNotNull null
-                val slug = item.slug ?: return@mapNotNull null
-                val posterUrl = item.image
-
-                if (item.istv == 2) return@mapNotNull null
-
-                val type = if (item.istv == 0) TvType.Movie else TvType.TvSeries
-                val prefix = if (item.istv == 0) "/watch/" else "/series/"
-                val encodedSlug = java.net.URLEncoder.encode(slug, "UTF-8").replace("+", "%20")
-                val itemUrl = if (slug.startsWith("http")) slug else "$mainUrl$prefix$encodedSlug"
-
-                Log.d(logTag, "🔍 Search Result: [$title] -> $itemUrl")
-
-                newMovieSearchResponse(title, itemUrl, type) {
-                    this.posterUrl = posterUrl
-                    this.year = item.year?.toIntOrNull()
-                    this.posterHeaders = imageHeaders()
-                }
-            } ?: emptyList()
-
-        } catch (e: Exception) {
-            Log.e(logTag, "Search Parsing Error: ${e.message}")
-            emptyList()
-        }
+    if (mainUrl != activeUrl) {
+        mainUrl = activeUrl
     }
+
+    val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
+    val url = "$activeUrl/filtering/?keywords=$encodedQuery&Rated=&genre=&release-years=&category=&quality=&country=&language="
+    Log.d(logTag, "🚀 Executing Search GET to: $url")
+
+    return try {
+        val document = httpGet(url, referer = activeUrl)
+        document.select("div#MainFiltar div.GridItem").mapNotNull {
+            it.toSearchResult()
+        }
+    } catch (e: Exception) {
+        Log.e(logTag, "Search Error: ${e.message}")
+        emptyList()
+    }
+}
     override suspend fun search(query: String): List<SearchResponse> {
         val initialResults = performSearch(query)
         if (initialResults.isEmpty() && query.trim() == "مسلسل") {
