@@ -1,4 +1,4 @@
-package com.egydead
+package com.lagradost.cloudstream3.ar
 
 import android.util.Log
 import com.lagradost.cloudstream3.*
