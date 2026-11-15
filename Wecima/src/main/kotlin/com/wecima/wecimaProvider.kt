@@ -387,7 +387,6 @@ class WecimaProvider : MainAPI() {
                         referer = url
                     )
                     val seasonDoc = Jsoup.parse(seasonHtml)
-                    // نستخدم a مباشرة لأن الحلقة النشطة قد لا تحتوي على class hoverable activable
                     seasonDoc.select("a").forEach { epEl ->
                         val epHref = epEl.attr("href").ifBlank { return@forEach }
                         val epName = epEl.selectFirst("episodetitle")?.text()?.trim()
@@ -405,7 +404,6 @@ class WecimaProvider : MainAPI() {
                     }
                 } catch (e: Exception) {
                     logError(e)
-                    // احتياطي للموسم النشط الموجود أصلاً في الصفحة إذا فشل طلب AJAX
                     if (seasonEl.parent()?.hasClass("active") == true) {
                         document.select("div.EpisodesList a").forEach { epEl ->
                             val epHref = epEl.attr("href").ifBlank { return@forEach }
