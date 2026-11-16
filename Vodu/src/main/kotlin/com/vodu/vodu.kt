@@ -100,8 +100,10 @@ class VoduProvider : MainAPI() {
         val poster = document.selectFirst("div.aspect-\\[2\\/3\\] img")?.attr("src")
         val backdrop = document.selectFirst("div.relative.h-\\[45vh\\] img")?.attr("src")
         val plot = document.selectFirst("p.max-w-2xl")?.text()?.trim()
+
+        // هنا التعديل: إنشاء كائن Score من 10
         val ratingText = document.selectFirst("span.text-white.font-bold:has(i.fa-star)")?.text()?.trim()
-        val score = ratingText?.replace(Regex("[^0-9.]"), "")?.toDoubleOrNull()
+        val score = ratingText?.replace(Regex("[^0-9.]"), "")?.toDoubleOrNull()?.let { Score(it, 10.0) }
 
         val yearText = document.select("div.flex.items-center span").firstOrNull {
             it.text().matches(Regex(".*\\b(19|20)\\d{2}\\b.*"))
