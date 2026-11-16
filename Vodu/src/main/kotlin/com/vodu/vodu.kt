@@ -51,7 +51,6 @@ class VoduProvider : MainAPI() {
         val document = try {
             app.get(request.data, headers = siteHeaders, timeout = 10).document
         } catch (e: Exception) {
-            // إظهار رسالة Toast للمستخدم عند تعذر الاتصال أو حظر الشبكة
             if (e is java.net.SocketTimeoutException ||
                 e is java.net.UnknownHostException ||
                 e is java.net.ConnectException ||
