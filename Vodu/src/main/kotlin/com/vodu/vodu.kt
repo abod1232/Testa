@@ -1,5 +1,6 @@
 package com.vodu
 
+import android.util.Log
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
@@ -37,6 +38,7 @@ class VoduProvider : MainAPI() {
         "$mainUrl/category/4" to "Arabic Series",
         "$mainUrl/category/7" to "Arabic Movies"
     )
+
     private fun fixImageUrl(url: String?): String? {
         if (url.isNullOrBlank()) return null
         return url.replace("&amp;", "&").trim()
@@ -106,10 +108,44 @@ class VoduProvider : MainAPI() {
         val document = app.get(url, headers = siteHeaders).document
 
         val title = document.selectFirst("h1")?.text()?.trim() ?: "Unknown"
-        val posterElement = document.selectFirst("div.w-32 img, div.sm\\:w-48 img, div.aspect-\\[2\\/3\\] img")
-        val poster = fixImageUrl(posterElement?.attr("src"))
-        val backdropElement = document.selectFirst("div.relative.h-\\[45vh\\] img, div.tv-hero img")
-        val backdrop = fixImageUrl(backdropElement?.attr("src")) ?: poster
+
+        // ──────────────────────────── LOGS للصور ────────────────────────────
+        val rawPoster = document.selectFirst("div.w-32 img, div.sm\\:w-48 img, div.aspect-\\[2\\/3\\] img")?.attr("src")
+        val poster = fixImageUrl(rawPoster)
+
+        val rawBackdrop = document.selectFirst("div.relative.h-\\[45vh\\] img, div.tv-hero img")?.attr("src")
+        val backdrop = fixImageUrl(rawBackdrop) ?: poster
+
+        val TAG = "VODU_IMAGE_DEBUG"
+        Log.d(TAG, "==================== فحص صور: $title ====================")
+        Log.d(TAG, "الرابط المطلوب: $url")
+        Log.d(TAG, "البوستر الخام من HTML: $rawPoster")
+        Log.d(TAG, "البوستر بعد التصليح: $poster")
+        Log.d(TAG, "الخلفية الخام من HTML: $rawBackdrop")
+        Log.d(TAG, "الخلفية بعد التصليح: $backdrop")
+
+        // تجربة اختبارية لتحميل الصورة من السيرفر للتأكد هل الرابط شغال أو يرجع 403 / 404
+        if (!poster.isNullOrBlank()) {
+            try {
+                val testRes = app.head(poster, headers = siteHeaders)
+                Log.d(TAG, "نتيجة فحص البوستر (Status Code): ${testRes.code} | Content-Type: ${testRes.headers["content-type"]}")
+            } catch (e: Exception) {
+                Log.e(TAG, "فشل الاتصال برابط البوستر: ${e.message}")
+            }
+        } else {
+            Log.e(TAG, "تحذير: لم يتم العثور على أي وسم صورة بوستر في الصفحة!")
+        }
+
+        if (!backdrop.isNullOrBlank() && backdrop != poster) {
+            try {
+                val testRes = app.head(backdrop, headers = siteHeaders)
+                Log.d(TAG, "نتيجة فحص الخلفية (Status Code): ${testRes.code} | Content-Type: ${testRes.headers["content-type"]}")
+            } catch (e: Exception) {
+                Log.e(TAG, "فشل الاتصال برابط الخلفية: ${e.message}")
+            }
+        }
+        Log.d(TAG, "==========================================================")
+        // ─────────────────────────────────────────────────────────────────────
 
         val plot = document.selectFirst("p.max-w-2xl")?.text()?.trim()
 
