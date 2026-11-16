@@ -108,8 +108,6 @@ class VoduProvider : MainAPI() {
         val document = app.get(url, headers = siteHeaders).document
 
         val title = document.selectFirst("h1")?.text()?.trim() ?: "Unknown"
-
-        // ──────────────────────────── LOGS للصور ────────────────────────────
         val rawPoster = document.selectFirst("div.w-32 img, div.sm\\:w-48 img, div.aspect-\\[2\\/3\\] img")?.attr("src")
         val poster = fixImageUrl(rawPoster)
 
@@ -123,8 +121,6 @@ class VoduProvider : MainAPI() {
         Log.d(TAG, "البوستر بعد التصليح: $poster")
         Log.d(TAG, "الخلفية الخام من HTML: $rawBackdrop")
         Log.d(TAG, "الخلفية بعد التصليح: $backdrop")
-
-        // تجربة اختبارية لتحميل الصورة من السيرفر للتأكد هل الرابط شغال أو يرجع 403 / 404
         if (!poster.isNullOrBlank()) {
             try {
                 val testRes = app.head(poster, headers = siteHeaders)
@@ -145,7 +141,6 @@ class VoduProvider : MainAPI() {
             }
         }
         Log.d(TAG, "==========================================================")
-        // ─────────────────────────────────────────────────────────────────────
 
         val plot = document.selectFirst("p.max-w-2xl")?.text()?.trim()
 
