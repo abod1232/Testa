@@ -9,6 +9,7 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.Qualities
 import org.jsoup.nodes.Element
 import com.lagradost.cloudstream3.utils.newExtractorLink
+import java.net.URLEncoder
 
 class VoduProvider : MainAPI() {
     override var mainUrl = "https://movie.vodu.me"
@@ -89,28 +90,67 @@ class VoduProvider : MainAPI() {
         }
     }
 
-    override suspend fun search(query: String): List<SearchResponse> {
-        val searchUrl = "$mainUrl/search?q=$query"
+    // ─────────────────────────────────────────────
+    // البحث مع التمرير وخوارزمية مطابقة الأسماء
+    // ─────────────────────────────────────────────
+    override suspend fun search(query: String): List<SearchResponse>? {
+        return search(query, 1)?.items
+    }
+
+    override suspend fun search(query: String, page: Int): SearchResponseList? {
+        val encoded = URLEncoder.encode(query, "utf-8")
+        val searchUrl = "$mainUrl/search?q=$encoded&sort=newest&sortBy=adddate&sortType=desc&p=$page"
         val document = app.get(searchUrl, headers = siteHeaders).document
 
-        return document.select("div.grid a[href*='/item/']").mapNotNull { element ->
-            val link = element.attr("href")
-            val title = element.selectFirst("p.truncate")?.text()?.trim() ?: return@mapNotNull null
-            val poster = fixImageUrl(element.selectFirst("img")?.attr("src"))
+        val rawElements = document.select("div.grid a[href*='/item/']")
+        if (rawElements.isEmpty()) return null
 
-            newMovieSearchResponse(title, link, TvType.Movie) {
-                this.posterUrl = poster
-            }
+        val parsedList = rawElements.mapNotNull { it.toSearchResponse() }
+
+        // حساب درجة مطابقة العنوان لترتيب النتائج الأكثر صلة أولاً
+        fun getMatchScore(title: String?, qLower: String): Int {
+            if (title.isNullOrBlank()) return 0
+            val tLower = title.lowercase().trim()
+            if (tLower == qLower) return 100
+            if (tLower.startsWith(qLower)) return 80
+            if (tLower.contains(qLower)) return 60
+            val tokens = qLower.split(Regex("\\s+")).filter { it.isNotBlank() }
+            val tokenMatches = tokens.count { tLower.contains(it) }
+            return if (tokenMatches > 0) 40 + tokenMatches else 0
         }
+
+        val ql = query.lowercase().trim()
+
+        val sortedResults = parsedList
+            .mapIndexed { index, item ->
+                val score = getMatchScore(item.name, ql)
+                Triple(item, score, index)
+            }
+            .sortedWith(
+                compareByDescending<Triple<SearchResponse, Int, Int>> { it.second } // الترتيب حسب درجة المطابقة
+                    .thenBy { it.third } // الحفاظ على ترتيب الموقع في حال تساوي الدرجة
+            )
+            .map { it.first }
+            .distinctBy { it.url }
+
+        // التحقق من وجود صفحة تالية عبر وسم rel="next" أو استعلام أرقام الصفحات
+        val hasNextPage = document.select("a[rel=next], a:contains(›)").isNotEmpty() ||
+                document.select("ul.flex a[href*='p=${page + 1}']").isNotEmpty()
+
+        return newSearchResponseList(sortedResults, hasNextPage)
     }
 
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url, headers = siteHeaders).document
 
         val title = document.selectFirst("h1")?.text()?.trim() ?: "Unknown"
+
+        // البوستر الأساسي
         val poster = fixImageUrl(
             document.selectFirst("div.aspect-\\[2\\/3\\] img, div.w-32 img")?.attr("src")
         )
+
+        // فحص رابط الخلفية
         val rawBackdrop = fixImageUrl(
             document.selectFirst("div.relative.h-\\[45vh\\] img, div.tv-hero img")?.attr("src")
         )
@@ -182,7 +222,7 @@ class VoduProvider : MainAPI() {
                             this.season = seasonNum
                             this.episode = epIndex + 1
                             this.description = epDesc
-                            this.posterUrl = poster // تعيين صورة المسلسل كصورة للحلقة
+                            this.posterUrl = poster
                         }
                     )
                 }
