@@ -9,7 +9,6 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.Qualities
 import org.jsoup.nodes.Element
 import com.lagradost.cloudstream3.utils.newExtractorLink
-import okhttp3.Headers
 
 class VoduProvider : MainAPI() {
     override var mainUrl = "https://movie.vodu.me"
@@ -22,7 +21,9 @@ class VoduProvider : MainAPI() {
         TvType.TvSeries,
         TvType.Anime
     )
-    private val defaultHeaders = mapOf(
+
+    // ترويسات عامة للموقع تُرسل مع كل طلب وصورة تلقائياً
+    private val siteHeaders = mapOf(
         "Referer" to "https://movie.vodu.me/",
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     )
@@ -38,13 +39,15 @@ class VoduProvider : MainAPI() {
         "$mainUrl/category/4" to "Arabic Series",
         "$mainUrl/category/7" to "Arabic Movies"
     )
+
+    // استبدال &amp; بـ & لكي يعالج السيرفر معاملات الصورة بنجاح
     private fun fixImageUrl(url: String?): String? {
         if (url.isNullOrBlank()) return null
         return url.replace("&amp;", "&").trim()
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = app.get(request.data, headers = defaultHeaders).document
+        val document = app.get(request.data, headers = siteHeaders).document
         val homeItems = ArrayList<HomePageList>()
         val sections = document.select("div:has(h2.tv-row-title)")
 
@@ -80,19 +83,17 @@ class VoduProvider : MainAPI() {
         return if (type == TvType.Movie) {
             newMovieSearchResponse(title, link, type) {
                 this.posterUrl = poster
-                this.headers = defaultHeaders
             }
         } else {
             newTvSeriesSearchResponse(title, link, type) {
                 this.posterUrl = poster
-                this.headers = defaultHeaders
             }
         }
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
         val searchUrl = "$mainUrl/search?q=$query"
-        val document = app.get(searchUrl, headers = defaultHeaders).document
+        val document = app.get(searchUrl, headers = siteHeaders).document
 
         return document.select("div.grid a[href*='/item/']").mapNotNull { element ->
             val link = element.attr("href")
@@ -101,17 +102,20 @@ class VoduProvider : MainAPI() {
 
             newMovieSearchResponse(title, link, TvType.Movie) {
                 this.posterUrl = poster
-                this.headers = defaultHeaders
             }
         }
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val document = app.get(url, headers = defaultHeaders).document
+        val document = app.get(url, headers = siteHeaders).document
 
         val title = document.selectFirst("h1")?.text()?.trim() ?: "Unknown"
+
+        // البوستر الأساسي الشغال دائماً
         val posterElement = document.selectFirst("div.w-32 img, div.sm\\:w-48 img, div.aspect-\\[2\\/3\\] img")
         val poster = fixImageUrl(posterElement?.attr("src"))
+
+        // الخلفية: إذا لم تكن موجودة نعتمد على البوستر نفسه
         val backdropElement = document.selectFirst("div.relative.h-\\[45vh\\] img, div.tv-hero img")
         val backdrop = fixImageUrl(backdropElement?.attr("src")) ?: poster
 
@@ -211,7 +215,7 @@ class VoduProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val document = app.get(data, headers = defaultHeaders).document
+        val document = app.get(data, headers = siteHeaders).document
         val html = document.html()
         val qualitiesMatch = Regex("""const\s+qualitiesRaw\s*=\s*(\{.*?\});""").find(html)?.groupValues?.get(1)
         if (!qualitiesMatch.isNullOrBlank()) {
