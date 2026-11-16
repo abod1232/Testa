@@ -51,7 +51,6 @@ class VoduProvider : MainAPI() {
     val document = try {
         app.get(request.data, headers = siteHeaders, timeout = 10).document
     } catch (e: Exception) {
-        // التقاط جميع أنواع أخطاء الشبكة بما فيها Canceled
         if (e is java.io.IOException ||        // يشمل Canceled, timeout, ConnectException
             e is java.net.UnknownHostException ||
             e is javax.net.ssl.SSLException
