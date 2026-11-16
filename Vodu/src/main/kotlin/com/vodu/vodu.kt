@@ -100,8 +100,6 @@ class VoduProvider : MainAPI() {
         val poster = document.selectFirst("div.aspect-\\[2\\/3\\] img")?.attr("src")
         val backdrop = document.selectFirst("div.relative.h-\\[45vh\\] img")?.attr("src")
         val plot = document.selectFirst("p.max-w-2xl")?.text()?.trim()
-
-        // استخدام Score.from10 للتقييم من 10
         val ratingText = document.selectFirst("span.text-white.font-bold:has(i.fa-star)")?.text()?.trim()
         val score = ratingText?.replace(Regex("[^0-9.]"), "")?.toDoubleOrNull()?.let {
             Score.from10(it)
