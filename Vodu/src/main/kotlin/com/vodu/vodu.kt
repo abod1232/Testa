@@ -53,7 +53,7 @@ class VoduProvider : MainAPI() {
             }
         }
 
-        return HomePageResponse(homeItems)
+        return newHomePageResponse(homeItems)
     }
 
     private fun Element.toSearchResponse(): SearchResponse? {
@@ -77,6 +77,7 @@ class VoduProvider : MainAPI() {
             }
         }
     }
+
     override suspend fun search(query: String): List<SearchResponse> {
         val searchUrl = "$mainUrl/search?q=$query"
         val document = app.get(searchUrl).document
@@ -91,6 +92,7 @@ class VoduProvider : MainAPI() {
             }
         }
     }
+
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url).document
 
@@ -98,8 +100,10 @@ class VoduProvider : MainAPI() {
         val poster = document.selectFirst("div.aspect-\\[2\\/3\\] img")?.attr("src")
         val backdrop = document.selectFirst("div.relative.h-\\[45vh\\] img")?.attr("src")
         val plot = document.selectFirst("p.max-w-2xl")?.text()?.trim()
+
+        // استخراج التقييم وتحويله لنظام score من 10 (Double)
         val ratingText = document.selectFirst("span.text-white.font-bold:has(i.fa-star)")?.text()?.trim()
-        val rating = ratingText?.replace(Regex("[^0-9.]"), "")?.toRatingInt()
+        val score = ratingText?.replace(Regex("[^0-9.]"), "")?.toDoubleOrNull()
 
         val yearText = document.select("div.flex.items-center span").firstOrNull {
             it.text().matches(Regex(".*\\b(19|20)\\d{2}\\b.*"))
@@ -109,20 +113,25 @@ class VoduProvider : MainAPI() {
         val duration = document.select("div.flex.items-center span").firstOrNull {
             it.text().contains("min")
         }?.text()?.replace(Regex("[^0-9]"), "")?.toIntOrNull()
+
         val genres = document.selectFirst("p:contains(Genres:)")?.text()
             ?.replace("Genres:", "")
             ?.split(",")
             ?.map { it.trim() }
+
         val actors = document.select("div:has(> h3:contains(Cast)) a[href*='/actor/']").mapNotNull {
             val actorName = it.selectFirst("p")?.text()?.trim() ?: return@mapNotNull null
             val actorImg = it.selectFirst("img")?.attr("src")
             Actor(actorName, actorImg)
         }
+
         val recommendations = document.select("div:has(> h3:contains(More Like This)) a[href*='/item/']").mapNotNull {
             it.toSearchResponse()
         }
+
         val trailerId = Regex("""const\s+trailerId\s*=\s*"([^"]+)"""").find(document.html())?.groupValues?.get(1)
         val trailerUrl = if (!trailerId.isNullOrBlank()) "https://www.youtube.com/watch?v=$trailerId" else null
+
         val isSeries = document.select("#seasonTabs, div[id^='seasonPanel_']").isNotEmpty() ||
                 document.select("span.ui-chip").any { it.text().contains("Series", true) }
 
@@ -155,7 +164,7 @@ class VoduProvider : MainAPI() {
                 this.backgroundPosterUrl = backdrop
                 this.plot = plot
                 this.year = year
-                this.rating = rating
+                this.score = score
                 this.tags = genres
                 this.recommendations = recommendations
                 addActors(actors)
@@ -170,7 +179,7 @@ class VoduProvider : MainAPI() {
                 this.plot = plot
                 this.year = year
                 this.duration = duration
-                this.rating = rating
+                this.score = score
                 this.tags = genres
                 this.recommendations = recommendations
                 addActors(actors)
@@ -178,6 +187,7 @@ class VoduProvider : MainAPI() {
             }
         }
     }
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -238,6 +248,7 @@ class VoduProvider : MainAPI() {
 
         return true
     }
+
     data class QualityItem(
         @JsonProperty("url") val url: String?,
         @JsonProperty("type") val type: String?
