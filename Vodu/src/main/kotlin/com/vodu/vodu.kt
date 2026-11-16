@@ -100,13 +100,9 @@ class VoduProvider : MainAPI() {
         val document = app.get(url).document
 
         val title = document.selectFirst("h1")?.text()?.trim() ?: "Unknown"
-
-        // البوستر الأساسي الشغال دائماً
         val poster = fixImageUrl(
             document.selectFirst("div.aspect-\\[2\\/3\\] img")?.attr("src")
         )
-
-        // الخلفية: نحاول أخذها، وإذا لم تكن موجودة نعتمد على البوستر نفسه
         val backdrop = fixImageUrl(
             document.selectFirst("div.relative.h-\\[45vh\\] img")?.attr("src")
         ) ?: poster
