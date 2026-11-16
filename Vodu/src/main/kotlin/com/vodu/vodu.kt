@@ -22,8 +22,6 @@ class VoduProvider : MainAPI() {
         TvType.TvSeries,
         TvType.Anime
     )
-
-    // إرسال Referer للموقع لمنع سيرفر الصور من حظر التطبيق
     private val defaultHeaders = mapOf(
         "Referer" to "https://movie.vodu.me/",
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -40,8 +38,6 @@ class VoduProvider : MainAPI() {
         "$mainUrl/category/4" to "Arabic Series",
         "$mainUrl/category/7" to "Arabic Movies"
     )
-
-    // فك تشفير &amp; فقط ليتمكن السيرفر من معالجة أبعاد الصورة بنجاح
     private fun fixImageUrl(url: String?): String? {
         if (url.isNullOrBlank()) return null
         return url.replace("&amp;", "&").trim()
@@ -114,12 +110,8 @@ class VoduProvider : MainAPI() {
         val document = app.get(url, headers = defaultHeaders).document
 
         val title = document.selectFirst("h1")?.text()?.trim() ?: "Unknown"
-
-        // جلب البوستر من حاوية الصورة الشخصية الخاصة بالعمل
         val posterElement = document.selectFirst("div.w-32 img, div.sm\\:w-48 img, div.aspect-\\[2\\/3\\] img")
         val poster = fixImageUrl(posterElement?.attr("src"))
-
-        // جلب الخلفية
         val backdropElement = document.selectFirst("div.relative.h-\\[45vh\\] img, div.tv-hero img")
         val backdrop = fixImageUrl(backdropElement?.attr("src")) ?: poster
 
