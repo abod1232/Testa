@@ -21,10 +21,6 @@ class VoduProvider : MainAPI() {
         TvType.TvSeries,
         TvType.Anime
     )
-
-    // ─────────────────────────────────────────────
-    // 1. الصفحة الرئيسية (Main Page)
-    // ─────────────────────────────────────────────
     override val mainPage = mainPageOf(
         "$mainUrl" to "Featured",
         "$mainUrl/movies" to "Latest Movies",
@@ -40,8 +36,6 @@ class VoduProvider : MainAPI() {
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(request.data).document
         val homeItems = ArrayList<HomePageList>()
-
-        // استخراج كافة الأقسام الأفقية (Carousels) الموجودة في الصفحة
         val sections = document.select("div:has(h2.tv-row-title)")
 
         if (sections.isNotEmpty()) {
@@ -53,7 +47,6 @@ class VoduProvider : MainAPI() {
                 }
             }
         } else {
-            // في حال فتح تصنيف يحتوي على شبكة أفلام عادية (Grid)
             val items = document.select("div.grid a[href*='/item/']").mapNotNull { it.toSearchResponse() }
             if (items.isNotEmpty()) {
                 homeItems.add(HomePageList(request.name, items))
@@ -67,8 +60,6 @@ class VoduProvider : MainAPI() {
         val link = this.attr("href") ?: return null
         val title = this.selectFirst("p.truncate")?.text()?.trim() ?: return null
         val poster = this.selectFirst("img")?.attr("src")
-
-        // تحديد إن كان مسلسل أو فيلم من الوسم المعروض على الصورة
         val chipText = this.selectFirst("span.ui-chip")?.text()?.lowercase() ?: ""
         val type = if (chipText.contains("series") || chipText.contains("مسلسل")) {
             TvType.TvSeries
@@ -86,10 +77,6 @@ class VoduProvider : MainAPI() {
             }
         }
     }
-
-    // ─────────────────────────────────────────────
-    // 2. البحث (Search)
-    // ─────────────────────────────────────────────
     override suspend fun search(query: String): List<SearchResponse> {
         val searchUrl = "$mainUrl/search?q=$query"
         val document = app.get(searchUrl).document
@@ -104,10 +91,6 @@ class VoduProvider : MainAPI() {
             }
         }
     }
-
-    // ─────────────────────────────────────────────
-    // 3. جلب تفاصيل العمل (Load Details)
-    // ─────────────────────────────────────────────
     override suspend fun load(url: String): LoadResponse {
         val document = app.get(url).document
 
@@ -115,8 +98,6 @@ class VoduProvider : MainAPI() {
         val poster = document.selectFirst("div.aspect-\\[2\\/3\\] img")?.attr("src")
         val backdrop = document.selectFirst("div.relative.h-\\[45vh\\] img")?.attr("src")
         val plot = document.selectFirst("p.max-w-2xl")?.text()?.trim()
-
-        // استخراج التقييم والمدة والسنة
         val ratingText = document.selectFirst("span.text-white.font-bold:has(i.fa-star)")?.text()?.trim()
         val rating = ratingText?.replace(Regex("[^0-9.]"), "")?.toRatingInt()
 
@@ -128,30 +109,20 @@ class VoduProvider : MainAPI() {
         val duration = document.select("div.flex.items-center span").firstOrNull {
             it.text().contains("min")
         }?.text()?.replace(Regex("[^0-9]"), "")?.toIntOrNull()
-
-        // استخراج التصنيفات
         val genres = document.selectFirst("p:contains(Genres:)")?.text()
             ?.replace("Genres:", "")
             ?.split(",")
             ?.map { it.trim() }
-
-        // الممثلين وطاقم العمل (Cast) مع الصور
         val actors = document.select("div:has(> h3:contains(Cast)) a[href*='/actor/']").mapNotNull {
             val actorName = it.selectFirst("p")?.text()?.trim() ?: return@mapNotNull null
             val actorImg = it.selectFirst("img")?.attr("src")
             Actor(actorName, actorImg)
         }
-
-        // اقتراحات أعمال مشابهة (More Like This)
         val recommendations = document.select("div:has(> h3:contains(More Like This)) a[href*='/item/']").mapNotNull {
             it.toSearchResponse()
         }
-
-        // استخراج رابط الإعلان الترويجي (YouTube Trailer)
         val trailerId = Regex("""const\s+trailerId\s*=\s*"([^"]+)"""").find(document.html())?.groupValues?.get(1)
         val trailerUrl = if (!trailerId.isNullOrBlank()) "https://www.youtube.com/watch?v=$trailerId" else null
-
-        // التحقق إذا كان العمل مسلسلاً
         val isSeries = document.select("#seasonTabs, div[id^='seasonPanel_']").isNotEmpty() ||
                 document.select("span.ui-chip").any { it.text().contains("Series", true) }
 
@@ -191,7 +162,6 @@ class VoduProvider : MainAPI() {
                 trailerUrl?.let { addTrailer(it) }
             }
         } else {
-            // فيلم
             val playUrl = document.selectFirst("a[href*='/play/']")?.attr("href") ?: url.replace("/item/", "/play/")
 
             return newMovieLoadResponse(title, url, TvType.Movie, playUrl) {
@@ -208,10 +178,6 @@ class VoduProvider : MainAPI() {
             }
         }
     }
-
-    // ─────────────────────────────────────────────
-    // 4. استخراج روابط المشاهدة والترجمة (Links & Subs)
-    // ─────────────────────────────────────────────
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -220,8 +186,6 @@ class VoduProvider : MainAPI() {
     ): Boolean {
         val document = app.get(data).document
         val html = document.html()
-
-        // 1. استخراج الجودات وروابط الفيديو من كود الجافاسكربت
         val qualitiesMatch = Regex("""const\s+qualitiesRaw\s*=\s*(\{.*?\});""").find(html)?.groupValues?.get(1)
         if (!qualitiesMatch.isNullOrBlank()) {
             val qualitiesJson = tryParseJson<Map<String, QualityItem>>(qualitiesMatch)
@@ -242,7 +206,6 @@ class VoduProvider : MainAPI() {
                 )
             }
         } else {
-            // في حال عدم وجود تفصيل جودات، استخراج الرابط البديل المباشر
             val fallbackMatch = Regex("""const\s+fallbackUrl\s*=\s*"([^"]+)"""").find(html)?.groupValues?.get(1)
             fallbackMatch?.let { rawUrl ->
                 val videoUrl = rawUrl.replace("\\/", "/")
@@ -258,8 +221,6 @@ class VoduProvider : MainAPI() {
                 )
             }
         }
-
-        // 2. استخراج الترجمات (Subtitles)
         val subtitlesMatch = Regex("""const\s+subtitlesRaw\s*=\s*(\[\{.*?\}\]);""").find(html)?.groupValues?.get(1)
         if (!subtitlesMatch.isNullOrBlank()) {
             val subsJson = tryParseJson<List<SubtitleItem>>(subtitlesMatch)
@@ -277,8 +238,6 @@ class VoduProvider : MainAPI() {
 
         return true
     }
-
-    // كائنات مساعدة لتحليل JSON
     data class QualityItem(
         @JsonProperty("url") val url: String?,
         @JsonProperty("type") val type: String?
