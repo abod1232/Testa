@@ -100,8 +100,17 @@ class VoduProvider : MainAPI() {
         val document = app.get(url).document
 
         val title = document.selectFirst("h1")?.text()?.trim() ?: "Unknown"
-        val poster = fixImageUrl(document.selectFirst("div.aspect-\\[2\\/3\\] img")?.attr("src"))
-        val backdrop = fixImageUrl(document.selectFirst("div.relative.h-\\[45vh\\] img")?.attr("src"))
+
+        // البوستر الأساسي الشغال دائماً
+        val poster = fixImageUrl(
+            document.selectFirst("div.aspect-\\[2\\/3\\] img")?.attr("src")
+        )
+
+        // الخلفية: نحاول أخذها، وإذا لم تكن موجودة نعتمد على البوستر نفسه
+        val backdrop = fixImageUrl(
+            document.selectFirst("div.relative.h-\\[45vh\\] img")?.attr("src")
+        ) ?: poster
+
         val plot = document.selectFirst("p.max-w-2xl")?.text()?.trim()
 
         val ratingText = document.selectFirst("span.text-white.font-bold:has(i.fa-star)")?.text()?.trim()
@@ -122,6 +131,7 @@ class VoduProvider : MainAPI() {
             ?.replace("Genres:", "")
             ?.split(",")
             ?.map { it.trim() }
+
         val actors = document.select("div:has(> h3:contains(Cast)) a[href*='/actor/']").mapNotNull {
             val actorName = it.selectFirst("p")?.text()?.trim() ?: return@mapNotNull null
             val actorImg = fixImageUrl(it.selectFirst("img")?.attr("src"))
