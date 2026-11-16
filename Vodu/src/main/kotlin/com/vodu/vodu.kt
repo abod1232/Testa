@@ -48,23 +48,22 @@ class VoduProvider : MainAPI() {
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = try {
-            app.get(request.data, headers = siteHeaders, timeout = 10).document
-        } catch (e: Exception) {
-            if (e is java.net.SocketTimeoutException ||
-                e is java.net.UnknownHostException ||
-                e is java.net.ConnectException ||
-                e is java.net.SocketException ||
-                e is javax.net.ssl.SSLException
-            ) {
-                showToast(
-                    "يبدو ان شبكتك لا تدعم فودو تاكد من انك تفتحه في العراق وعلى شبكة مدعومة🇮🇶",
-                    Toast.LENGTH_LONG
-                )
-                return newHomePageResponse(emptyList())
-            }
-            throw e
+    val document = try {
+        app.get(request.data, headers = siteHeaders, timeout = 10).document
+    } catch (e: Exception) {
+        // التقاط جميع أنواع أخطاء الشبكة بما فيها Canceled
+        if (e is java.io.IOException ||        // يشمل Canceled, timeout, ConnectException
+            e is java.net.UnknownHostException ||
+            e is javax.net.ssl.SSLException
+        ) {
+            showToast(
+                "يبدو ان شبكتك لا تدعم فودو تاكد من انك تفتحه في العراق وعلى شبكة مدعومة🇮🇶",
+                Toast.LENGTH_LONG
+            )
+            return newHomePageResponse(emptyList())
         }
+        throw e
+    }
 
         val homeItems = ArrayList<HomePageList>()
         val sections = document.select("div:has(h2.tv-row-title)")
