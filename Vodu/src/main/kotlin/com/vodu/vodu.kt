@@ -108,10 +108,27 @@ class VoduProvider : MainAPI() {
         val document = app.get(url, headers = siteHeaders).document
 
         val title = document.selectFirst("h1")?.text()?.trim() ?: "Unknown"
+
+        // البوستر الأساسي
         val poster = fixImageUrl(
             document.selectFirst("div.aspect-\\[2\\/3\\] img, div.w-32 img")?.attr("src")
         )
-        val backdrop = poster
+
+        // فحص رابط الخلفية والتأكد من أنه يعمل (200 OK)، وإلا نستخدم البوستر
+        val rawBackdrop = fixImageUrl(
+            document.selectFirst("div.relative.h-\\[45vh\\] img, div.tv-hero img")?.attr("src")
+        )
+
+        val backdrop = if (!rawBackdrop.isNullOrBlank()) {
+            try {
+                val check = app.head(rawBackdrop, headers = siteHeaders)
+                if (check.isSuccessful) rawBackdrop else poster
+            } catch (_: Exception) {
+                poster
+            }
+        } else {
+            poster
+        }
 
         val plot = document.selectFirst("p.max-w-2xl")?.text()?.trim()
 
@@ -133,6 +150,7 @@ class VoduProvider : MainAPI() {
             ?.replace("Genres:", "")
             ?.split(",")
             ?.map { it.trim() }
+
         val actors = document.select("div:has(> h3:contains(Cast)) a[href*='/actor/']").mapNotNull {
             val actorName = it.selectFirst("p")?.text()?.trim() ?: return@mapNotNull null
             val actorImg = fixImageUrl(it.selectFirst("img")?.attr("src"))
@@ -168,6 +186,7 @@ class VoduProvider : MainAPI() {
                             this.season = seasonNum
                             this.episode = epIndex + 1
                             this.description = epDesc
+                            this.posterUrl = poster // تعيين صورة المسلسل كصورة للحلقة
                         }
                     )
                 }
