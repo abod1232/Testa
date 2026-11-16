@@ -108,13 +108,9 @@ class VoduProvider : MainAPI() {
         val document = app.get(url, headers = siteHeaders).document
 
         val title = document.selectFirst("h1")?.text()?.trim() ?: "Unknown"
-
-        // البوستر الأساسي
         val poster = fixImageUrl(
             document.selectFirst("div.aspect-\\[2\\/3\\] img, div.w-32 img")?.attr("src")
         )
-
-        // فحص رابط الخلفية والتأكد من أنه يعمل (200 OK)، وإلا نستخدم البوستر
         val rawBackdrop = fixImageUrl(
             document.selectFirst("div.relative.h-\\[45vh\\] img, div.tv-hero img")?.attr("src")
         )
