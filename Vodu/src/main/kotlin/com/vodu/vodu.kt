@@ -33,6 +33,11 @@ class VoduProvider : MainAPI() {
         "$mainUrl/category/7" to "Arabic Movies"
     )
 
+    // دالة مساعدة لتصحيح روابط الصور واستبدال &amp; بـ &
+    private fun fixImageUrl(url: String?): String? {
+        return url?.replace("&amp;", "&")
+    }
+
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val document = app.get(request.data).document
         val homeItems = ArrayList<HomePageList>()
@@ -59,7 +64,7 @@ class VoduProvider : MainAPI() {
     private fun Element.toSearchResponse(): SearchResponse? {
         val link = this.attr("href") ?: return null
         val title = this.selectFirst("p.truncate")?.text()?.trim() ?: return null
-        val poster = this.selectFirst("img")?.attr("src")
+        val poster = fixImageUrl(this.selectFirst("img")?.attr("src"))
         val chipText = this.selectFirst("span.ui-chip")?.text()?.lowercase() ?: ""
         val type = if (chipText.contains("series") || chipText.contains("مسلسل")) {
             TvType.TvSeries
@@ -85,7 +90,7 @@ class VoduProvider : MainAPI() {
         return document.select("div.grid a[href*='/item/']").mapNotNull { element ->
             val link = element.attr("href")
             val title = element.selectFirst("p.truncate")?.text()?.trim() ?: return@mapNotNull null
-            val poster = element.selectFirst("img")?.attr("src")
+            val poster = fixImageUrl(element.selectFirst("img")?.attr("src"))
 
             newMovieSearchResponse(title, link, TvType.Movie) {
                 this.posterUrl = poster
@@ -97,9 +102,11 @@ class VoduProvider : MainAPI() {
         val document = app.get(url).document
 
         val title = document.selectFirst("h1")?.text()?.trim() ?: "Unknown"
-        val poster = document.selectFirst("div.aspect-\\[2\\/3\\] img")?.attr("src")
-        val backdrop = document.selectFirst("div.relative.h-\\[45vh\\] img")?.attr("src")
+        // تنظيف بوستر وخلفية العمل
+        val poster = fixImageUrl(document.selectFirst("div.aspect-\\[2\\/3\\] img")?.attr("src"))
+        val backdrop = fixImageUrl(document.selectFirst("div.relative.h-\\[45vh\\] img")?.attr("src"))
         val plot = document.selectFirst("p.max-w-2xl")?.text()?.trim()
+
         val ratingText = document.selectFirst("span.text-white.font-bold:has(i.fa-star)")?.text()?.trim()
         val score = ratingText?.replace(Regex("[^0-9.]"), "")?.toDoubleOrNull()?.let {
             Score.from10(it)
@@ -119,9 +126,10 @@ class VoduProvider : MainAPI() {
             ?.split(",")
             ?.map { it.trim() }
 
+        // تنظيف صور الممثلين
         val actors = document.select("div:has(> h3:contains(Cast)) a[href*='/actor/']").mapNotNull {
             val actorName = it.selectFirst("p")?.text()?.trim() ?: return@mapNotNull null
-            val actorImg = it.selectFirst("img")?.attr("src")
+            val actorImg = fixImageUrl(it.selectFirst("img")?.attr("src"))
             Actor(actorName, actorImg)
         }
 
