@@ -1,7 +1,9 @@
 package com.vodu
 
+import android.widget.Toast
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.CommonActivity.showToast
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
 import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
 import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
@@ -46,7 +48,25 @@ class VoduProvider : MainAPI() {
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val document = app.get(request.data, headers = siteHeaders).document
+        val document = try {
+            app.get(request.data, headers = siteHeaders, timeout = 10).document
+        } catch (e: Exception) {
+            // إظهار رسالة Toast للمستخدم عند تعذر الاتصال أو حظر الشبكة
+            if (e is java.net.SocketTimeoutException ||
+                e is java.net.UnknownHostException ||
+                e is java.net.ConnectException ||
+                e is java.net.SocketException ||
+                e is javax.net.ssl.SSLException
+            ) {
+                showToast(
+                    "يبدو ان شبكتك لا تدعم فودو تاكد من انك تفتحه في العراق وعلى شبكة مدعومة🇮🇶",
+                    Toast.LENGTH_LONG
+                )
+                return newHomePageResponse(emptyList())
+            }
+            throw e
+        }
+
         val homeItems = ArrayList<HomePageList>()
         val sections = document.select("div:has(h2.tv-row-title)")
 
@@ -89,6 +109,7 @@ class VoduProvider : MainAPI() {
             }
         }
     }
+
     override suspend fun search(query: String): List<SearchResponse>? {
         return search(query, 1)?.items
     }
@@ -102,6 +123,7 @@ class VoduProvider : MainAPI() {
         if (rawElements.isEmpty()) return null
 
         val parsedList = rawElements.mapNotNull { it.toSearchResponse() }
+
         fun getMatchScore(title: String?, qLower: String): Int {
             if (title.isNullOrBlank()) return 0
             val tLower = title.lowercase().trim()
@@ -121,11 +143,12 @@ class VoduProvider : MainAPI() {
                 Triple(item, score, index)
             }
             .sortedWith(
-                compareByDescending<Triple<SearchResponse, Int, Int>> { it.second } // الترتيب حسب درجة المطابقة
-                    .thenBy { it.third } // الحفاظ على ترتيب الموقع في حال تساوي الدرجة
+                compareByDescending<Triple<SearchResponse, Int, Int>> { it.second }
+                    .thenBy { it.third }
             )
             .map { it.first }
             .distinctBy { it.url }
+
         val hasNextPage = document.select("a[rel=next], a:contains(›)").isNotEmpty() ||
                 document.select("ul.flex a[href*='p=${page + 1}']").isNotEmpty()
 
@@ -136,9 +159,11 @@ class VoduProvider : MainAPI() {
         val document = app.get(url, headers = siteHeaders).document
 
         val title = document.selectFirst("h1")?.text()?.trim() ?: "Unknown"
+
         val poster = fixImageUrl(
             document.selectFirst("div.aspect-\\[2\\/3\\] img, div.w-32 img")?.attr("src")
         )
+
         val rawBackdrop = fixImageUrl(
             document.selectFirst("div.relative.h-\\[45vh\\] img, div.tv-hero img")?.attr("src")
         )
