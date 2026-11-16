@@ -32,8 +32,6 @@ class VoduProvider : MainAPI() {
         "$mainUrl/category/4" to "Arabic Series",
         "$mainUrl/category/7" to "Arabic Movies"
     )
-
-    // دالة مساعدة لتصحيح روابط الصور واستبدال &amp; بـ &
     private fun fixImageUrl(url: String?): String? {
         return url?.replace("&amp;", "&")
     }
@@ -102,7 +100,6 @@ class VoduProvider : MainAPI() {
         val document = app.get(url).document
 
         val title = document.selectFirst("h1")?.text()?.trim() ?: "Unknown"
-        // تنظيف بوستر وخلفية العمل
         val poster = fixImageUrl(document.selectFirst("div.aspect-\\[2\\/3\\] img")?.attr("src"))
         val backdrop = fixImageUrl(document.selectFirst("div.relative.h-\\[45vh\\] img")?.attr("src"))
         val plot = document.selectFirst("p.max-w-2xl")?.text()?.trim()
@@ -125,8 +122,6 @@ class VoduProvider : MainAPI() {
             ?.replace("Genres:", "")
             ?.split(",")
             ?.map { it.trim() }
-
-        // تنظيف صور الممثلين
         val actors = document.select("div:has(> h3:contains(Cast)) a[href*='/actor/']").mapNotNull {
             val actorName = it.selectFirst("p")?.text()?.trim() ?: return@mapNotNull null
             val actorImg = fixImageUrl(it.selectFirst("img")?.attr("src"))
