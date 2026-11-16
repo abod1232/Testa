@@ -108,12 +108,9 @@ class VoduProvider : MainAPI() {
         val document = app.get(url, headers = siteHeaders).document
 
         val title = document.selectFirst("h1")?.text()?.trim() ?: "Unknown"
-
-        // البوستر الشغال دائماً
         val poster = fixImageUrl(
             document.selectFirst("div.aspect-\\[2\\/3\\] img, div.w-32 img")?.attr("src")
         )
-        // استخدام نفس الصورة كخلفية لتفادي أخطاء HTTP 500 الناتجة عن روابط الباك دروب التالفة في الموقع
         val backdrop = poster
 
         val plot = document.selectFirst("p.max-w-2xl")?.text()?.trim()
@@ -136,8 +133,6 @@ class VoduProvider : MainAPI() {
             ?.replace("Genres:", "")
             ?.split(",")
             ?.map { it.trim() }
-
-        // نأخذ الممثلين مع صورهم
         val actors = document.select("div:has(> h3:contains(Cast)) a[href*='/actor/']").mapNotNull {
             val actorName = it.selectFirst("p")?.text()?.trim() ?: return@mapNotNull null
             val actorImg = fixImageUrl(it.selectFirst("img")?.attr("src"))
