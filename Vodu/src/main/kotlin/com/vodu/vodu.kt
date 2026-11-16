@@ -89,10 +89,6 @@ class VoduProvider : MainAPI() {
             }
         }
     }
-
-    // ─────────────────────────────────────────────
-    // البحث مع التمرير وخوارزمية مطابقة الأسماء
-    // ─────────────────────────────────────────────
     override suspend fun search(query: String): List<SearchResponse>? {
         return search(query, 1)?.items
     }
@@ -106,8 +102,6 @@ class VoduProvider : MainAPI() {
         if (rawElements.isEmpty()) return null
 
         val parsedList = rawElements.mapNotNull { it.toSearchResponse() }
-
-        // حساب درجة مطابقة العنوان لترتيب النتائج الأكثر صلة أولاً
         fun getMatchScore(title: String?, qLower: String): Int {
             if (title.isNullOrBlank()) return 0
             val tLower = title.lowercase().trim()
@@ -132,8 +126,6 @@ class VoduProvider : MainAPI() {
             )
             .map { it.first }
             .distinctBy { it.url }
-
-        // التحقق من وجود صفحة تالية عبر وسم rel="next" أو استعلام أرقام الصفحات
         val hasNextPage = document.select("a[rel=next], a:contains(›)").isNotEmpty() ||
                 document.select("ul.flex a[href*='p=${page + 1}']").isNotEmpty()
 
@@ -144,13 +136,9 @@ class VoduProvider : MainAPI() {
         val document = app.get(url, headers = siteHeaders).document
 
         val title = document.selectFirst("h1")?.text()?.trim() ?: "Unknown"
-
-        // البوستر الأساسي
         val poster = fixImageUrl(
             document.selectFirst("div.aspect-\\[2\\/3\\] img, div.w-32 img")?.attr("src")
         )
-
-        // فحص رابط الخلفية
         val rawBackdrop = fixImageUrl(
             document.selectFirst("div.relative.h-\\[45vh\\] img, div.tv-hero img")?.attr("src")
         )
