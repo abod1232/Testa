@@ -1,6 +1,5 @@
 package com.vodu
 
-import android.util.Log
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
@@ -22,6 +21,7 @@ class VoduProvider : MainAPI() {
         TvType.TvSeries,
         TvType.Anime
     )
+
     private val siteHeaders = mapOf(
         "Referer" to "https://movie.vodu.me/",
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -108,39 +108,13 @@ class VoduProvider : MainAPI() {
         val document = app.get(url, headers = siteHeaders).document
 
         val title = document.selectFirst("h1")?.text()?.trim() ?: "Unknown"
-        val rawPoster = document.selectFirst("div.w-32 img, div.sm\\:w-48 img, div.aspect-\\[2\\/3\\] img")?.attr("src")
-        val poster = fixImageUrl(rawPoster)
 
-        val rawBackdrop = document.selectFirst("div.relative.h-\\[45vh\\] img, div.tv-hero img")?.attr("src")
-        val backdrop = fixImageUrl(rawBackdrop) ?: poster
-
-        val TAG = "VODU_IMAGE_DEBUG"
-        Log.d(TAG, "==================== فحص صور: $title ====================")
-        Log.d(TAG, "الرابط المطلوب: $url")
-        Log.d(TAG, "البوستر الخام من HTML: $rawPoster")
-        Log.d(TAG, "البوستر بعد التصليح: $poster")
-        Log.d(TAG, "الخلفية الخام من HTML: $rawBackdrop")
-        Log.d(TAG, "الخلفية بعد التصليح: $backdrop")
-        if (!poster.isNullOrBlank()) {
-            try {
-                val testRes = app.head(poster, headers = siteHeaders)
-                Log.d(TAG, "نتيجة فحص البوستر (Status Code): ${testRes.code} | Content-Type: ${testRes.headers["content-type"]}")
-            } catch (e: Exception) {
-                Log.e(TAG, "فشل الاتصال برابط البوستر: ${e.message}")
-            }
-        } else {
-            Log.e(TAG, "تحذير: لم يتم العثور على أي وسم صورة بوستر في الصفحة!")
-        }
-
-        if (!backdrop.isNullOrBlank() && backdrop != poster) {
-            try {
-                val testRes = app.head(backdrop, headers = siteHeaders)
-                Log.d(TAG, "نتيجة فحص الخلفية (Status Code): ${testRes.code} | Content-Type: ${testRes.headers["content-type"]}")
-            } catch (e: Exception) {
-                Log.e(TAG, "فشل الاتصال برابط الخلفية: ${e.message}")
-            }
-        }
-        Log.d(TAG, "==========================================================")
+        // البوستر الشغال دائماً
+        val poster = fixImageUrl(
+            document.selectFirst("div.aspect-\\[2\\/3\\] img, div.w-32 img")?.attr("src")
+        )
+        // استخدام نفس الصورة كخلفية لتفادي أخطاء HTTP 500 الناتجة عن روابط الباك دروب التالفة في الموقع
+        val backdrop = poster
 
         val plot = document.selectFirst("p.max-w-2xl")?.text()?.trim()
 
@@ -163,6 +137,7 @@ class VoduProvider : MainAPI() {
             ?.split(",")
             ?.map { it.trim() }
 
+        // نأخذ الممثلين مع صورهم
         val actors = document.select("div:has(> h3:contains(Cast)) a[href*='/actor/']").mapNotNull {
             val actorName = it.selectFirst("p")?.text()?.trim() ?: return@mapNotNull null
             val actorImg = fixImageUrl(it.selectFirst("img")?.attr("src"))
