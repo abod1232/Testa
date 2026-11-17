@@ -241,8 +241,6 @@ class CimaLightProvider : MainAPI() {
         }
     }
 
-    // ====================== دوال معالجة StreamWish و HGCloud ======================
-
     private fun customB64Decode(s: String, alphabet: String): String {
         var bc = 0
         var bs = 0
@@ -429,8 +427,6 @@ class CimaLightProvider : MainAPI() {
         }
     }
 
-    // ============================== loadLinks المعدلة ==============================
-
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -462,15 +458,11 @@ class CimaLightProvider : MainAPI() {
                 collectedLinks[cleanUrl] = cleanName
             }
         }
-
-        // استخراج السيرفرات من الـ embed
         intermediateDoc.select("div.embeding ul li").forEach { serverElement ->
             val serverUrl = serverElement.attr("data-embed")
             val serverName = serverElement.text().trim()
             addLink(serverUrl, serverName)
         }
-
-        // استخراج روابط التحميل إن وجدت
         intermediateDoc.select("div.downloads a, ul.downloads li a").forEach { dlElement ->
             val dlUrl = dlElement.attr("href")
             val dlName = dlElement.text().trim()
@@ -501,15 +493,11 @@ class CimaLightProvider : MainAPI() {
                 emittedByBuiltIn = true
                 callback(extractorLink)
             }
-
-            // 1. تجربة المستخرج الافتراضي
             try {
                 loadExtractor(targetUrl, mainUrl, subtitleCallback, builtInCallback)
             } catch (e: Exception) {
                 logError(e)
             }
-
-            // 2. إذا لم يستخرج روابط، يتم استدعاء UniversalExtractor الخاص بك
             if (!emittedByBuiltIn) {
                 try {
                     UniversalExtractor.extract(
