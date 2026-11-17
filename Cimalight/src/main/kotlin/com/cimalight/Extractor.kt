@@ -1653,7 +1653,7 @@ class ArabicGoFileExtractor : ExtractorApi() {
 object UniversalExtractor {
     private const val TAG = "UniversalExtractor"
     private const val DEFAULT_UA =
-        "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Mobile Safari/537.36"
     private const val FALLBACK_UA =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     suspend fun extract(
@@ -1957,7 +1957,7 @@ object UniversalExtractor {
             "Referer" to referer,
             "User-Agent" to DEFAULT_UA,
             "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language" to "en-US,en;q=0.9,ar;q=0.8"
+            "Accept-Language" to "ar-IQ,ar;q=0.9,en-US;q=0.8,en;q=0.7"
         )
         if (cookie.isNotBlank()) h["Cookie"] = cookie
         return safeRunResult {
@@ -1972,11 +1972,10 @@ object UniversalExtractor {
             "Origin" to domain.removeSuffix("/"),
             "User-Agent" to DEFAULT_UA,
             "Accept" to "*/*",
-            "Accept-Language" to "en-US,en;q=0.9",
+            "Accept-Language" to "ar-IQ,ar;q=0.9,en-US;q=0.8,en;q=0.7",
             "Sec-Fetch-Dest" to "empty",
             "Sec-Fetch-Mode" to "cors",
-            "Sec-Fetch-Site" to "cross-site",
-            "Range" to "bytes=0-"
+            "Sec-Fetch-Site" to "cross-site"
         )
         if (cookie.isNotBlank()) map["Cookie"] = cookie
         return map
