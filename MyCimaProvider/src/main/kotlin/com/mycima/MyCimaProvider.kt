@@ -37,7 +37,7 @@ import kotlin.coroutines.resume
 
 class MyCimaProvider(private val context: Context) : MainAPI() {
     override var lang = "ar"
-    override var mainUrl = "https://mycima.living"
+    override var mainUrl = "https://mycima.house"
     override var name = "MyCima"
     override val usesWebView = false
     override val hasMainPage = true
