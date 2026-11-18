@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.Dialog
 import android.content.Context
-import android.graphics.Color
 import android.os.Handler
 import android.os.Looper
 import android.util.Base64
@@ -18,8 +17,6 @@ import android.webkit.CookieManager
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.LinearLayout
-import android.widget.TextView
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import kotlinx.coroutines.Dispatchers
@@ -32,6 +29,8 @@ import kotlinx.coroutines.sync.withLock
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import java.net.URI
+import java.net.URL
 import java.net.URLEncoder
 import kotlin.coroutines.resume
 
@@ -61,21 +60,20 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
             val finalUrl = response.url
 
             val base = try {
-                val uri = java.net.URI(finalUrl)
+                val uri = URI(finalUrl)
                 "${uri.scheme}://${uri.host}"
             } catch (e: Exception) {
                 mainUrl
             }
 
             redirectUrl = base
+            mainUrl = base
             Log.d(TAG, "Resolved main domain: $base")
-
             base
         } catch (e: Exception) {
             mainUrl
         }
     }
-
 
     private fun isCloudflareChallenge(html: String, title: String): Boolean {
         return (title.contains("Just a moment", ignoreCase = true) ||
@@ -85,8 +83,19 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
                 !html.contains("Grid--WecimaPosts")
     }
 
-    private fun getHeaders(referer: String? = null): Map<String, String> {
-        val cookies = CookieManager.getInstance().getCookie(mainUrl) ?: ""
+    private fun getHeaders(referer: String? = null, targetUrl: String? = null): Map<String, String> {
+        val activeBase = redirectUrl ?: mainUrl
+        val cookieTarget = targetUrl ?: activeBase
+        val cookies = try {
+            CookieManager.getInstance().getCookie(cookieTarget)
+                ?: CookieManager.getInstance().getCookie(activeBase)
+                ?: ""
+        } catch (_: Exception) {
+            ""
+        }
+
+        val safeReferer = referer?.takeIf { it.all { ch -> ch.code in 32..126 } } ?: activeBase
+
         val map = mutableMapOf(
             "User-Agent" to lastValidUserAgent,
             "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
@@ -94,7 +103,7 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
             "Upgrade-Insecure-Requests" to "1",
             "Cache-Control" to "no-cache",
             "Pragma" to "no-cache",
-            "Referer" to (referer ?: mainUrl) // هنا نجعل الـ Referer الأساسي هو mainUrl
+            "Referer" to safeReferer
         )
         if (cookies.isNotEmpty()) map["Cookie"] = cookies
         return map
@@ -118,7 +127,7 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
 
             dialog.window?.apply {
                 setBackgroundDrawableResource(android.R.color.transparent)
-                clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND) // إزالة التعتيم الخلفي
+                clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
                 addFlags(
                     WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
@@ -134,7 +143,6 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
             }
 
             val webView = WebView(activity)
-
             webView.visibility = View.INVISIBLE
             dialog.setContentView(webView, ViewGroup.LayoutParams(1, 1))
 
@@ -145,7 +153,7 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
                     databaseEnabled = true
                     useWideViewPort = true
                     loadWithOverviewMode = true
-                    userAgentString = com.mycima.MyCimaProvider.Companion.lastValidUserAgent
+                    userAgentString = lastValidUserAgent
                     cacheMode = WebSettings.LOAD_DEFAULT
                 }
             } catch (_: Exception) {
@@ -196,19 +204,13 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
                     } ?: ""
 
                     if (currentCookies.contains("cf_clearance")) {
-                        Log.d(
-                            com.mycima.MyCimaProvider.Companion.TAG,
-                            "Hidden Cloudflare Bypass Successful!"
-                        )
+                        Log.d(TAG, "Hidden Cloudflare Bypass Successful!")
                         handler.postDelayed({ finish(true) }, 1000)
                         return
                     }
 
                     if (System.currentTimeMillis() - startTime > timeoutMs) {
-                        Log.d(
-                            com.mycima.MyCimaProvider.Companion.TAG,
-                            "Hidden Cloudflare Bypass Timeout!"
-                        )
+                        Log.d(TAG, "Hidden Cloudflare Bypass Timeout!")
                         finish(false)
                         return
                     }
@@ -221,8 +223,8 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
 
             try {
                 dialog.show()
-
-                webView.loadUrl(url, mutableMapOf("Referer" to mainUrl))
+                val activeBase = redirectUrl ?: mainUrl
+                webView.loadUrl(url, mutableMapOf("Referer" to activeBase))
             } catch (e: Exception) {
                 finish(false)
             }
@@ -233,13 +235,11 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
         }
     }
 
-
     private suspend fun smartGet(
         url: String,
         referer: String? = null,
-        timeoutSeconds: Long = 20000L
+        timeoutSeconds: Long = 20L
     ): Document {
-
         var currentAttempt = 0
         val normalRetries = 2
 
@@ -248,7 +248,7 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
             try {
                 val response = app.get(
                     url,
-                    headers = getHeaders(referer),
+                    headers = getHeaders(referer, url),
                     timeout = timeoutSeconds,
                     cacheTime = 0
                 )
@@ -260,35 +260,21 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
                 ) {
                     return response.document
                 } else {
-                    Log.d(
-                        com.mycima.MyCimaProvider.Companion.TAG,
-                        "Attempt $currentAttempt failed (Code: ${response.code}). Retrying silently..."
-                    )
+                    Log.d(TAG, "Attempt $currentAttempt failed (Code: ${response.code}). Retrying silently...")
                     kotlinx.coroutines.delay(1500)
                 }
             } catch (e: Exception) {
-                Log.d(
-                    com.mycima.MyCimaProvider.Companion.TAG,
-                    "Attempt $currentAttempt Exception: ${e.message}"
-                )
+                Log.d(TAG, "Attempt $currentAttempt Exception: ${e.message}")
                 kotlinx.coroutines.delay(1500)
             }
         }
 
-        Log.d(
-            com.mycima.MyCimaProvider.Companion.TAG,
-            "Normal retries failed. Activating Hidden WebView Bypass..."
-        )
+        Log.d(TAG, "Normal retries failed. Activating Hidden WebView Bypass...")
 
-        com.mycima.MyCimaProvider.Companion.cfLock.withLock {
+        cfLock.withLock {
             try {
-                val check =
-                    app.get(url, headers = getHeaders(referer), timeout = 10000L, cacheTime = 0)
-                if (check.code == 200 && !isCloudflareChallenge(
-                        check.text,
-                        ""
-                    )
-                ) return check.document
+                val check = app.get(url, headers = getHeaders(referer, url), timeout = 10L, cacheTime = 0)
+                if (check.code == 200 && !isCloudflareChallenge(check.text, "")) return check.document
             } catch (_: Exception) {
             }
 
@@ -298,7 +284,7 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
         return try {
             app.get(
                 url,
-                headers = getHeaders(referer),
+                headers = getHeaders(referer, url),
                 timeout = timeoutSeconds,
                 cacheTime = 0
             ).document
@@ -311,11 +297,10 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
         url: String,
         data: Map<String, String>,
         referer: String? = null,
-        timeoutSeconds: Long = 20000L
+        timeoutSeconds: Long = 20L
     ): Document {
-
         try {
-            val headers = getHeaders(referer).toMutableMap()
+            val headers = getHeaders(referer, url).toMutableMap()
             headers["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8"
             headers["X-Requested-With"] = "XMLHttpRequest"
 
@@ -326,30 +311,30 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
                 timeout = timeoutSeconds,
                 cacheTime = 0
             )
-            if (!isCloudflareChallenge(response.text, "")) {
+            if (response.code == 200 && !isCloudflareChallenge(response.text, "")) {
                 return response.document
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
         }
 
-        com.mycima.MyCimaProvider.Companion.cfLock.withLock {
+        cfLock.withLock {
             try {
                 val checkResponse = app.get(
-                    mainUrl,
-                    headers = getHeaders(referer),
+                    url,
+                    headers = getHeaders(referer, url),
                     timeout = timeoutSeconds,
                     cacheTime = 0
                 )
                 if (isCloudflareChallenge(checkResponse.text, "")) {
-                    fetchCookiesWithTrustedWebView(mainUrl, timeoutMs = 30000L)
+                    fetchCookiesWithTrustedWebView(redirectUrl ?: mainUrl, timeoutMs = 30000L)
                 }
-            } catch (e: Exception) {
-                fetchCookiesWithTrustedWebView(mainUrl, timeoutMs = 30000L)
+            } catch (_: Exception) {
+                fetchCookiesWithTrustedWebView(redirectUrl ?: mainUrl, timeoutMs = 30000L)
             }
         }
 
         return try {
-            val retryHeaders = getHeaders(referer).toMutableMap()
+            val retryHeaders = getHeaders(referer, url).toMutableMap()
             retryHeaders["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8"
             retryHeaders["X-Requested-With"] = "XMLHttpRequest"
             app.post(
@@ -367,14 +352,6 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
     private fun extractNumbers(text: String?): Int? {
         if (text.isNullOrBlank()) return null
         return Regex("""\d+""").find(text)?.value?.toIntOrNull()
-    }
-
-    private fun String.safeBase64Decode(): String {
-        return try {
-            String(Base64.decode(this, Base64.DEFAULT), Charsets.UTF_8)
-        } catch (e: Exception) {
-            ""
-        }
     }
 
     private fun getPosterFromStyle(element: Element?): String? {
@@ -405,7 +382,7 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
 
         val posterUrl = getPosterFromStyle(linkElement.selectFirst("span.BG--GridItem"))
         val titleTag = linkElement.selectFirst("strong") ?: return null
-        val title = titleTag.ownText().trim()
+        val title = titleTag.ownText().trim().ifBlank { linkElement.attr("title").trim() }
         val year = titleTag.selectFirst("span.year")?.text()?.let { extractNumbers(it) }
 
         val isMovie = this.selectFirst("div.Episode--number") == null && !url.contains("/series/")
@@ -423,7 +400,6 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
         }
     }
 
-
     override val mainPage = mainPageOf(
         "$mainUrl/" to "احدث الاضافات",
         "$mainUrl/movies/" to "افلام جديدة",
@@ -436,10 +412,12 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         return try {
+            val activeBase = baseUrl().trimEnd('/')
+            val baseRequestUrl = request.data.replace(Regex("^https?://[^/]+"), activeBase)
             val url = if (page > 1) {
-                "${request.data.removeSuffix("/")}/page/$page/"
+                "${baseRequestUrl.removeSuffix("/")}/page/$page/"
             } else {
-                request.data
+                baseRequestUrl
             }
 
             val document = smartGet(url)
@@ -473,263 +451,271 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
         return document.select("div#MainFiltar div.GridItem").mapNotNull { it.toSearchResult() }
     }
 
-    override suspend fun load(url: String): LoadResponse? {
+    private fun parseSeasonNumber(text: String): Int? {
+        Regex("(\\d+)").find(text)?.groupValues?.get(1)?.toIntOrNull()?.let { return it }
 
+        val normalized = text
+            .replace(Regex("[\u064B-\u065F\u0670\u0640]"), "")
+            .replace('أ', 'ا')
+            .replace('إ', 'ا')
+            .replace('آ', 'ا')
+            .replace('ٱ', 'ا')
+            .replace('ى', 'ي')
+            .replace('ؤ', 'و')
+            .replace('ئ', 'ي')
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
+        val ordinals = listOf(
+            "الحادي والثلاثون" to 31, "الحادي والثلاثين" to 31, "الواحد والثلاثون" to 31, "الواحد والثلاثين" to 31,
+            "الثاني والثلاثون" to 32, "الثاني والثلاثين" to 32,
+            "الثالث والثلاثون" to 33, "الثالث والثلاثين" to 33,
+            "الرابع والثلاثون" to 34, "الرابع والثلاثين" to 34,
+            "الخامس والثلاثون" to 35, "الخامس والثلاثين" to 35,
+            "الثلاثون" to 30, "الثلاثين" to 30,
+            "الحادي والعشرون" to 21, "الحادي والعشرين" to 21, "الواحد والعشرون" to 21, "الواحد والعشرين" to 21,
+            "الثاني والعشرون" to 22, "الثاني والعشرين" to 22,
+            "الثالث والعشرون" to 23, "الثالث والعشرين" to 23,
+            "الرابع والعشرون" to 24, "الرابع والعشرين" to 24,
+            "الخامس والعشرون" to 25, "الخامس والعشرين" to 25,
+            "السادس والعشرون" to 26, "السادس والعشرين" to 26,
+            "السابع والعشرون" to 27, "السابع والعشرين" to 27,
+            "الثامن والعشرون" to 28, "الثامن والعشرين" to 28,
+            "التاسع والعشرون" to 29, "التاسع والعشرين" to 29,
+            "العشرون" to 20, "العشرين" to 20,
+            "الحادي عشر" to 11, "الواحد عشر" to 11,
+            "الثاني عشر" to 12,
+            "الثالث عشر" to 13,
+            "الرابع عشر" to 14,
+            "الخامس عشر" to 15,
+            "السادس عشر" to 16,
+            "السابع عشر" to 17,
+            "الثامن عشر" to 18,
+            "التاسع عشر" to 19,
+            "العاشر" to 10,
+            "الاول" to 1,
+            "الثاني" to 2,
+            "الثالث" to 3,
+            "الرابع" to 4,
+            "الخامس" to 5,
+            "السادس" to 6,
+            "السابع" to 7,
+            "الثامن" to 8,
+            "التاسع" to 9
+        )
+
+        return ordinals.firstOrNull { normalized.contains(it.first) }?.second
+    }
+
+    override suspend fun load(url: String): LoadResponse? {
         return try {
             val document = smartGet(url)
-            var title =
-                document.selectFirst("div.Title--Content--Single-begin > h1")?.ownText()?.trim()
-            if (title.isNullOrBlank()) {
-                title = document.selectFirst("meta[property='og:title']")?.attr("content")?.trim()
-                title = title?.replace(" - وي سيما WECIMA ماي سيما MYCIMA", "")
+            val currentBase = try {
+                val u = URL(url)
+                "${u.protocol}://${u.host}"
+            } catch (_: Exception) {
+                baseUrl()
+            }
+
+            val isSeriesPage = document.selectFirst(
+                "div.SeasonsList ul li a, div.Seasons--Episodes, div.EpisodesList a, singlesection.Series--Section a"
+            ) != null
+
+            val seriesTitleFromSection = document.selectFirst("singlesection.Series--Section h2")?.text()
+                ?.replace("حلقات ", "")
+                ?.trim()
+                ?.ifBlank { null }
+
+            var rawTitle = if (isSeriesPage && !seriesTitleFromSection.isNullOrBlank()) {
+                seriesTitleFromSection
+            } else {
+                document.selectFirst("div.Title--Content--Single-begin > h1")?.ownText()
+                    ?.trimEnd('(', ' ', ')')?.trim()
+            }
+
+            if (rawTitle.isNullOrBlank()) {
+                rawTitle = document.selectFirst("meta[property='og:title']")?.attr("content")?.trim()
+                    ?.replace(" - وي سيما WECIMA ماي سيما MYCIMA", "")
                     ?.replace(" - ماي سيما", "")
             }
-            if (title.isNullOrBlank()) {
-                title = document.title()
+            if (rawTitle.isNullOrBlank()) {
+                rawTitle = document.title()
             }
-            if (title.isNullOrBlank()) return null
+            val finalTitle = rawTitle?.trim()?.takeIf { it.isNotBlank() } ?: return null
 
             val poster = getPosterFromStyle(document.selectFirst("wecima.separated--top"))
-            val year =
-                document.selectFirst("div.Title--Content--Single-begin h1 a")?.text()?.toIntOrNull()
-            val plot = document.selectFirst("div.StoryMovieContent")?.text()?.trim()
-            val tags =
-                document.select("ul.Terms--Content--Single-begin li:has(span:contains(النوع)) p a")
-                    .map { it.text() }
+                ?: document.selectFirst("meta[property='og:image']")?.attr("content")?.ifBlank { null }
+
+            val year = document.selectFirst("div.Title--Content--Single-begin h1 a")?.text()
+                ?.trim()?.toIntOrNull()
+                ?: extractNumbers(document.selectFirst("div.Title--Content--Single-begin h1")?.text())
+
+            val plot = document.selectFirst("div.StoryMovieContent")?.text()?.trim()?.ifBlank { null }
+                ?: document.selectFirst("div.AsideContext p, div.AsideContext div")?.text()?.trim()?.ifBlank { null }
+                ?: document.selectFirst("div.PostItemContent")?.text()?.trim()?.ifBlank { null }
+                ?: document.selectFirst("meta[property='og:description']")?.attr("content")?.trim()?.ifBlank { null }
+                ?: document.selectFirst("meta[name='description']")?.attr("content")?.trim()?.ifBlank { null }
+
+            val tags = document.select("ul.Terms--Content--Single-begin li:has(span:contains(النوع)) p a")
+                .map { it.text().trim() }
+
             val recommendations = document.select("div.Grid--WecimaPosts div.GridItem")
                 .mapNotNull { it.toSearchResult() }
 
-            val isSeriesPage = document.selectFirst("div.SeasonsList, .Seasons--Episodes") != null
-            val seriesUrlFromEpisode =
-                document.selectFirst("ul.Terms--Content--Single-begin li:contains(المسلسل) a")
-                    ?.attr("href")
-            fun extractPostId(doc: org.jsoup.nodes.Document): String? {
-                doc.selectFirst("input[name=post_id]")?.attr("value")?.takeIf { it.isNotBlank() }
-                    ?.let { return it }
-                doc.selectFirst("[data-post_id]")?.attr("data-post_id")?.takeIf { it.isNotBlank() }
-                    ?.let { return it }
-                doc.selectFirst("[data-postid]")?.attr("data-postid")?.takeIf { it.isNotBlank() }
-                    ?.let { return it }
-                doc.selectFirst("meta[name=post_id]")?.attr("content")?.takeIf { it.isNotBlank() }
-                    ?.let { return it }
-                val scriptsText = doc.select("script").joinToString(" ") { it.data() ?: "" }
-                Regex("""post_id['"]?\s*[:=]\s*['"]?(\d{3,})['"]?""").find(scriptsText)?.groups?.get(
-                    1
-                )?.value?.let { return it }
-                Regex("""postid['"]?\s*[:=]\s*['"]?(\d{3,})['"]?""").find(scriptsText)?.groups?.get(
-                    1
-                )?.value?.let { return it }
+            val seriesUrlFromEpisode = document
+                .selectFirst("singlesection.Series--Section > a, ul.Terms--Content--Single-begin li:contains(المسلسل) a")
+                ?.attr("href")
+
+            fun extractPostId(doc: Document): String? {
+                val html = doc.html()
+                Regex("""Single/Episodes\.php.*?post_id:\s*['"](\d+)['"]""", RegexOption.DOT_MATCHES_ALL)
+                    .find(html)?.groupValues?.get(1)?.let { return it }
+                doc.selectFirst("input[name=post_id]")?.attr("value")?.takeIf { it.isNotBlank() }?.let { return it }
+                doc.selectFirst("[data-post_id]")?.attr("data-post_id")?.takeIf { it.isNotBlank() }?.let { return it }
+                doc.selectFirst("[data-postid]")?.attr("data-postid")?.takeIf { it.isNotBlank() }?.let { return it }
+                doc.selectFirst("link[rel=shortlink]")?.attr("href")?.let {
+                    Regex("p=(\\d+)").find(it)?.groupValues?.get(1)
+                }?.let { return it }
+                val scriptsText = doc.select("script").joinToString(" ") { it.data() }
+                Regex("""post_id['"]?\s*[:=]\s*['"]?(\d{3,})['"]?""").find(scriptsText)?.groupValues?.get(1)?.let { return it }
                 return null
             }
 
-            fun extractEpisodeNumberFromText(text: String?): String? {
+            fun extractEpisodeNumberFromText(text: String?): Int? {
                 if (text.isNullOrBlank()) return null
-                Regex("""الحلقة\s*(\d+)""").find(text)?.groups?.get(1)?.value?.let { return it }
-                Regex("""\b(\d{1,3})\b""").find(text)?.groups?.get(1)?.value?.let { return it }
+                Regex("""الحلقة\s*(\d+)""").find(text)?.groupValues?.get(1)?.toIntOrNull()?.let { return it }
+                Regex("""\b(\d{1,4})\b""").find(text)?.groupValues?.get(1)?.toIntOrNull()?.let { return it }
                 return null
             }
 
             fun resolveUrl(base: String, relative: String): String {
                 return try {
-                    val u = java.net.URL(java.net.URL(base), relative)
-                    u.toString()
+                    URL(URL(base), relative).toString()
                 } catch (e: Exception) {
-                    if (relative.startsWith("http")) relative else mainUrl.trimEnd('/') + "/" + relative.trimStart(
-                        '/'
-                    )
+                    if (relative.startsWith("http")) relative else currentBase.trimEnd('/') + "/" + relative.trimStart('/')
+                }
+            }
+
+            fun parseEpisodesFromAnchors(
+                anchors: List<Element>,
+                seasonLabel: String?,
+                seasonNumber: Int?
+            ): List<Episode> {
+                var counter = 0
+                return anchors.mapNotNull { a ->
+                    val rawHref = a.attr("href").ifBlank { a.attr("data-href") }
+                    if (rawHref.isBlank()) return@mapNotNull null
+                    val epHref = resolveUrl(url, rawHref)
+
+                    val epTitleRaw = a.selectFirst("episodetitle, .episodetitle")?.text()?.trim()
+                        ?: a.attr("title").ifBlank { a.text() }.trim()
+                    val epNum = extractEpisodeNumberFromText(epTitleRaw) ?: run {
+                        counter++
+                        counter
+                    }
+
+                    val epName = if (!seasonLabel.isNullOrBlank()) {
+                        "$seasonLabel الحلقة $epNum"
+                    } else {
+                        "الحلقة $epNum"
+                    }
+
+                    newEpisode(epHref) {
+                        this.name = epName
+                        this.season = seasonNumber
+                        this.episode = epNum
+                        this.posterUrl = poster
+                    }
                 }
             }
 
             if (isSeriesPage) {
-                val episodes = mutableListOf<Episode>()
+                val htmlText = document.html()
+                val ajaxBase = Regex("""var\s+AjaxtURL\s*=\s*"([^"]+)"""")
+                    .find(htmlText)?.groupValues?.get(1)
+                    ?: "$currentBase/wp-content/themes/mycima/Ajaxt/"
+                val ajaxUrl = "${ajaxBase.trimEnd('/')}/Single/Episodes.php"
                 val postId = extractPostId(document)
-                val ajaxUrl = "${baseUrl()}/wp-content/themes/mycima/Ajaxt/Single/Episodes.php"
 
-                var seasonAnchors = document.select("div.SeasonsList ul li a")
-                if (seasonAnchors.isEmpty()) {
-                    seasonAnchors = document.select(".Seasons--Episodes ul li a")
+                val seasonAnchors = document.select("div.SeasonsList ul li a")
+                    .ifEmpty { document.select(".Seasons--Episodes ul li a") }
+
+                val episodes: List<Episode> = if (seasonAnchors.isEmpty()) {
+                    val anchors = document.select("div.EpisodesList a[href]")
+                    parseEpisodesFromAnchors(anchors, null, null)
+                } else {
+                    val parsedNums = seasonAnchors.map { parseSeasonNumber(it.text()) }
+                    val usedNumbers = parsedNums.filterNotNull().toMutableSet()
+                    var nextMissing = 1
+                    val resolvedSeasonNums = parsedNums.map { known ->
+                        if (known != null) {
+                            known
+                        } else {
+                            while (usedNumbers.contains(nextMissing)) nextMissing++
+                            val assigned = nextMissing
+                            usedNumbers.add(assigned)
+                            nextMissing++
+                            assigned
+                        }
+                    }
+
+                    coroutineScope {
+                        seasonAnchors.mapIndexed { idx, seasonEl ->
+                            async(Dispatchers.IO) {
+                                val seasonNumber = resolvedSeasonNums[idx]
+                                val rawSeasonText = seasonEl.text().trim()
+                                val seasonLabel = rawSeasonText
+                                    .replace(Regex("\\s*(مترجم|مدبلج).*"), "")
+                                    .trim()
+                                    .ifBlank { "الموسم $seasonNumber" }
+
+                                val seasonId = seasonEl.attr("data-season").ifBlank { seasonEl.attr("data-season-id") }
+                                val isActiveSeason = seasonEl.parent()?.hasClass("active") == true
+
+                                if (isActiveSeason) {
+                                    val inPageAnchors = document.select("div.EpisodesList a[href]")
+                                    if (inPageAnchors.isNotEmpty()) {
+                                        return@async parseEpisodesFromAnchors(inPageAnchors, seasonLabel, seasonNumber)
+                                    }
+                                }
+
+                                if (seasonId.isNotBlank() && !postId.isNullOrBlank()) {
+                                    try {
+                                        val seasonDoc = smartPost(
+                                            ajaxUrl,
+                                            data = mapOf("season" to seasonId, "post_id" to postId),
+                                            referer = currentBase,
+                                            timeoutSeconds = 15L
+                                        )
+                                        val anchors = seasonDoc.select("a[href]")
+                                        if (anchors.isNotEmpty()) {
+                                            return@async parseEpisodesFromAnchors(anchors, seasonLabel, seasonNumber)
+                                        }
+                                    } catch (_: Exception) {
+                                    }
+                                }
+
+                                emptyList()
+                            }
+                        }.awaitAll().flatten()
+                    }
                 }
 
-                if (seasonAnchors.isEmpty()) {
-                    val globalAnchors = document.select("div.EpisodesList a[href], a.episode[href]")
-                    for (a in globalAnchors) {
-                        val epTitleRaw = a.selectFirst(".episodetitle")?.text() ?: a.attr("title")
-                            .ifBlank { a.text() }
-                        val epNumText = extractEpisodeNumberFromText(epTitleRaw)
-                        val epNum = epNumText?.toIntOrNull()
-                        val newTitle =
-                            if (epNum != null) "الحلقة $epNum" else (epTitleRaw ?: "حلقة")
-                        var epHref = a.attr("href").ifBlank { a.attr("data-href") }
-                        if (epHref.isNullOrBlank()) continue
-                        epHref = resolveUrl(url, epHref)
-                        episodes.add(newEpisode(epHref) {
-                            this.name = newTitle
-                            this.season = null
-                            this.episode = epNum
-                            this.posterUrl = poster
-                        })
-                    }
-
-                    val distinctEpisodes = episodes.distinctBy { it.data }
-                    return newTvSeriesLoadResponse(
-                        title!!,
-                        url,
-                        TvType.TvSeries,
-                        distinctEpisodes
-                    ) {
-                        this.posterUrl = poster
-                        this.year = year
-                        this.plot = plot
-                        this.tags = tags
-                        this.recommendations = recommendations
-                    }
-                }
-
-                for ((seasonIndex, seasonEl) in seasonAnchors.withIndex()) {
-                    val rawSeasonText = seasonEl.text().trim()
-                    val seasonIdRaw =
-                        seasonEl.attr("data-season").ifBlank { seasonEl.attr("data-season-id") }
-                    val seasonHrefRaw = seasonEl.attr("href").ifBlank { seasonEl.attr("data-href") }
-
-                    val seasonNumFromText = extractNumbers(rawSeasonText)
-                    val seasonNumFromId =
-                        extractNumbers(seasonIdRaw)?.takeIf { seasonIdRaw.length <= 3 }
-                    val seasonNumber = seasonNumFromText ?: seasonNumFromId ?: (seasonIndex + 1)
-
-                    val seasonLabel = when {
-                        rawSeasonText.isNotBlank() && !rawSeasonText.matches(Regex("^\\d{3,}\$")) -> {
-                            if (rawSeasonText.matches(Regex("^\\d{1,3}\$"))) "الموسم $rawSeasonText" else rawSeasonText
-                        }
-
-                        else -> "الموسم $seasonNumber"
-                    }
-
-                    var gotEpisodesForThisSeason = false
-                    var localEpisodeCounter = 0
-
-                    if (seasonIdRaw.isNotBlank() && !postId.isNullOrBlank()) {
-                        try {
-                            val postData = mapOf("season" to seasonIdRaw, "post_id" to postId)
-                            val seasonDoc = smartPost(
-                                ajaxUrl,
-                                data = postData,
-                                referer = url,
-                                timeoutSeconds = 10_000L
-                            )
-                            val anchors = seasonDoc.select("a[href]")
-                                .ifEmpty { seasonDoc.select("div.EpisodesList a[href]") }
-                            if (anchors.isNotEmpty()) {
-                                for (a in anchors) {
-                                    val epTitleRaw =
-                                        a.selectFirst(".episodetitle")?.text() ?: a.attr("title")
-                                            .ifBlank { a.text() }
-                                    val epNumText = extractEpisodeNumberFromText(epTitleRaw)
-                                    val epNum = epNumText?.toIntOrNull() ?: run {
-                                        localEpisodeCounter += 1
-                                        localEpisodeCounter
-                                    }
-                                    var epHref = a.attr("href").ifBlank { a.attr("data-href") }
-                                    if (epHref.isNullOrBlank()) continue
-                                    epHref = resolveUrl(url, epHref)
-                                    episodes.add(newEpisode(epHref) {
-                                        this.name = "$seasonLabel الحلقة $epNum"
-                                        this.season = seasonNumber
-                                        this.episode = epNum
-                                        this.posterUrl = poster
-                                    })
-                                }
-                                gotEpisodesForThisSeason = true
-                            }
-                        } catch (_: Exception) {
-                        }
-                    }
-
-                    if (gotEpisodesForThisSeason) continue
-
-                    if (!seasonHrefRaw.isNullOrBlank()) {
-                        try {
-                            val resolvedSeasonHref = resolveUrl(url, seasonHrefRaw)
-                            val seasonDoc = smartGet(
-                                resolvedSeasonHref,
-                                referer = url,
-                                timeoutSeconds = 10_000L
-                            )
-                            val anchors =
-                                seasonDoc.select("div.EpisodesList a[href], a[href]").filter {
-                                    it.closest(".SeasonsList") == null
-                                }
-                            if (anchors.isNotEmpty()) {
-                                for (a in anchors) {
-                                    val epTitleRaw =
-                                        a.selectFirst(".episodetitle")?.text() ?: a.attr("title")
-                                            .ifBlank { a.text() }
-                                    val epNumText = extractEpisodeNumberFromText(epTitleRaw)
-                                    val epNum = epNumText?.toIntOrNull() ?: run {
-                                        localEpisodeCounter += 1
-                                        localEpisodeCounter
-                                    }
-                                    var epHref = a.attr("href").ifBlank { a.attr("data-href") }
-                                    if (epHref.isNullOrBlank()) continue
-                                    epHref = resolveUrl(url, epHref)
-                                    episodes.add(newEpisode(epHref) {
-                                        this.name = "$seasonLabel الحلقة $epNum"
-                                        this.season = seasonNumber
-                                        this.episode = epNum
-                                        this.posterUrl = poster
-                                    })
-                                }
-                                gotEpisodesForThisSeason = true
-                            }
-                        } catch (_: Exception) {
-                        }
-                    }
-
-                    if (gotEpisodesForThisSeason) continue
-
-                    val fallbackBlocks = document.select("div.SeasonsList, .Seasons--Episodes")
-                    if (fallbackBlocks.isNotEmpty()) {
-                        val matchingBlock =
-                            fallbackBlocks.getOrNull(seasonIndex) ?: fallbackBlocks.firstOrNull()
-                        matchingBlock?.select("div.EpisodesList a[href], a[href]")?.let { anchors ->
-                            if (anchors.isNotEmpty()) {
-                                for (a in anchors) {
-                                    val epTitleRaw =
-                                        a.selectFirst(".episodetitle")?.text() ?: a.attr("title")
-                                            .ifBlank { a.text() }
-                                    val epNumText = extractEpisodeNumberFromText(epTitleRaw)
-                                    val epNum = epNumText?.toIntOrNull() ?: run {
-                                        localEpisodeCounter += 1
-                                        localEpisodeCounter
-                                    }
-                                    var epHref = a.attr("href").ifBlank { a.attr("data-href") }
-                                    if (epHref.isNullOrBlank()) continue
-                                    epHref = resolveUrl(url, epHref)
-                                    episodes.add(newEpisode(epHref) {
-                                        this.name = "$seasonLabel الحلقة $epNum"
-                                        this.season = seasonNumber
-                                        this.episode = epNum
-                                        this.posterUrl = poster
-                                    })
-                                }
-                                gotEpisodesForThisSeason = true
-                            }
-                        }
-                    }
-                }
                 val distinctEpisodes = episodes.distinctBy { it.data }
                     .sortedWith(compareBy({ it.season }, { it.episode }))
 
-                return newTvSeriesLoadResponse(title!!, url, TvType.TvSeries, distinctEpisodes) {
+                val seriesPageUrl = seriesUrlFromEpisode?.let { resolveUrl(url, it) } ?: url
+                return newTvSeriesLoadResponse(finalTitle, seriesPageUrl, TvType.TvSeries, distinctEpisodes) {
                     this.posterUrl = poster
                     this.year = year
                     this.plot = plot
                     this.tags = tags
                     this.recommendations = recommendations
                 }
-            } else if (seriesUrlFromEpisode != null) {
-                return load(seriesUrlFromEpisode)
+            } else if (!seriesUrlFromEpisode.isNullOrBlank()) {
+                return load(resolveUrl(url, seriesUrlFromEpisode))
             } else {
-                return newMovieLoadResponse(title!!, url, TvType.Movie, url) {
+                return newMovieLoadResponse(finalTitle, url, TvType.Movie, url) {
                     this.posterUrl = poster
                     this.year = year
                     this.plot = plot
@@ -743,9 +729,11 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
             return null
         }
     }
+
     private val browserHeaders = mapOf(
         "user-agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
     )
+
     private fun fixBase64Padding(text: String): String {
         val cleanText = text.trim().replace(" ", "").replace("\n", "")
         val missingPadding = cleanText.length % 4
@@ -755,6 +743,7 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
             cleanText
         }
     }
+
     private fun smartDecode(payload: String): String? {
         try {
             val decoded =
@@ -768,6 +757,7 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
         }
         return null
     }
+
     private suspend fun deepExtractGovid(url: String, referer: String): String {
         try {
             val reqHeaders = browserHeaders + mapOf("referer" to referer)
@@ -795,14 +785,15 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
         }
         return url
     }
+
     override suspend fun loadLinks(
-        data: String, // data هو رابط الفيلم (target_url) الذي سنستخدمه كـ referer
+        data: String,
         isCasting: Boolean,
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        val initialHeaders = browserHeaders + mapOf("referer" to mainUrl)
-        val document = app.get(data, headers = initialHeaders, timeout = 15L).document
+        val activeBase = baseUrl()
+        val document = smartGet(data, referer = activeBase)
 
         val linksToProcess = mutableListOf<Pair<String, String>>()
         document.select("ul#watch li[data-watch]").forEach {
@@ -815,6 +806,7 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
             val name = it.selectFirst("quality")?.text()?.trim() ?: "تحميل"
             if (url.isNotBlank()) linksToProcess.add(url to name)
         }
+
         coroutineScope {
             linksToProcess.distinctBy { it.first }.map { (link, serverName) ->
                 async {
@@ -823,12 +815,11 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
                         if (finalUrl.contains("=") && !finalUrl.contains("pic=")) {
                             val encodedPart = finalUrl.substringAfterLast("=")
                             val decoded = smartDecode(encodedPart)
-                            finalUrl = decoded ?: deepExtractGovid(finalUrl, data)
+                            finalUrl = decoded ?: deepExtractGovid(finalUrl, activeBase)
                         } else {
-                            finalUrl = deepExtractGovid(finalUrl, data)
+                            finalUrl = deepExtractGovid(finalUrl, activeBase)
                         }
-                    }
-                    else if (finalUrl.contains("/go/")) {
+                    } else if (finalUrl.contains("/go/")) {
                         val encodedPart = finalUrl.substringAfterLast("/go/").trimEnd('/')
                         val decoded = smartDecode(encodedPart)
                         if (decoded != null) {
@@ -836,10 +827,10 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
                         }
                     }
                     if (finalUrl.isNotBlank() && finalUrl.startsWith("http")) {
-                        loadExtractor(finalUrl, data, subtitleCallback, callback)
+                        loadExtractor(finalUrl, activeBase, subtitleCallback, callback)
                     }
                 }
-            }.awaitAll() // انتظار جميع العمليات
+            }.awaitAll()
         }
 
         return true
