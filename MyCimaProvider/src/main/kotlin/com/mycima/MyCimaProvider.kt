@@ -1,40 +1,21 @@
 package com.mycima
 
-import android.annotation.SuppressLint
-import android.app.Activity
-import android.app.Dialog
-import android.content.Context
-import android.os.Handler
-import android.os.Looper
 import android.util.Base64
 import android.util.Log
-import android.view.Gravity
-import android.view.View
-import android.view.ViewGroup
-import android.view.Window
-import android.view.WindowManager
-import android.webkit.CookieManager
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.net.URI
 import java.net.URL
 import java.net.URLEncoder
-import kotlin.coroutines.resume
 
-class MyCimaProvider(private val context: Context) : MainAPI() {
+class MyCimaProvider : MainAPI() {
     override var lang = "ar"
     override var mainUrl = "https://mycima.house"
     override var name = "MyCima"
@@ -46,10 +27,8 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
     companion object {
         const val TAG = "MyCima"
         var redirectUrl: String? = null
-
-        private val cfLock = Mutex()
-        private var lastValidUserAgent =
-            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+        private const val USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     }
 
     private suspend fun baseUrl(): String {
@@ -75,29 +54,12 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
         }
     }
 
-    private fun isCloudflareChallenge(html: String, title: String): Boolean {
-        return (title.contains("Just a moment", ignoreCase = true) ||
-                title.contains("Attention Required", ignoreCase = true) ||
-                html.contains("cf-turnstile") ||
-                html.contains("challenge-platform")) &&
-                !html.contains("Grid--WecimaPosts")
-    }
-
-    private fun getHeaders(referer: String? = null, targetUrl: String? = null): Map<String, String> {
+    private fun getHeaders(referer: String? = null): Map<String, String> {
         val activeBase = redirectUrl ?: mainUrl
-        val cookieTarget = targetUrl ?: activeBase
-        val cookies = try {
-            CookieManager.getInstance().getCookie(cookieTarget)
-                ?: CookieManager.getInstance().getCookie(activeBase)
-                ?: ""
-        } catch (_: Exception) {
-            ""
-        }
-
         val safeReferer = referer?.takeIf { it.all { ch -> ch.code in 32..126 } } ?: activeBase
 
-        val map = mutableMapOf(
-            "User-Agent" to lastValidUserAgent,
+        return mapOf(
+            "User-Agent" to USER_AGENT,
             "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
             "Accept-Language" to "ar,en-US;q=0.9,en;q=0.8",
             "Upgrade-Insecure-Requests" to "1",
@@ -105,134 +67,6 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
             "Pragma" to "no-cache",
             "Referer" to safeReferer
         )
-        if (cookies.isNotEmpty()) map["Cookie"] = cookies
-        return map
-    }
-
-    @SuppressLint("SetTextI18n", "SetJavaScriptEnabled")
-    private suspend fun fetchCookiesWithTrustedWebView(
-        url: String,
-        timeoutMs: Long = 30000L
-    ): Boolean = suspendCancellableCoroutine { cont ->
-        Handler(Looper.getMainLooper()).post {
-            val activity = context as? Activity
-            if (activity == null || activity.isFinishing) {
-                if (cont.isActive) cont.resume(false)
-                return@post
-            }
-
-            val dialog = Dialog(activity)
-            dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
-            dialog.setCancelable(false)
-
-            dialog.window?.apply {
-                setBackgroundDrawableResource(android.R.color.transparent)
-                clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-                addFlags(
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                )
-
-                val params = attributes
-                params.width = 1
-                params.height = 1
-                params.gravity = Gravity.TOP or Gravity.START
-                params.x = -1000
-                params.y = -1000
-                attributes = params
-            }
-
-            val webView = WebView(activity)
-            webView.visibility = View.INVISIBLE
-            dialog.setContentView(webView, ViewGroup.LayoutParams(1, 1))
-
-            try {
-                webView.settings.apply {
-                    javaScriptEnabled = true
-                    domStorageEnabled = true
-                    databaseEnabled = true
-                    useWideViewPort = true
-                    loadWithOverviewMode = true
-                    userAgentString = lastValidUserAgent
-                    cacheMode = WebSettings.LOAD_DEFAULT
-                }
-            } catch (_: Exception) {
-            }
-
-            val cookieManager = CookieManager.getInstance()
-            try {
-                cookieManager.setAcceptCookie(true)
-                cookieManager.setAcceptThirdPartyCookies(webView, true)
-            } catch (_: Exception) {
-            }
-
-            var finished = false
-
-            fun finish(success: Boolean) {
-                if (finished) return
-                finished = true
-                try {
-                    cookieManager.flush()
-                } catch (_: Exception) {
-                }
-                try {
-                    if (dialog.isShowing) dialog.dismiss()
-                } catch (_: Exception) {
-                }
-                try {
-                    webView.stopLoading()
-                } catch (_: Exception) {
-                }
-                try {
-                    webView.destroy()
-                } catch (_: Exception) {
-                }
-                if (cont.isActive) cont.resume(success)
-            }
-
-            val startTime = System.currentTimeMillis()
-            val handler = Handler(Looper.getMainLooper())
-
-            val checker = object : Runnable {
-                override fun run() {
-                    if (finished) return
-
-                    val currentCookies = try {
-                        cookieManager.getCookie(url)
-                    } catch (e: Exception) {
-                        ""
-                    } ?: ""
-
-                    if (currentCookies.contains("cf_clearance")) {
-                        Log.d(TAG, "Hidden Cloudflare Bypass Successful!")
-                        handler.postDelayed({ finish(true) }, 1000)
-                        return
-                    }
-
-                    if (System.currentTimeMillis() - startTime > timeoutMs) {
-                        Log.d(TAG, "Hidden Cloudflare Bypass Timeout!")
-                        finish(false)
-                        return
-                    }
-                    handler.postDelayed(this, 1000)
-                }
-            }
-
-            handler.postDelayed(checker, 1000)
-            webView.webViewClient = object : WebViewClient() {}
-
-            try {
-                dialog.show()
-                val activeBase = redirectUrl ?: mainUrl
-                webView.loadUrl(url, mutableMapOf("Referer" to activeBase))
-            } catch (e: Exception) {
-                finish(false)
-            }
-
-            cont.invokeOnCancellation {
-                handler.post { finish(false) }
-            }
-        }
     }
 
     private suspend fun smartGet(
@@ -240,55 +74,14 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
         referer: String? = null,
         timeoutSeconds: Long = 20L
     ): Document {
-        var currentAttempt = 0
-        val normalRetries = 2
-
-        while (currentAttempt < normalRetries) {
-            currentAttempt++
-            try {
-                val response = app.get(
-                    url,
-                    headers = getHeaders(referer, url),
-                    timeout = timeoutSeconds,
-                    cacheTime = 0
-                )
-
-                if (response.code == 200 && !isCloudflareChallenge(
-                        response.text,
-                        response.document.title()
-                    )
-                ) {
-                    return response.document
-                } else {
-                    Log.d(TAG, "Attempt $currentAttempt failed (Code: ${response.code}). Retrying silently...")
-                    kotlinx.coroutines.delay(1500)
-                }
-            } catch (e: Exception) {
-                Log.d(TAG, "Attempt $currentAttempt Exception: ${e.message}")
-                kotlinx.coroutines.delay(1500)
-            }
-        }
-
-        Log.d(TAG, "Normal retries failed. Activating Hidden WebView Bypass...")
-
-        cfLock.withLock {
-            try {
-                val check = app.get(url, headers = getHeaders(referer, url), timeout = 10L, cacheTime = 0)
-                if (check.code == 200 && !isCloudflareChallenge(check.text, "")) return check.document
-            } catch (_: Exception) {
-            }
-
-            fetchCookiesWithTrustedWebView(url, timeoutMs = 30000L)
-        }
-
         return try {
             app.get(
                 url,
-                headers = getHeaders(referer, url),
-                timeout = timeoutSeconds,
-                cacheTime = 0
+                headers = getHeaders(referer),
+                timeout = timeoutSeconds
             ).document
         } catch (e: Exception) {
+            Log.e(TAG, "smartGet failed for $url: ${e.message}")
             Jsoup.parse("<html><body>Error loading page</body></html>", url)
         }
     }
@@ -299,52 +92,20 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
         referer: String? = null,
         timeoutSeconds: Long = 20L
     ): Document {
-        try {
-            val headers = getHeaders(referer, url).toMutableMap()
-            headers["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8"
-            headers["X-Requested-With"] = "XMLHttpRequest"
-
-            val response = app.post(
-                url,
-                data = data,
-                headers = headers,
-                timeout = timeoutSeconds,
-                cacheTime = 0
-            )
-            if (response.code == 200 && !isCloudflareChallenge(response.text, "")) {
-                return response.document
-            }
-        } catch (_: Exception) {
-        }
-
-        cfLock.withLock {
-            try {
-                val checkResponse = app.get(
-                    url,
-                    headers = getHeaders(referer, url),
-                    timeout = timeoutSeconds,
-                    cacheTime = 0
-                )
-                if (isCloudflareChallenge(checkResponse.text, "")) {
-                    fetchCookiesWithTrustedWebView(redirectUrl ?: mainUrl, timeoutMs = 30000L)
-                }
-            } catch (_: Exception) {
-                fetchCookiesWithTrustedWebView(redirectUrl ?: mainUrl, timeoutMs = 30000L)
-            }
-        }
-
         return try {
-            val retryHeaders = getHeaders(referer, url).toMutableMap()
-            retryHeaders["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8"
-            retryHeaders["X-Requested-With"] = "XMLHttpRequest"
+            val headers = getHeaders(referer).toMutableMap().apply {
+                put("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+                put("X-Requested-With", "XMLHttpRequest")
+            }
+
             app.post(
                 url,
                 data = data,
-                headers = retryHeaders,
-                timeout = timeoutSeconds,
-                cacheTime = 0
+                headers = headers,
+                timeout = timeoutSeconds
             ).document
         } catch (e: Exception) {
+            Log.e(TAG, "smartPost failed for $url: ${e.message}")
             Jsoup.parse("", url)
         }
     }
@@ -730,10 +491,6 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
         }
     }
 
-    private val browserHeaders = mapOf(
-        "user-agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
-    )
-
     private fun fixBase64Padding(text: String): String {
         val cleanText = text.trim().replace(" ", "").replace("\n", "")
         val missingPadding = cleanText.length % 4
@@ -753,14 +510,17 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
             val decodedRev =
                 String(Base64.decode(fixBase64Padding(reversed), Base64.DEFAULT), Charsets.UTF_8)
             if (decodedRev.contains("http")) return decodedRev
-        } catch (e: Exception) {
+        } catch (_: Exception) {
         }
         return null
     }
 
     private suspend fun deepExtractGovid(url: String, referer: String): String {
         try {
-            val reqHeaders = browserHeaders + mapOf("referer" to referer)
+            val reqHeaders = mapOf(
+                "User-Agent" to USER_AGENT,
+                "Referer" to referer
+            )
             val res = app.get(url, headers = reqHeaders, timeout = 10L)
 
             if (!res.isSuccessful) return url
@@ -781,7 +541,7 @@ class MyCimaProvider(private val context: Context) : MainAPI() {
             if (directMatch != null) {
                 return directMatch.groupValues[1].replace("\\/", "/")
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
         }
         return url
     }
