@@ -17,7 +17,7 @@ import java.net.URLEncoder
 
 class MyCimaProvider : MainAPI() {
     override var lang = "ar"
-    override var mainUrl = "https://mycima.house"
+    override var mainUrl = "https://mycima.recipes"
     override var name = "MyCima"
     override val usesWebView = false
     override val hasMainPage = true
