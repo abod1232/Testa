@@ -13,6 +13,7 @@ import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.net.URI
 import java.net.URL
+import java.net.URLDecoder
 import java.net.URLEncoder
 
 class MyCimaProvider : MainAPI() {
@@ -29,8 +30,18 @@ class MyCimaProvider : MainAPI() {
         var redirectUrl: String? = null
         private const val USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-        private const val REQUEST_DELAY = 700L  // تأخير 0.7 ثانية بين إطلاق كل طلب
-        private const val MAX_AJAX_RETRIES = 15 // أقصى عدد لمحاولات الإعادة للفاشلات
+
+        private const val REQUEST_DELAY = 700L
+        private const val MAX_AJAX_RETRIES = 15
+
+        private val streamWishPreferredDomains = listOf(
+            "vibuxer.com",
+            "hanerix.com",
+            "niramirus.com",
+            "hglamioz.com",
+            "playnixes.com",
+            "medixiru.com"
+        )
     }
 
     private suspend fun baseUrl(): String {
@@ -230,47 +241,40 @@ class MyCimaProvider : MainAPI() {
             .trim()
 
         val ordinals = listOf(
-            "الحادي والثلاثون" to 31, "الحادي والثلاثين" to 31, "الواحد والثلاثون" to 31, "الواحد والثلاثين" to 31,
-            "الثاني والثلاثون" to 32, "الثاني والثلاثين" to 32,
-            "الثالث والثلاثون" to 33, "الثالث والثلاثين" to 33,
-            "الرابع والثلاثون" to 34, "الرابع والثلاثين" to 34,
-            "الخامس والثلاثون" to 35, "الخامس والثلاثين" to 35,
             "الثلاثون" to 30, "الثلاثين" to 30,
-            "الحادي والعشرون" to 21, "الحادي والعشرين" to 21, "الواحد والعشرون" to 21, "الواحد والعشرين" to 21,
-            "الثاني والعشرون" to 22, "الثاني والعشرين" to 22,
-            "الثالث والعشرون" to 23, "الثالث والعشرين" to 23,
-            "الرابع والعشرون" to 24, "الرابع والعشرين" to 24,
-            "الخامس والعشرون" to 25, "الخامس والعشرين" to 25,
-            "السادس والعشرون" to 26, "السادس والعشرين" to 26,
-            "السابع والعشرون" to 27, "السابع والعشرين" to 27,
-            "الثامن والعشرون" to 28, "الثامن والعشرين" to 28,
             "التاسع والعشرون" to 29, "التاسع والعشرين" to 29,
+            "الثامن والعشرون" to 28, "الثامن والعشرين" to 28,
+            "السابع والعشرون" to 27, "السابع والعشرين" to 27,
+            "السادس والعشرون" to 26, "السادس والعشرين" to 26,
+            "الخامس والعشرون" to 25, "الخامس والعشرين" to 25,
+            "الرابع والعشرون" to 24, "الرابع والعشرين" to 24,
+            "الثالث والعشرون" to 23, "الثالث والعشرين" to 23,
+            "الثاني والعشرون" to 22, "الثاني والعشرين" to 22,
+            "الحادي والعشرون" to 21, "الحادي والعشرين" to 21, "الواحد والعشرون" to 21, "الواحد والعشرين" to 21,
             "العشرون" to 20, "العشرين" to 20,
-            "الحادي عشر" to 11, "الواحد عشر" to 11,
-            "الثاني عشر" to 12,
-            "الثالث عشر" to 13,
-            "الرابع عشر" to 14,
-            "الخامس عشر" to 15,
-            "السادس عشر" to 16,
-            "السابع عشر" to 17,
-            "الثامن عشر" to 18,
             "التاسع عشر" to 19,
+            "الثامن عشر" to 18,
+            "السابع عشر" to 17,
+            "السادس عشر" to 16,
+            "الخامس عشر" to 15,
+            "الرابع عشر" to 14,
+            "الثالث عشر" to 13,
+            "الثاني عشر" to 12,
+            "الحادي عشر" to 11, "الواحد عشر" to 11,
             "العاشر" to 10,
-            "الاول" to 1,
-            "الثاني" to 2,
-            "الثالث" to 3,
-            "الرابع" to 4,
-            "الخامس" to 5,
-            "السادس" to 6,
-            "السابع" to 7,
+            "التاسع" to 9,
             "الثامن" to 8,
-            "التاسع" to 9
+            "السابع" to 7,
+            "السادس" to 6,
+            "الخامس" to 5,
+            "الرابع" to 4,
+            "الثالث" to 3,
+            "الثاني" to 2,
+            "الاول" to 1
         )
 
         return ordinals.firstOrNull { normalized.contains(it.first) }?.second
     }
-
-    
 
     override suspend fun load(url: String): LoadResponse? {
         return try {
@@ -280,6 +284,21 @@ class MyCimaProvider : MainAPI() {
                 "${u.protocol}://${u.host}"
             } catch (_: Exception) {
                 baseUrl()
+            }
+
+            fun extractPostId(doc: Document): String? {
+                val html = doc.html()
+                Regex("""Single/Episodes\.php.*?post_id:\s*['"](\d+)['"]""", RegexOption.DOT_MATCHES_ALL)
+                    .find(html)?.groupValues?.get(1)?.let { return it }
+                doc.selectFirst("input[name=post_id]")?.attr("value")?.takeIf { it.isNotBlank() }?.let { return it }
+                doc.selectFirst("[data-post_id]")?.attr("data-post_id")?.takeIf { it.isNotBlank() }?.let { return it }
+                doc.selectFirst("[data-postid]")?.attr("data-postid")?.takeIf { it.isNotBlank() }?.let { return it }
+                doc.selectFirst("link[rel=shortlink]")?.attr("href")?.let {
+                    Regex("p=(\\d+)").find(it)?.groupValues?.get(1)
+                }?.let { return it }
+                val scriptsText = doc.select("script").joinToString(" ") { it.data() }
+                Regex("""post_id['"]?\s*[:=]\s*['"]?(\d{3,})['"]?""").find(scriptsText)?.groupValues?.get(1)?.let { return it }
+                return null
             }
 
             val isSeriesPage = document.selectFirst(
@@ -330,21 +349,6 @@ class MyCimaProvider : MainAPI() {
             val seriesUrlFromEpisode = document
                 .selectFirst("singlesection.Series--Section > a, ul.Terms--Content--Single-begin li:contains(المسلسل) a")
                 ?.attr("href")
-
-            fun extractPostId(doc: Document): String? {
-                val html = doc.html()
-                Regex("""Single/Episodes\.php.*?post_id:\s*['"](\d+)['"]""", RegexOption.DOT_MATCHES_ALL)
-                    .find(html)?.groupValues?.get(1)?.let { return it }
-                doc.selectFirst("input[name=post_id]")?.attr("value")?.takeIf { it.isNotBlank() }?.let { return it }
-                doc.selectFirst("[data-post_id]")?.attr("data-post_id")?.takeIf { it.isNotBlank() }?.let { return it }
-                doc.selectFirst("[data-postid]")?.attr("data-postid")?.takeIf { it.isNotBlank() }?.let { return it }
-                doc.selectFirst("link[rel=shortlink]")?.attr("href")?.let {
-                    Regex("p=(\\d+)").find(it)?.groupValues?.get(1)
-                }?.let { return it }
-                val scriptsText = doc.select("script").joinToString(" ") { it.data() }
-                Regex("""post_id['"]?\s*[:=]\s*['"]?(\d{3,})['"]?""").find(scriptsText)?.groupValues?.get(1)?.let { return it }
-                return null
-            }
 
             fun extractEpisodeNumberFromText(text: String?): Int? {
                 if (text.isNullOrBlank()) return null
@@ -397,13 +401,14 @@ class MyCimaProvider : MainAPI() {
                 }
             }
 
+            val htmlText = document.html()
+            val ajaxBase = Regex("""var\s+AjaxtURL\s*=\s*"([^"]+)"""")
+                .find(htmlText)?.groupValues?.get(1)
+                ?: "$currentBase/wp-content/themes/mycima/Ajaxt/"
+            val ajaxUrl = "${ajaxBase.trimEnd('/')}/Single/Episodes.php"
+            val postId = extractPostId(document)
+
             if (isSeriesPage) {
-                val htmlText = document.html()
-                val ajaxBase = Regex("""var\s+AjaxtURL\s*=\s*"([^"]+)"""")
-                    .find(htmlText)?.groupValues?.get(1)
-                    ?: "$currentBase/wp-content/themes/mycima/Ajaxt/"
-                val ajaxUrl = "${ajaxBase.trimEnd('/')}/Single/Episodes.php"
-                val postId = extractPostId(document)
                 val allAnchors = document.select("div.SeasonsList ul li a, .Seasons--Episodes ul li a, div.SeasonsList a")
                 val seasonAnchors = allAnchors.filter { a ->
                     val text = a.text().trim()
@@ -450,6 +455,7 @@ class MyCimaProvider : MainAPI() {
 
                         val seasonId = seasonEl.attr("data-season").ifBlank { seasonEl.attr("data-season-id") }
                         val isActiveSeason = seasonEl.parent()?.hasClass("active") == true || seasonEl.hasClass("active")
+
                         if (isActiveSeason && activeBox.isNotEmpty()) {
                             val inPageEpisodes = parseEpisodesFromAnchors(activeBox, seasonLabel, seasonNumber)
                             if (inPageEpisodes.isNotEmpty()) {
@@ -462,6 +468,7 @@ class MyCimaProvider : MainAPI() {
                             pendingTasks.add(SeasonTask(seasonId, seasonLabel, seasonNumber))
                         }
                     }
+
                     suspend fun fetchStaggered(tasks: List<SeasonTask>): Pair<List<Episode>, List<SeasonTask>> {
                         val failed = mutableListOf<SeasonTask>()
                         val fetched = coroutineScope {
@@ -501,11 +508,13 @@ class MyCimaProvider : MainAPI() {
                         }
                         return Pair(successEps, failed)
                     }
+
                     var (stageEps, failedTasks) = fetchStaggered(pendingTasks)
                     allEpisodes.addAll(stageEps)
+
                     var retryCount = 1
                     while (failedTasks.isNotEmpty() && retryCount <= MAX_AJAX_RETRIES) {
-                        kotlinx.coroutines.delay(800L) // انتظار بسيط قبل جولة الإعادة
+                        kotlinx.coroutines.delay(800L)
                         val (retryEps, stillFailed) = fetchStaggered(failedTasks)
                         allEpisodes.addAll(retryEps)
                         failedTasks = stillFailed
@@ -527,7 +536,26 @@ class MyCimaProvider : MainAPI() {
             } else if (!seriesUrlFromEpisode.isNullOrBlank()) {
                 return load(resolveUrl(url, seriesUrlFromEpisode))
             } else {
-                return newMovieLoadResponse(finalTitle, url, TvType.Movie, url) {
+                var movieWatchUrl = url
+                val hasServersInPage = document.selectFirst("ul#watch li[data-watch], ul.List--Download--Wecima--Single li a[href]") != null
+
+                if (!hasServersInPage && !postId.isNullOrBlank()) {
+                    try {
+                        val ajaxDoc = smartPost(
+                            ajaxUrl,
+                            data = mapOf("post_id" to postId),
+                            referer = currentBase,
+                            timeoutSeconds = 12L
+                        )
+                        val ajaxWatchLink = ajaxDoc.selectFirst("ul#watch li[data-watch], a[href]")?.attr("href")
+                        if (!ajaxWatchLink.isNullOrBlank()) {
+                            movieWatchUrl = resolveUrl(url, ajaxWatchLink)
+                        }
+                    } catch (_: Exception) {
+                    }
+                }
+
+                return newMovieLoadResponse(finalTitle, url, TvType.Movie, movieWatchUrl) {
                     this.posterUrl = poster
                     this.year = year
                     this.plot = plot
@@ -542,59 +570,201 @@ class MyCimaProvider : MainAPI() {
         }
     }
 
-    private fun fixBase64Padding(text: String): String {
-        val cleanText = text.trim().replace(" ", "").replace("\n", "")
-        val missingPadding = cleanText.length % 4
-        return if (missingPadding > 0) {
-            cleanText + "=".repeat(4 - missingPadding)
-        } else {
-            cleanText
-        }
-    }
-
-    private fun smartDecode(payload: String): String? {
-        try {
-            val decoded =
-                String(Base64.decode(fixBase64Padding(payload), Base64.DEFAULT), Charsets.UTF_8)
-            if (decoded.contains("http")) return decoded
-            val reversed = payload.reversed()
-            val decodedRev =
-                String(Base64.decode(fixBase64Padding(reversed), Base64.DEFAULT), Charsets.UTF_8)
-            if (decodedRev.contains("http")) return decodedRev
+    private fun decodeWecimaUrl(encodedStr: String): String? {
+        return try {
+            if (encodedStr.isBlank()) return null
+            val cleanedStr = encodedStr.replace("+", "").trim()
+            val finalB64Str = if (!cleanedStr.startsWith("aHR0c")) "aHR0c$cleanedStr" else cleanedStr
+            String(Base64.decode(finalB64Str, Base64.DEFAULT))
         } catch (_: Exception) {
+            null
         }
-        return null
     }
 
-    private suspend fun deepExtractGovid(url: String, referer: String): String {
-        try {
-            val reqHeaders = mapOf(
+    private fun customB64Decode(s: String, alphabet: String): String {
+        var bc = 0
+        var bs = 0
+        val out = mutableListOf<Byte>()
+        for (ch in s) {
+            val idx = alphabet.indexOf(ch)
+            if (idx == -1) continue
+            bs = if (bc % 4 != 0) (bs * 64 + idx) else idx
+            if (bc % 4 != 0) {
+                out.add((0xff and (bs shr ((-2 * (bc + 1)) and 6))).toByte())
+            }
+            bc++
+        }
+        return try {
+            val pct = out.joinToString("") { "%02x".format(it) }
+            URLDecoder.decode("%$pct".replace("%", "%25").replace("%25", "%"), "UTF-8")
+        } catch (e: Exception) {
+            String(out.toByteArray(), Charsets.UTF_8)
+        }
+    }
+
+    private fun rc4(s: String, key: String): String {
+        val sbox = IntArray(256) { it }
+        var j = 0
+        for (i in 0 until 256) {
+            j = (j + sbox[i] + key[i % key.length].code) % 256
+            val temp = sbox[i]; sbox[i] = sbox[j]; sbox[j] = temp
+        }
+        var i = 0
+        j = 0
+        val res = StringBuilder()
+        for (ch in s) {
+            i = (i + 1) % 256
+            j = (j + sbox[i]) % 256
+            val temp = sbox[i]; sbox[i] = sbox[j]; sbox[j] = temp
+            res.append((ch.code xor sbox[(sbox[i] + sbox[j]) % 256]).toChar())
+        }
+        return res.toString()
+    }
+
+    private fun deobfuscateJs(jsCode: String): String {
+        val jsId = """[a-zA-Z_$][\w$]*"""
+        val decRegex = Regex("""function\s+($jsId)\s*\(\s*($jsId)(?:\s*,\s*$jsId)?\s*\)\s*\{\s*\2\s*=\s*\2\s*([-+])\s*([^;]+);\s*(?:const|let|var)\s+$jsId\s*=\s*($jsId)\s*\(\s*\)\s*;""")
+        val mDec = decRegex.find(jsCode) ?: return jsCode
+
+        val decFn = mDec.groupValues[1]
+        val op = mDec.groupValues[3]
+        val offsetVal = mDec.groupValues[4].trim().toIntOrNull() ?: 0
+        val offset = if (op == "+") -offsetVal else offsetVal
+        val arrFn = mDec.groupValues[5]
+
+        val arrRegex = Regex("""function\s+${Regex.escape(arrFn)}\s*\(\s*\)\s*\{\s*(?:const|let|var)\s+$jsId\s*=\s*(\[.*?\])\s*;""", RegexOption.DOT_MATCHES_ALL)
+        val mArr = arrRegex.find(jsCode) ?: return jsCode
+        val rawArrStr = mArr.groupValues[1]
+
+        val arr = Regex("""['"]([^'"]+)['"]""").findAll(rawArrStr).map { it.groupValues[1] }.toMutableList()
+        val alphabetMatch = Regex("""['"]([A-Za-z0-9+/=]{64,65})['"]""").find(jsCode)
+        val alphabet = alphabetMatch?.groupValues?.get(1)
+            ?: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/="
+
+        fun decodeItem(idx: Int, key: String): String {
+            val realIdx = idx - offset
+            if (realIdx !in arr.indices) return ""
+            val raw = arr[realIdx]
+            return try {
+                if (key.isNotEmpty()) {
+                    rc4(customB64Decode(raw, alphabet), key)
+                } else {
+                    customB64Decode(raw, alphabet)
+                }
+            } catch (e: Exception) {
+                raw
+            }
+        }
+
+        val callRegex = Regex("""\b${Regex.escape(decFn)}\(\s*(0x[0-9a-fA-F]+|\d+)(?:\s*,\s*['"]([^'"]*)['"])?\s*\)""")
+        return callRegex.replace(jsCode) { m ->
+            val numStr = m.groupValues[1]
+            val idx = if (numStr.startsWith("0x")) numStr.substring(2).toInt(16) else numStr.toInt()
+            val key = m.groupValues.getOrNull(2) ?: ""
+            "\"${decodeItem(idx, key)}\""
+        }
+    }
+
+    private fun extractDomains(decodedJs: String, currentHost: String): List<String> {
+        val domains = mutableListOf<String>()
+        val listRegex = Regex("""\b(?:main|dmca)\s*=\s*\[([^\]]+)\]""")
+        listRegex.findAll(decodedJs).forEach { match ->
+            val content = match.groupValues[1]
+            Regex("""['"]([a-zA-Z0-9.-]+\.[a-z]{2,})['"]""").findAll(content).forEach { d ->
+                domains.add(d.groupValues[1])
+            }
+        }
+        if (domains.isEmpty()) {
+            val domainRegex = Regex("""['"]([a-zA-Z0-9.-]+\.[a-z]{2,})['"]""")
+            domainRegex.findAll(decodedJs).forEach { d ->
+                val dom = d.groupValues[1]
+                if (!dom.contains("google") && !dom.contains("cloudflare") && !dom.endsWith(currentHost)) {
+                    domains.add(dom)
+                }
+            }
+        }
+        return domains.distinct()
+    }
+
+    private suspend fun replaceStreamWishDomain(targetUrl: String, referer: String? = null): String {
+        return try {
+            val uri = URL(targetUrl)
+            val query = if (!uri.query.isNullOrBlank()) "?${uri.query}" else ""
+            val path = uri.path
+
+            for (domain in streamWishPreferredDomains) {
+                val candidateUrl = "https://$domain$path$query"
+                try {
+                    val check = app.get(
+                        candidateUrl,
+                        headers = mapOf(
+                            "User-Agent" to USER_AGENT,
+                            "Referer" to (referer ?: "https://$domain/")
+                        ),
+                        timeout = 6
+                    )
+                    if (check.code == 200 && !check.text.contains("loading", ignoreCase = true)) {
+                        return candidateUrl
+                    }
+                } catch (_: Exception) {}
+            }
+
+            "https://${streamWishPreferredDomains.first()}$path$query"
+        } catch (e: Exception) {
+            targetUrl
+        }
+    }
+
+    private suspend fun resolveHgCloud(targetUrl: String, referer: String? = null): String? {
+        return try {
+            val headers = mapOf(
                 "User-Agent" to USER_AGENT,
-                "Referer" to referer
+                "Referer" to (referer ?: targetUrl)
             )
-            val res = app.get(url, headers = reqHeaders, timeout = 10L)
 
-            if (!res.isSuccessful) return url
+            val r1 = app.get(targetUrl, headers = headers, timeout = 8)
+            if (r1.code != 200) return null
 
-            val html = res.text
-            val atobRegex = Regex("""atob\s*\(\s*["']([^"']+)["']\s*\)""")
-            val atobMatches = atobRegex.findAll(html)
-            for (match in atobMatches) {
-                val decoded = smartDecode(match.groupValues[1])
-                if (decoded != null) return decoded
+            val html = r1.text
+            val jsPathMatch = Regex("""<script[^>]+src=["']([^"']*main\.js[^"']*)["']""").find(html)
+                ?: if (html.lowercase().contains("loading")) Regex("""<script[^>]+src=["'](/[^"']+\.js[^"']*)["']""").find(html) else null
+
+            val uri = URL(r1.url)
+            val currentHost = uri.host
+            val candidates = mutableListOf<String>()
+            candidates.addAll(streamWishPreferredDomains)
+
+            if (jsPathMatch != null) {
+                val jsRelative = jsPathMatch.groupValues[1]
+                val jsUrl = if (jsRelative.startsWith("http")) jsRelative else "${uri.protocol}://${uri.host}$jsRelative"
+
+                val r2 = app.get(jsUrl, headers = headers, timeout = 8)
+                if (r2.code == 200) {
+                    try {
+                        val decodedJs = deobfuscateJs(r2.text)
+                        candidates.addAll(extractDomains(decodedJs, currentHost))
+                    } catch (_: Exception) {}
+                }
             }
-            val iframeSrc = res.document.selectFirst("iframe")?.attr("src")
-            if (!iframeSrc.isNullOrBlank()) {
-                return if (iframeSrc.startsWith("//")) "https:$iframeSrc" else iframeSrc
+
+            val uniqueCandidates = candidates.distinct().take(8)
+
+            for (dest in uniqueCandidates) {
+                if (dest.equals(currentHost, ignoreCase = true)) continue
+                val query = if (!uri.query.isNullOrBlank()) "?${uri.query}" else ""
+                val testUrl = "https://$dest${uri.path}$query"
+
+                try {
+                    val check = app.get(testUrl, headers = mapOf("User-Agent" to USER_AGENT, "Referer" to r1.url), timeout = 5)
+                    if (check.code == 200 && !check.text.contains("loading", ignoreCase = true)) {
+                        return testUrl
+                    }
+                } catch (_: Exception) {}
             }
-            val directRegex = Regex("""["'](https?://[^"']+\.(?:m3u8|mp4|php)[^"']*)["']""")
-            val directMatch = directRegex.find(html)
-            if (directMatch != null) {
-                return directMatch.groupValues[1].replace("\\/", "/")
-            }
+            null
         } catch (_: Exception) {
+            null
         }
-        return url
     }
 
     override suspend fun loadLinks(
@@ -605,45 +775,74 @@ class MyCimaProvider : MainAPI() {
     ): Boolean {
         val activeBase = baseUrl()
         val document = smartGet(data, referer = activeBase)
+        val collectedLinks = linkedMapOf<String, String?>()
 
-        val linksToProcess = mutableListOf<Pair<String, String>>()
-        document.select("ul#watch li[data-watch]").forEach {
-            val url = it.attr("data-watch")
-            val name = extractServerName(it)
-            if (url.isNotBlank()) linksToProcess.add(url to name)
+        fun addLink(rawUrl: String?, serverName: String?) {
+            val cleanUrl = rawUrl?.trim().orEmpty()
+            if (!cleanUrl.startsWith("http")) return
+            val cleanName = serverName?.trim()?.takeIf { it.isNotBlank() }
+            if (!collectedLinks.containsKey(cleanUrl)) {
+                collectedLinks[cleanUrl] = cleanName
+            } else if (collectedLinks[cleanUrl].isNullOrBlank() && cleanName != null) {
+                collectedLinks[cleanUrl] = cleanName
+            }
         }
-        document.select("ul.List--Download--Wecima--Single li a[href]").forEach {
-            val url = it.attr("href")
-            val name = it.selectFirst("quality")?.text()?.trim() ?: "تحميل"
-            if (url.isNotBlank()) linksToProcess.add(url to name)
+
+        document.select("ul#watch li[data-watch]").forEach { serverEl ->
+            val watchUrl = serverEl.attr("data-watch")
+            val serverName = extractServerName(serverEl)
+            addLink(watchUrl, serverName)
+        }
+
+        document.select("ul.List--Download--Wecima--Single li a[href]").forEach { downloadEl ->
+            val downloadUrl = downloadEl.attr("href")
+            val serverName = downloadEl.selectFirst("quality")?.text()?.trim() ?: "تحميل"
+            addLink(downloadUrl, serverName)
+        }
+
+        document.select("ul.WatchServersList li btn[data-url]").forEach { serverBtn ->
+            decodeWecimaUrl(serverBtn.attr("data-url"))?.let { decodedUrl ->
+                val serverName = serverBtn.text().trim().ifBlank { serverBtn.parent()?.text()?.trim() }
+                addLink(decodedUrl, serverName)
+            }
+        }
+
+        document.select(".openLinkDown[data-href]").forEach { downloadBtn ->
+            decodeWecimaUrl(downloadBtn.attr("data-href"))?.let { decodedUrl ->
+                val serverName = downloadBtn.selectFirst("quality")?.text()?.trim()
+                addLink(decodedUrl, serverName)
+            }
         }
 
         coroutineScope {
-            linksToProcess.distinctBy { it.first }.map { (link, serverName) ->
+            collectedLinks.entries.toList().map { (link, serverName) ->
                 async {
-                    var finalUrl = link.trim()
-                    if (finalUrl.contains("govid")) {
-                        if (finalUrl.contains("=") && !finalUrl.contains("pic=")) {
-                            val encodedPart = finalUrl.substringAfterLast("=")
-                            val decoded = smartDecode(encodedPart)
-                            finalUrl = decoded ?: deepExtractGovid(finalUrl, activeBase)
+                    var targetUrl = link
+                    val isStreamWishOrHg = targetUrl.contains("hgcloud", ignoreCase = true) ||
+                            targetUrl.contains("streamwish", ignoreCase = true) ||
+                            serverName?.contains("hgcloud", ignoreCase = true) == true ||
+                            serverName?.contains("streamwish", ignoreCase = true) == true
+
+                    if (isStreamWishOrHg) {
+                        val resolved = if (targetUrl.contains("hgcloud", ignoreCase = true)) {
+                            resolveHgCloud(targetUrl, activeBase) ?: replaceStreamWishDomain(targetUrl, activeBase)
                         } else {
-                            finalUrl = deepExtractGovid(finalUrl, activeBase)
+                            replaceStreamWishDomain(targetUrl, activeBase)
                         }
-                    } else if (finalUrl.contains("/go/")) {
-                        val encodedPart = finalUrl.substringAfterLast("/go/").trimEnd('/')
-                        val decoded = smartDecode(encodedPart)
-                        if (decoded != null) {
-                            finalUrl = decoded
+                        if (resolved.isNotBlank()) {
+                            targetUrl = resolved
                         }
                     }
-                    if (finalUrl.isNotBlank() && finalUrl.startsWith("http")) {
-                        loadExtractor(finalUrl, activeBase, subtitleCallback, callback)
+
+                    try {
+                        loadExtractor(targetUrl, activeBase, subtitleCallback, callback)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Extractor Error for $targetUrl: ${e.message}")
                     }
                 }
             }.awaitAll()
         }
 
-        return true
+        return collectedLinks.isNotEmpty()
     }
 }
