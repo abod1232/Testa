@@ -29,6 +29,10 @@ class MyCimaProvider : MainAPI() {
         var redirectUrl: String? = null
         private const val USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        
+        // إعدادات التحكم والسرعة
+        private const val REQUEST_DELAY = 700L  // تأخير 0.7 ثانية بين إطلاق كل طلب
+        private const val MAX_AJAX_RETRIES = 15 // أقصى عدد لمحاولات الإعادة للفاشلات
     }
 
     private suspend fun baseUrl(): String {
@@ -268,6 +272,8 @@ class MyCimaProvider : MainAPI() {
         return ordinals.firstOrNull { normalized.contains(it.first) }?.second
     }
 
+    
+
     override suspend fun load(url: String): LoadResponse? {
         return try {
             val document = smartGet(url)
@@ -365,11 +371,14 @@ class MyCimaProvider : MainAPI() {
                 var counter = 0
                 return anchors.mapNotNull { a ->
                     val rawHref = a.attr("href").ifBlank { a.attr("data-href") }
-                    if (rawHref.isBlank()) return@mapNotNull null
+                    if (rawHref.isBlank() || rawHref.startsWith("#") || rawHref.contains("season", ignoreCase = true)) {
+                        return@mapNotNull null
+                    }
                     val epHref = resolveUrl(url, rawHref)
 
                     val epTitleRaw = a.selectFirst("episodetitle, .episodetitle")?.text()?.trim()
                         ?: a.attr("title").ifBlank { a.text() }.trim()
+                    
                     val epNum = extractEpisodeNumberFromText(epTitleRaw) ?: run {
                         counter++
                         counter
@@ -398,13 +407,25 @@ class MyCimaProvider : MainAPI() {
                 val ajaxUrl = "${ajaxBase.trimEnd('/')}/Single/Episodes.php"
                 val postId = extractPostId(document)
 
-                val seasonAnchors = document.select("div.SeasonsList ul li a")
-                    .ifEmpty { document.select(".Seasons--Episodes ul li a") }
+                // استخراج روابط المواسم مع استبعاد أزرار الحلقات العشوائية بدقة
+                val allAnchors = document.select("div.SeasonsList ul li a, .Seasons--Episodes ul li a, div.SeasonsList a")
+                val seasonAnchors = allAnchors.filter { a ->
+                    val text = a.text().trim()
+                    !text.contains("حلقة") && (text.contains("الموسم") || text.contains("موسم") || a.hasAttr("data-season"))
+                }
 
-                val episodes: List<Episode> = if (seasonAnchors.isEmpty()) {
-                    val anchors = document.select("div.EpisodesList a[href]")
-                    parseEpisodesFromAnchors(anchors, null, null)
+                val allEpisodes = mutableListOf<Episode>()
+
+                if (seasonAnchors.isEmpty()) {
+                    val anchors = document.select("div.EpisodesList a[href], div.Episodes--Seasons--Episodes a[href]")
+                    allEpisodes.addAll(parseEpisodesFromAnchors(anchors, null, 1))
                 } else {
+                    data class SeasonTask(
+                        val id: String,
+                        val label: String,
+                        val number: Int
+                    )
+
                     val parsedNums = seasonAnchors.map { parseSeasonNumber(it.text()) }
                     val usedNumbers = parsedNums.filterNotNull().toMutableSet()
                     var nextMissing = 1
@@ -420,49 +441,91 @@ class MyCimaProvider : MainAPI() {
                         }
                     }
 
-                    coroutineScope {
-                        seasonAnchors.mapIndexed { idx, seasonEl ->
-                            async(Dispatchers.IO) {
-                                val seasonNumber = resolvedSeasonNums[idx]
-                                val rawSeasonText = seasonEl.text().trim()
-                                val seasonLabel = rawSeasonText
-                                    .replace(Regex("\\s*(مترجم|مدبلج).*"), "")
-                                    .trim()
-                                    .ifBlank { "الموسم $seasonNumber" }
+                    val pendingTasks = mutableListOf<SeasonTask>()
+                    val activeBox = document.select("div.EpisodesList a[href], div.Episodes--Seasons--Episodes a[href]")
 
-                                val seasonId = seasonEl.attr("data-season").ifBlank { seasonEl.attr("data-season-id") }
-                                val isActiveSeason = seasonEl.parent()?.hasClass("active") == true
+                    seasonAnchors.forEachIndexed { idx, seasonEl ->
+                        val seasonNumber = resolvedSeasonNums[idx]
+                        val rawSeasonText = seasonEl.text().trim()
+                        val seasonLabel = rawSeasonText
+                            .replace(Regex("\\s*(مترجم|مدبلج).*"), "")
+                            .trim()
+                            .ifBlank { "الموسم $seasonNumber" }
 
-                                if (isActiveSeason) {
-                                    val inPageAnchors = document.select("div.EpisodesList a[href]")
-                                    if (inPageAnchors.isNotEmpty()) {
-                                        return@async parseEpisodesFromAnchors(inPageAnchors, seasonLabel, seasonNumber)
-                                    }
+                        val seasonId = seasonEl.attr("data-season").ifBlank { seasonEl.attr("data-season-id") }
+                        val isActiveSeason = seasonEl.parent()?.hasClass("active") == true || seasonEl.hasClass("active")
+
+                        // إذا كان هو الموسم المفتوح أصلاً في الصفحة
+                        if (isActiveSeason && activeBox.isNotEmpty()) {
+                            val inPageEpisodes = parseEpisodesFromAnchors(activeBox, seasonLabel, seasonNumber)
+                            if (inPageEpisodes.isNotEmpty()) {
+                                allEpisodes.addAll(inPageEpisodes)
+                                return@forEachIndexed
+                            }
+                        }
+
+                        if (seasonId.isNotBlank()) {
+                            pendingTasks.add(SeasonTask(seasonId, seasonLabel, seasonNumber))
+                        }
+                    }
+
+                    // دالة لجلب قائمة مواسم بالتوازي مع فاصل 700ms لحظة الإطلاق
+                    suspend fun fetchStaggered(tasks: List<SeasonTask>): Pair<List<Episode>, List<SeasonTask>> {
+                        val failed = mutableListOf<SeasonTask>()
+                        val fetched = coroutineScope {
+                            tasks.mapIndexed { index, task ->
+                                if (index > 0) {
+                                    kotlinx.coroutines.delay(REQUEST_DELAY)
                                 }
-
-                                if (seasonId.isNotBlank() && !postId.isNullOrBlank()) {
+                                async(Dispatchers.IO) {
                                     try {
-                                        val seasonDoc = smartPost(
-                                            ajaxUrl,
-                                            data = mapOf("season" to seasonId, "post_id" to postId),
-                                            referer = currentBase,
-                                            timeoutSeconds = 15L
-                                        )
-                                        val anchors = seasonDoc.select("a[href]")
-                                        if (anchors.isNotEmpty()) {
-                                            return@async parseEpisodesFromAnchors(anchors, seasonLabel, seasonNumber)
+                                        if (!postId.isNullOrBlank()) {
+                                            val seasonDoc = smartPost(
+                                                ajaxUrl,
+                                                data = mapOf("season" to task.id, "post_id" to postId),
+                                                referer = currentBase,
+                                                timeoutSeconds = 12L
+                                            )
+                                            val anchors = seasonDoc.select("a[href]")
+                                            val eps = parseEpisodesFromAnchors(anchors, task.label, task.number)
+                                            if (eps.isNotEmpty()) {
+                                                return@async Pair(eps, null)
+                                            }
                                         }
                                     } catch (_: Exception) {
                                     }
+                                    Pair(emptyList<Episode>(), task)
                                 }
+                            }.awaitAll()
+                        }
 
-                                emptyList()
+                        val successEps = mutableListOf<Episode>()
+                        fetched.forEach { (eps, failTask) ->
+                            if (eps.isNotEmpty()) {
+                                successEps.addAll(eps)
+                            } else if (failTask != null) {
+                                failed.add(failTask)
                             }
-                        }.awaitAll().flatten()
+                        }
+                        return Pair(successEps, failed)
+                    }
+
+                    // 1. المرحلة الأولى: إطلاق جميع المواسم
+                    var (stageEps, failedTasks) = fetchStaggered(pendingTasks)
+                    allEpisodes.addAll(stageEps)
+
+                    // 2. محاولات Fallback حتى 15 مرة للفاشلات
+                    var retryCount = 1
+                    while (failedTasks.isNotEmpty() && retryCount <= MAX_AJAX_RETRIES) {
+                        kotlinx.coroutines.delay(800L) // انتظار بسيط قبل جولة الإعادة
+                        val (retryEps, stillFailed) = fetchStaggered(failedTasks)
+                        allEpisodes.addAll(retryEps)
+                        failedTasks = stillFailed
+                        retryCount++
                     }
                 }
 
-                val distinctEpisodes = episodes.distinctBy { it.data }
+                val distinctEpisodes = allEpisodes.distinctBy { it.data }
                     .sortedWith(compareBy({ it.season }, { it.episode }))
 
                 val seriesPageUrl = seriesUrlFromEpisode?.let { resolveUrl(url, it) } ?: url
