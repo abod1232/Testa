@@ -29,8 +29,6 @@ class MyCimaProvider : MainAPI() {
         var redirectUrl: String? = null
         private const val USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-        
-        // إعدادات التحكم والسرعة
         private const val REQUEST_DELAY = 700L  // تأخير 0.7 ثانية بين إطلاق كل طلب
         private const val MAX_AJAX_RETRIES = 15 // أقصى عدد لمحاولات الإعادة للفاشلات
     }
@@ -406,8 +404,6 @@ class MyCimaProvider : MainAPI() {
                     ?: "$currentBase/wp-content/themes/mycima/Ajaxt/"
                 val ajaxUrl = "${ajaxBase.trimEnd('/')}/Single/Episodes.php"
                 val postId = extractPostId(document)
-
-                // استخراج روابط المواسم مع استبعاد أزرار الحلقات العشوائية بدقة
                 val allAnchors = document.select("div.SeasonsList ul li a, .Seasons--Episodes ul li a, div.SeasonsList a")
                 val seasonAnchors = allAnchors.filter { a ->
                     val text = a.text().trim()
@@ -454,8 +450,6 @@ class MyCimaProvider : MainAPI() {
 
                         val seasonId = seasonEl.attr("data-season").ifBlank { seasonEl.attr("data-season-id") }
                         val isActiveSeason = seasonEl.parent()?.hasClass("active") == true || seasonEl.hasClass("active")
-
-                        // إذا كان هو الموسم المفتوح أصلاً في الصفحة
                         if (isActiveSeason && activeBox.isNotEmpty()) {
                             val inPageEpisodes = parseEpisodesFromAnchors(activeBox, seasonLabel, seasonNumber)
                             if (inPageEpisodes.isNotEmpty()) {
@@ -468,8 +462,6 @@ class MyCimaProvider : MainAPI() {
                             pendingTasks.add(SeasonTask(seasonId, seasonLabel, seasonNumber))
                         }
                     }
-
-                    // دالة لجلب قائمة مواسم بالتوازي مع فاصل 700ms لحظة الإطلاق
                     suspend fun fetchStaggered(tasks: List<SeasonTask>): Pair<List<Episode>, List<SeasonTask>> {
                         val failed = mutableListOf<SeasonTask>()
                         val fetched = coroutineScope {
@@ -509,12 +501,8 @@ class MyCimaProvider : MainAPI() {
                         }
                         return Pair(successEps, failed)
                     }
-
-                    // 1. المرحلة الأولى: إطلاق جميع المواسم
                     var (stageEps, failedTasks) = fetchStaggered(pendingTasks)
                     allEpisodes.addAll(stageEps)
-
-                    // 2. محاولات Fallback حتى 15 مرة للفاشلات
                     var retryCount = 1
                     while (failedTasks.isNotEmpty() && retryCount <= MAX_AJAX_RETRIES) {
                         kotlinx.coroutines.delay(800L) // انتظار بسيط قبل جولة الإعادة
