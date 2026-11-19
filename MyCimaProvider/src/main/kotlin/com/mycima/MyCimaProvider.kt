@@ -861,8 +861,8 @@ class MyCimaProvider : MainAPI() {
                                         name = serverName ?: "Vidsharing (GoVid)",
                                         url = streamUrl,
                                         ){
-                                        referer = targetUrl,
-                                        quality = Qualities.P1080.value,
+                                        this.referer = targetUrl
+                                        this.quality = Qualities.P1080.value
                                         this.headers = m3u8Headers
                                     }
                                 )
