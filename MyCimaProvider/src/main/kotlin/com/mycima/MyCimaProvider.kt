@@ -856,15 +856,15 @@ class MyCimaProvider : MainAPI() {
                                 )
 
                                 callback(
-                                    ExtractorLink(
+                                    newExtractorLink(
                                         source = "Vidsharing",
                                         name = serverName ?: "Vidsharing (GoVid)",
                                         url = streamUrl,
-                                        referer = targetUrl,
-                                        quality = Qualities.P1080.value,
-                                        isM3u8 = true,
-                                        headers = m3u8Headers
-                                    )
+                                        ){
+                                        this.referer = targetUrl,
+                                        this.quality = Qualities.P1080.value,
+                                        this.headers = m3u8Headers
+                                    }
                                 )
                                 return@async
                             }
