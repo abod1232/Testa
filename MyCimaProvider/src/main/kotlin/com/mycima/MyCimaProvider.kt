@@ -770,6 +770,7 @@ class MyCimaProvider : MainAPI() {
             null
         }
     }
+
     private fun extractHexM3u8(html: String): String? {
         val hexRegex = Regex("""["'](68747470[0-9a-fA-F]{30,})["']""")
         val match = hexRegex.find(html)?.groupValues?.get(1) ?: return null
@@ -834,6 +835,24 @@ class MyCimaProvider : MainAPI() {
             collectedLinks.entries.toList().map { (link, serverName) ->
                 async {
                     var targetUrl = link
+
+                    // 1. الدخول إلى صفحات govid.live/play/= لاستخراج رابط iframe الفعلي
+                    if (targetUrl.contains("govid.live/play/=")) {
+                        try {
+                            val playDoc = smartGet(targetUrl, referer = activeBase)
+                            val iframeSrc = playDoc.selectFirst("iframe[src]")?.attr("src")
+                                ?: Regex("""<!--\s*sss(https?://[^\s>]+)\s*-->""").find(playDoc.html())?.groupValues?.get(1)
+                                ?: Regex("""src=["'](https?://[^"']+)["']""").find(playDoc.html())?.groupValues?.get(1)
+
+                            if (!iframeSrc.isNullOrBlank()) {
+                                targetUrl = iframeSrc.trim()
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error fetching govid play iframe: ${e.message}")
+                        }
+                    }
+
+                    // 2. معالجة مشغل GoVid المباشر (govid.live/e/) وفك تشفير Hex m3u8
                     if (targetUrl.contains("govid.live/e/")) {
                         try {
                             val govidHeaders = mapOf(
@@ -860,7 +879,8 @@ class MyCimaProvider : MainAPI() {
                                         source = "Vidsharing",
                                         name = serverName ?: "Vidsharing (GoVid)",
                                         url = streamUrl,
-                                        ){
+                                        type = ExtractorLinkType.M3U8
+                                    ) {
                                         this.referer = targetUrl
                                         this.quality = Qualities.P1080.value
                                         this.headers = m3u8Headers
@@ -872,8 +892,11 @@ class MyCimaProvider : MainAPI() {
                             Log.e(TAG, "Error resolving GoVid stream: ${e.message}")
                         }
                     }
+
+                    // 3. معالجة سيرفرات StreamWish و HgCloud ونطاقاتها المتغيرة
                     val isStreamWishOrHg = targetUrl.contains("hgcloud", ignoreCase = true) ||
                             targetUrl.contains("streamwish", ignoreCase = true) ||
+                            targetUrl.contains("fsdcmo.sbs", ignoreCase = true) ||
                             serverName?.contains("hgcloud", ignoreCase = true) == true ||
                             serverName?.contains("streamwish", ignoreCase = true) == true
 
@@ -888,6 +911,7 @@ class MyCimaProvider : MainAPI() {
                         }
                     }
 
+                    // 4. استدعاء المستخرجات العامة
                     try {
                         loadExtractor(targetUrl, activeBase, subtitleCallback, callback)
                     } catch (e: Exception) {
