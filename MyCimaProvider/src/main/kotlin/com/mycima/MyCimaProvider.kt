@@ -28,8 +28,12 @@ class MyCimaProvider : MainAPI() {
     companion object {
         const val TAG = "MyCima"
         var redirectUrl: String? = null
+
         private const val USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
+        private const val MOBILE_USER_AGENT =
+            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Mobile Safari/537.36"
 
         private const val REQUEST_DELAY = 700L
         private const val MAX_AJAX_RETRIES = 15
@@ -380,7 +384,7 @@ class MyCimaProvider : MainAPI() {
 
                     val epTitleRaw = a.selectFirst("episodetitle, .episodetitle")?.text()?.trim()
                         ?: a.attr("title").ifBlank { a.text() }.trim()
-                    
+
                     val epNum = extractEpisodeNumberFromText(epTitleRaw) ?: run {
                         counter++
                         counter
@@ -767,6 +771,20 @@ class MyCimaProvider : MainAPI() {
         }
     }
 
+    // دالة فك تشفير رابط m3u8 من Hex لسيرفرات GoVid
+    private fun extractHexM3u8(html: String): String? {
+        val hexRegex = Regex("""["'](68747470[0-9a-fA-F]{30,})["']""")
+        val match = hexRegex.find(html)?.groupValues?.get(1) ?: return null
+        return try {
+            match.chunked(2)
+                .map { it.toInt(16).toByte() }
+                .toByteArray()
+                .toString(Charsets.UTF_8)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -818,6 +836,48 @@ class MyCimaProvider : MainAPI() {
             collectedLinks.entries.toList().map { (link, serverName) ->
                 async {
                     var targetUrl = link
+
+                    // معالجة سيرفر GoVid واستخراج m3u8 المشفر مع ترويسات الأندرويد المطلوبة
+                    if (targetUrl.contains("govid.live/e/")) {
+                        try {
+                            val govidHeaders = mapOf(
+                                "User-Agent" to MOBILE_USER_AGENT,
+                                "Referer" to activeBase
+                            )
+                            val res = app.get(targetUrl, headers = govidHeaders, timeout = 10L)
+                            val streamUrl = extractHexM3u8(res.text)
+                            if (!streamUrl.isNullOrBlank()) {
+                                val m3u8Headers = mapOf(
+                                    "User-Agent" to MOBILE_USER_AGENT,
+                                    "Referer" to targetUrl,
+                                    "Origin" to "https://govid.live",
+                                    "Accept" to "*/*",
+                                    "Sec-Fetch-Site" to "same-origin",
+                                    "Sec-Fetch-Mode" to "cors",
+                                    "Sec-Fetch-Dest" to "empty",
+                                    "sec-ch-ua-platform" to "\"Android\"",
+                                    "sec-ch-ua-mobile" to "?1"
+                                )
+
+                                callback(
+                                    ExtractorLink(
+                                        source = "Vidsharing",
+                                        name = serverName ?: "Vidsharing (GoVid)",
+                                        url = streamUrl,
+                                        referer = targetUrl,
+                                        quality = Qualities.P1080.value,
+                                        isM3u8 = true,
+                                        headers = m3u8Headers
+                                    )
+                                )
+                                return@async
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error resolving GoVid stream: ${e.message}")
+                        }
+                    }
+
+                    // معالجة سيرفرات StreamWish و HgCloud
                     val isStreamWishOrHg = targetUrl.contains("hgcloud", ignoreCase = true) ||
                             targetUrl.contains("streamwish", ignoreCase = true) ||
                             serverName?.contains("hgcloud", ignoreCase = true) == true ||
