@@ -770,8 +770,6 @@ class MyCimaProvider : MainAPI() {
             null
         }
     }
-
-    // دالة فك تشفير رابط m3u8 من Hex لسيرفرات GoVid
     private fun extractHexM3u8(html: String): String? {
         val hexRegex = Regex("""["'](68747470[0-9a-fA-F]{30,})["']""")
         val match = hexRegex.find(html)?.groupValues?.get(1) ?: return null
@@ -836,8 +834,6 @@ class MyCimaProvider : MainAPI() {
             collectedLinks.entries.toList().map { (link, serverName) ->
                 async {
                     var targetUrl = link
-
-                    // معالجة سيرفر GoVid واستخراج m3u8 المشفر مع ترويسات الأندرويد المطلوبة
                     if (targetUrl.contains("govid.live/e/")) {
                         try {
                             val govidHeaders = mapOf(
@@ -876,8 +872,6 @@ class MyCimaProvider : MainAPI() {
                             Log.e(TAG, "Error resolving GoVid stream: ${e.message}")
                         }
                     }
-
-                    // معالجة سيرفرات StreamWish و HgCloud
                     val isStreamWishOrHg = targetUrl.contains("hgcloud", ignoreCase = true) ||
                             targetUrl.contains("streamwish", ignoreCase = true) ||
                             serverName?.contains("hgcloud", ignoreCase = true) == true ||
