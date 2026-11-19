@@ -835,8 +835,6 @@ class MyCimaProvider : MainAPI() {
             collectedLinks.entries.toList().map { (link, serverName) ->
                 async {
                     var targetUrl = link
-
-                    // 1. الدخول إلى صفحات govid.live/play/= لاستخراج رابط iframe الفعلي
                     if (targetUrl.contains("govid.live/play/=")) {
                         try {
                             val playDoc = smartGet(targetUrl, referer = activeBase)
@@ -851,8 +849,6 @@ class MyCimaProvider : MainAPI() {
                             Log.e(TAG, "Error fetching govid play iframe: ${e.message}")
                         }
                     }
-
-                    // 2. معالجة مشغل GoVid المباشر (govid.live/e/) وفك تشفير Hex m3u8
                     if (targetUrl.contains("govid.live/e/")) {
                         try {
                             val govidHeaders = mapOf(
@@ -892,8 +888,6 @@ class MyCimaProvider : MainAPI() {
                             Log.e(TAG, "Error resolving GoVid stream: ${e.message}")
                         }
                     }
-
-                    // 3. معالجة سيرفرات StreamWish و HgCloud ونطاقاتها المتغيرة
                     val isStreamWishOrHg = targetUrl.contains("hgcloud", ignoreCase = true) ||
                             targetUrl.contains("streamwish", ignoreCase = true) ||
                             targetUrl.contains("fsdcmo.sbs", ignoreCase = true) ||
@@ -910,8 +904,6 @@ class MyCimaProvider : MainAPI() {
                             targetUrl = resolved
                         }
                     }
-
-                    // 4. استدعاء المستخرجات العامة
                     try {
                         loadExtractor(targetUrl, activeBase, subtitleCallback, callback)
                     } catch (e: Exception) {
