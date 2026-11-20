@@ -180,12 +180,7 @@ class MyCimaProvider : MainAPI() {
 
     override val mainPage = mainPageOf(
         "$mainUrl/" to "احدث الاضافات",
-        "$mainUrl/movies/" to "افلام جديدة",
-        "$mainUrl/series/" to "مسلسلات جديدة",
-        "$mainUrl/category/افلام-اجنبي/" to "افلام اجنبي",
-        "$mainUrl/category/مسلسلات-عربي/" to "مسلسلات عربي",
-        "$mainUrl/category/افلام-انمي/" to "أفلام أنمي",
-        "$mainUrl/category/مسلسلات-انمي/" to "مسلسلات أنمي",
+        
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
