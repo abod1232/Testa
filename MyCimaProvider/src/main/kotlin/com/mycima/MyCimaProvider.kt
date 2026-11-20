@@ -283,7 +283,7 @@ class MyCimaProvider : MainAPI() {
             baseUrl()
         }
         var document: Document? = null
-        for (attempt in 1..3) {
+        for (attempt in 1..15) {
             try {
                 val doc = smartGet(url, referer = currentBase, timeoutSeconds = 15L)
                 val bodyText = doc.body().text()
@@ -558,7 +558,7 @@ class MyCimaProvider : MainAPI() {
             var movieWatchUrl = url
             val hasServersInPage = doc.selectFirst("ul#watch li[data-watch], ul.List--Download--Wecima--Single li a[href]") != null
             if (!hasServersInPage && !postId.isNullOrBlank()) {
-                for (retry in 1..3) {
+                for (retry in 1..15) {
                     try {
                         val ajaxDoc = smartPost(
                             ajaxUrl,
