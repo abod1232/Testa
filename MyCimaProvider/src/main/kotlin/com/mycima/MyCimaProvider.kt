@@ -282,14 +282,11 @@ class MyCimaProvider : MainAPI() {
         } catch (_: Exception) {
             baseUrl()
         }
-
-        // 1. محاولة جلب الصفحة الرئيسية مع إعادة المحاولة في حال وجود 503 أو فشل مؤقت
         var document: Document? = null
         for (attempt in 1..3) {
             try {
                 val doc = smartGet(url, referer = currentBase, timeoutSeconds = 15L)
                 val bodyText = doc.body().text()
-                // التأكد من أن الصفحة ليست خطأ 503 أو صفحة حظر
                 if (!bodyText.contains("Error loading page") && 
                     !bodyText.contains("503 Service") && 
                     !bodyText.contains("Cloudflare") &&
@@ -300,8 +297,6 @@ class MyCimaProvider : MainAPI() {
             } catch (_: Exception) {}
             kotlinx.coroutines.delay(800L)
         }
-
-        // إذا فشل جلب الصفحة بالكامل وظل يعطي 503، ننشئ مستند افتراضي للمتابعة
         val doc = document ?: Jsoup.parse("<html><body></body></html>", url)
 
         fun extractPostId(d: Document): String? {
@@ -322,8 +317,6 @@ class MyCimaProvider : MainAPI() {
         val isSeriesPage = url.contains("/series/") || doc.selectFirst(
             "div.SeasonsList ul li a, div.Seasons--Episodes, div.EpisodesList a, singlesection.Series--Section a"
         ) != null
-
-        // 2. استخراج العنوان مع Fallback من الـ URL slug في حال الـ 503
         val seriesTitleFromSection = doc.selectFirst("singlesection.Series--Section h2")?.text()
             ?.replace("حلقات ", "")
             ?.trim()
@@ -344,8 +337,6 @@ class MyCimaProvider : MainAPI() {
         if (rawTitle.isNullOrBlank()) {
             rawTitle = doc.title().takeIf { !it.contains("Error loading page") && it.isNotBlank() }
         }
-
-        // Fallback من الرابط نفسه في حال تعذر الحصول على العنوان بسبب خطأ 503
         if (rawTitle.isNullOrBlank()) {
             val slug = url.trimEnd('/').substringAfterLast('/')
             rawTitle = try {
@@ -437,8 +428,6 @@ class MyCimaProvider : MainAPI() {
             ?: "$currentBase/wp-content/themes/mycima/Ajaxt/"
         val ajaxUrl = "${ajaxBase.trimEnd('/')}/Single/Episodes.php"
         val postId = extractPostId(doc)
-
-        // ================= معالجة المسلسلات =================
         if (isSeriesPage) {
             val allAnchors = doc.select("div.SeasonsList ul li a, .Seasons--Episodes ul li a, div.SeasonsList a")
             val seasonAnchors = allAnchors.filter { a ->
@@ -566,11 +555,8 @@ class MyCimaProvider : MainAPI() {
         } else if (!seriesUrlFromEpisode.isNullOrBlank()) {
             return load(resolveUrl(url, seriesUrlFromEpisode))
         } else {
-            // ================= معالجة الأفلام مع Fallback AJAX كامل =================
             var movieWatchUrl = url
             val hasServersInPage = doc.selectFirst("ul#watch li[data-watch], ul.List--Download--Wecima--Single li a[href]") != null
-
-            // إذا لم توجد سيرفرات (بسبب خطأ 503 أو صفحة بدون سيرفرات)، نقوم بعمل محاولات AJAX
             if (!hasServersInPage && !postId.isNullOrBlank()) {
                 for (retry in 1..3) {
                     try {
