@@ -276,269 +276,303 @@ class MyCimaProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse? {
-        return try {
-            val document = smartGet(url)
-            val currentBase = try {
-                val u = URL(url)
-                "${u.protocol}://${u.host}"
+        val currentBase = try {
+            val u = URL(url)
+            "${u.protocol}://${u.host}"
+        } catch (_: Exception) {
+            baseUrl()
+        }
+
+        // 1. محاولة جلب الصفحة الرئيسية مع إعادة المحاولة في حال وجود 503 أو فشل مؤقت
+        var document: Document? = null
+        for (attempt in 1..3) {
+            try {
+                val doc = smartGet(url, referer = currentBase, timeoutSeconds = 15L)
+                val bodyText = doc.body().text()
+                // التأكد من أن الصفحة ليست خطأ 503 أو صفحة حظر
+                if (!bodyText.contains("Error loading page") && 
+                    !bodyText.contains("503 Service") && 
+                    !bodyText.contains("Cloudflare") &&
+                    doc.selectFirst("h1, singlesection, title") != null) {
+                    document = doc
+                    break
+                }
+            } catch (_: Exception) {}
+            kotlinx.coroutines.delay(800L)
+        }
+
+        // إذا فشل جلب الصفحة بالكامل وظل يعطي 503، ننشئ مستند افتراضي للمتابعة
+        val doc = document ?: Jsoup.parse("<html><body></body></html>", url)
+
+        fun extractPostId(d: Document): String? {
+            val html = d.html()
+            Regex("""Single/Episodes\.php.*?post_id:\s*['"](\d+)['"]""", RegexOption.DOT_MATCHES_ALL)
+                .find(html)?.groupValues?.get(1)?.let { return it }
+            d.selectFirst("input[name=post_id]")?.attr("value")?.takeIf { it.isNotBlank() }?.let { return it }
+            d.selectFirst("[data-post_id]")?.attr("data-post_id")?.takeIf { it.isNotBlank() }?.let { return it }
+            d.selectFirst("[data-postid]")?.attr("data-postid")?.takeIf { it.isNotBlank() }?.let { return it }
+            d.selectFirst("link[rel=shortlink]")?.attr("href")?.let {
+                Regex("p=(\\d+)").find(it)?.groupValues?.get(1)
+            }?.let { return it }
+            val scriptsText = d.select("script").joinToString(" ") { it.data() }
+            Regex("""post_id['"]?\s*[:=]\s*['"]?(\d{3,})['"]?""").find(scriptsText)?.groupValues?.get(1)?.let { return it }
+            return null
+        }
+
+        val isSeriesPage = url.contains("/series/") || doc.selectFirst(
+            "div.SeasonsList ul li a, div.Seasons--Episodes, div.EpisodesList a, singlesection.Series--Section a"
+        ) != null
+
+        // 2. استخراج العنوان مع Fallback من الـ URL slug في حال الـ 503
+        val seriesTitleFromSection = doc.selectFirst("singlesection.Series--Section h2")?.text()
+            ?.replace("حلقات ", "")
+            ?.trim()
+            ?.ifBlank { null }
+
+        var rawTitle = if (isSeriesPage && !seriesTitleFromSection.isNullOrBlank()) {
+            seriesTitleFromSection
+        } else {
+            doc.selectFirst("div.Title--Content--Single-begin > h1")?.ownText()
+                ?.trimEnd('(', ' ', ')')?.trim()
+        }
+
+        if (rawTitle.isNullOrBlank()) {
+            rawTitle = doc.selectFirst("meta[property='og:title']")?.attr("content")?.trim()
+                ?.replace(" - وي سيما WECIMA ماي سيما MYCIMA", "")
+                ?.replace(" - ماي سيما", "")
+        }
+        if (rawTitle.isNullOrBlank()) {
+            rawTitle = doc.title().takeIf { !it.contains("Error loading page") && it.isNotBlank() }
+        }
+
+        // Fallback من الرابط نفسه في حال تعذر الحصول على العنوان بسبب خطأ 503
+        if (rawTitle.isNullOrBlank()) {
+            val slug = url.trimEnd('/').substringAfterLast('/')
+            rawTitle = try {
+                URLDecoder.decode(slug, "UTF-8").replace("-", " ")
             } catch (_: Exception) {
-                baseUrl()
+                slug.replace("-", " ")
             }
+        }
 
-            fun extractPostId(doc: Document): String? {
-                val html = doc.html()
-                Regex("""Single/Episodes\.php.*?post_id:\s*['"](\d+)['"]""", RegexOption.DOT_MATCHES_ALL)
-                    .find(html)?.groupValues?.get(1)?.let { return it }
-                doc.selectFirst("input[name=post_id]")?.attr("value")?.takeIf { it.isNotBlank() }?.let { return it }
-                doc.selectFirst("[data-post_id]")?.attr("data-post_id")?.takeIf { it.isNotBlank() }?.let { return it }
-                doc.selectFirst("[data-postid]")?.attr("data-postid")?.takeIf { it.isNotBlank() }?.let { return it }
-                doc.selectFirst("link[rel=shortlink]")?.attr("href")?.let {
-                    Regex("p=(\\d+)").find(it)?.groupValues?.get(1)
-                }?.let { return it }
-                val scriptsText = doc.select("script").joinToString(" ") { it.data() }
-                Regex("""post_id['"]?\s*[:=]\s*['"]?(\d{3,})['"]?""").find(scriptsText)?.groupValues?.get(1)?.let { return it }
-                return null
+        val finalTitle = rawTitle.replace(Regex("""\s+"""), " ").trim()
+
+        val poster = getPosterFromStyle(doc.selectFirst("wecima.separated--top"))
+            ?: doc.selectFirst("meta[property='og:image']")?.attr("content")?.ifBlank { null }
+
+        val year = doc.selectFirst("div.Title--Content--Single-begin h1 a")?.text()
+            ?.trim()?.toIntOrNull()
+            ?: extractNumbers(doc.selectFirst("div.Title--Content--Single-begin h1")?.text())
+            ?: Regex("""\b(19\d\d|20\d\d)\b""").find(url)?.groupValues?.get(1)?.toIntOrNull()
+
+        val plot = doc.selectFirst("div.StoryMovieContent")?.text()?.trim()?.ifBlank { null }
+            ?: doc.selectFirst("div.AsideContext p, div.AsideContext div")?.text()?.trim()?.ifBlank { null }
+            ?: doc.selectFirst("div.PostItemContent")?.text()?.trim()?.ifBlank { null }
+            ?: doc.selectFirst("meta[property='og:description']")?.attr("content")?.trim()?.ifBlank { null }
+
+        val tags = doc.select("ul.Terms--Content--Single-begin li:has(span:contains(النوع)) p a")
+            .map { it.text().trim() }
+
+        val recommendations = doc.select("div.Grid--WecimaPosts div.GridItem")
+            .mapNotNull { it.toSearchResult() }
+
+        val seriesUrlFromEpisode = doc
+            .selectFirst("singlesection.Series--Section > a, ul.Terms--Content--Single-begin li:contains(المسلسل) a")
+            ?.attr("href")
+
+        fun extractEpisodeNumberFromText(text: String?): Int? {
+            if (text.isNullOrBlank()) return null
+            Regex("""الحلقة\s*(\d+)""").find(text)?.groupValues?.get(1)?.toIntOrNull()?.let { return it }
+            Regex("""\b(\d{1,4})\b""").find(text)?.groupValues?.get(1)?.toIntOrNull()?.let { return it }
+            return null
+        }
+
+        fun resolveUrl(base: String, relative: String): String {
+            return try {
+                URL(URL(base), relative).toString()
+            } catch (e: Exception) {
+                if (relative.startsWith("http")) relative else currentBase.trimEnd('/') + "/" + relative.trimStart('/')
             }
+        }
 
-            val isSeriesPage = document.selectFirst(
-                "div.SeasonsList ul li a, div.Seasons--Episodes, div.EpisodesList a, singlesection.Series--Section a"
-            ) != null
-
-            val seriesTitleFromSection = document.selectFirst("singlesection.Series--Section h2")?.text()
-                ?.replace("حلقات ", "")
-                ?.trim()
-                ?.ifBlank { null }
-
-            var rawTitle = if (isSeriesPage && !seriesTitleFromSection.isNullOrBlank()) {
-                seriesTitleFromSection
-            } else {
-                document.selectFirst("div.Title--Content--Single-begin > h1")?.ownText()
-                    ?.trimEnd('(', ' ', ')')?.trim()
-            }
-
-            if (rawTitle.isNullOrBlank()) {
-                rawTitle = document.selectFirst("meta[property='og:title']")?.attr("content")?.trim()
-                    ?.replace(" - وي سيما WECIMA ماي سيما MYCIMA", "")
-                    ?.replace(" - ماي سيما", "")
-            }
-            if (rawTitle.isNullOrBlank()) {
-                rawTitle = document.title()
-            }
-            val finalTitle = rawTitle?.trim()?.takeIf { it.isNotBlank() } ?: return null
-
-            val poster = getPosterFromStyle(document.selectFirst("wecima.separated--top"))
-                ?: document.selectFirst("meta[property='og:image']")?.attr("content")?.ifBlank { null }
-
-            val year = document.selectFirst("div.Title--Content--Single-begin h1 a")?.text()
-                ?.trim()?.toIntOrNull()
-                ?: extractNumbers(document.selectFirst("div.Title--Content--Single-begin h1")?.text())
-
-            val plot = document.selectFirst("div.StoryMovieContent")?.text()?.trim()?.ifBlank { null }
-                ?: document.selectFirst("div.AsideContext p, div.AsideContext div")?.text()?.trim()?.ifBlank { null }
-                ?: document.selectFirst("div.PostItemContent")?.text()?.trim()?.ifBlank { null }
-                ?: document.selectFirst("meta[property='og:description']")?.attr("content")?.trim()?.ifBlank { null }
-                ?: document.selectFirst("meta[name='description']")?.attr("content")?.trim()?.ifBlank { null }
-
-            val tags = document.select("ul.Terms--Content--Single-begin li:has(span:contains(النوع)) p a")
-                .map { it.text().trim() }
-
-            val recommendations = document.select("div.Grid--WecimaPosts div.GridItem")
-                .mapNotNull { it.toSearchResult() }
-
-            val seriesUrlFromEpisode = document
-                .selectFirst("singlesection.Series--Section > a, ul.Terms--Content--Single-begin li:contains(المسلسل) a")
-                ?.attr("href")
-
-            fun extractEpisodeNumberFromText(text: String?): Int? {
-                if (text.isNullOrBlank()) return null
-                Regex("""الحلقة\s*(\d+)""").find(text)?.groupValues?.get(1)?.toIntOrNull()?.let { return it }
-                Regex("""\b(\d{1,4})\b""").find(text)?.groupValues?.get(1)?.toIntOrNull()?.let { return it }
-                return null
-            }
-
-            fun resolveUrl(base: String, relative: String): String {
-                return try {
-                    URL(URL(base), relative).toString()
-                } catch (e: Exception) {
-                    if (relative.startsWith("http")) relative else currentBase.trimEnd('/') + "/" + relative.trimStart('/')
+        fun parseEpisodesFromAnchors(
+            anchors: List<Element>,
+            seasonLabel: String?,
+            seasonNumber: Int?
+        ): List<Episode> {
+            var counter = 0
+            return anchors.mapNotNull { a ->
+                val rawHref = a.attr("href").ifBlank { a.attr("data-href") }
+                if (rawHref.isBlank() || rawHref.startsWith("#") || rawHref.contains("season", ignoreCase = true)) {
+                    return@mapNotNull null
                 }
-            }
+                val epHref = resolveUrl(url, rawHref)
 
-            fun parseEpisodesFromAnchors(
-                anchors: List<Element>,
-                seasonLabel: String?,
-                seasonNumber: Int?
-            ): List<Episode> {
-                var counter = 0
-                return anchors.mapNotNull { a ->
-                    val rawHref = a.attr("href").ifBlank { a.attr("data-href") }
-                    if (rawHref.isBlank() || rawHref.startsWith("#") || rawHref.contains("season", ignoreCase = true)) {
-                        return@mapNotNull null
-                    }
-                    val epHref = resolveUrl(url, rawHref)
+                val epTitleRaw = a.selectFirst("episodetitle, .episodetitle")?.text()?.trim()
+                    ?: a.attr("title").ifBlank { a.text() }.trim()
 
-                    val epTitleRaw = a.selectFirst("episodetitle, .episodetitle")?.text()?.trim()
-                        ?: a.attr("title").ifBlank { a.text() }.trim()
-
-                    val epNum = extractEpisodeNumberFromText(epTitleRaw) ?: run {
-                        counter++
-                        counter
-                    }
-
-                    val epName = if (!seasonLabel.isNullOrBlank()) {
-                        "$seasonLabel الحلقة $epNum"
-                    } else {
-                        "الحلقة $epNum"
-                    }
-
-                    newEpisode(epHref) {
-                        this.name = epName
-                        this.season = seasonNumber
-                        this.episode = epNum
-                        this.posterUrl = poster
-                    }
-                }
-            }
-
-            val htmlText = document.html()
-            val ajaxBase = Regex("""var\s+AjaxtURL\s*=\s*"([^"]+)"""")
-                .find(htmlText)?.groupValues?.get(1)
-                ?: "$currentBase/wp-content/themes/mycima/Ajaxt/"
-            val ajaxUrl = "${ajaxBase.trimEnd('/')}/Single/Episodes.php"
-            val postId = extractPostId(document)
-
-            if (isSeriesPage) {
-                val allAnchors = document.select("div.SeasonsList ul li a, .Seasons--Episodes ul li a, div.SeasonsList a")
-                val seasonAnchors = allAnchors.filter { a ->
-                    val text = a.text().trim()
-                    !text.contains("حلقة") && (text.contains("الموسم") || text.contains("موسم") || a.hasAttr("data-season"))
+                val epNum = extractEpisodeNumberFromText(epTitleRaw) ?: run {
+                    counter++
+                    counter
                 }
 
-                val allEpisodes = mutableListOf<Episode>()
-
-                if (seasonAnchors.isEmpty()) {
-                    val anchors = document.select("div.EpisodesList a[href], div.Episodes--Seasons--Episodes a[href]")
-                    allEpisodes.addAll(parseEpisodesFromAnchors(anchors, null, 1))
+                val epName = if (!seasonLabel.isNullOrBlank()) {
+                    "$seasonLabel الحلقة $epNum"
                 } else {
-                    data class SeasonTask(
-                        val id: String,
-                        val label: String,
-                        val number: Int
-                    )
-
-                    val parsedNums = seasonAnchors.map { parseSeasonNumber(it.text()) }
-                    val usedNumbers = parsedNums.filterNotNull().toMutableSet()
-                    var nextMissing = 1
-                    val resolvedSeasonNums = parsedNums.map { known ->
-                        if (known != null) {
-                            known
-                        } else {
-                            while (usedNumbers.contains(nextMissing)) nextMissing++
-                            val assigned = nextMissing
-                            usedNumbers.add(assigned)
-                            nextMissing++
-                            assigned
-                        }
-                    }
-
-                    val pendingTasks = mutableListOf<SeasonTask>()
-                    val activeBox = document.select("div.EpisodesList a[href], div.Episodes--Seasons--Episodes a[href]")
-
-                    seasonAnchors.forEachIndexed { idx, seasonEl ->
-                        val seasonNumber = resolvedSeasonNums[idx]
-                        val rawSeasonText = seasonEl.text().trim()
-                        val seasonLabel = rawSeasonText
-                            .replace(Regex("\\s*(مترجم|مدبلج).*"), "")
-                            .trim()
-                            .ifBlank { "الموسم $seasonNumber" }
-
-                        val seasonId = seasonEl.attr("data-season").ifBlank { seasonEl.attr("data-season-id") }
-                        val isActiveSeason = seasonEl.parent()?.hasClass("active") == true || seasonEl.hasClass("active")
-
-                        if (isActiveSeason && activeBox.isNotEmpty()) {
-                            val inPageEpisodes = parseEpisodesFromAnchors(activeBox, seasonLabel, seasonNumber)
-                            if (inPageEpisodes.isNotEmpty()) {
-                                allEpisodes.addAll(inPageEpisodes)
-                                return@forEachIndexed
-                            }
-                        }
-
-                        if (seasonId.isNotBlank()) {
-                            pendingTasks.add(SeasonTask(seasonId, seasonLabel, seasonNumber))
-                        }
-                    }
-
-                    suspend fun fetchStaggered(tasks: List<SeasonTask>): Pair<List<Episode>, List<SeasonTask>> {
-                        val failed = mutableListOf<SeasonTask>()
-                        val fetched = coroutineScope {
-                            tasks.mapIndexed { index, task ->
-                                if (index > 0) {
-                                    kotlinx.coroutines.delay(REQUEST_DELAY)
-                                }
-                                async(Dispatchers.IO) {
-                                    try {
-                                        if (!postId.isNullOrBlank()) {
-                                            val seasonDoc = smartPost(
-                                                ajaxUrl,
-                                                data = mapOf("season" to task.id, "post_id" to postId),
-                                                referer = currentBase,
-                                                timeoutSeconds = 12L
-                                            )
-                                            val anchors = seasonDoc.select("a[href]")
-                                            val eps = parseEpisodesFromAnchors(anchors, task.label, task.number)
-                                            if (eps.isNotEmpty()) {
-                                                return@async Pair(eps, null)
-                                            }
-                                        }
-                                    } catch (_: Exception) {
-                                    }
-                                    Pair(emptyList<Episode>(), task)
-                                }
-                            }.awaitAll()
-                        }
-
-                        val successEps = mutableListOf<Episode>()
-                        fetched.forEach { (eps, failTask) ->
-                            if (eps.isNotEmpty()) {
-                                successEps.addAll(eps)
-                            } else if (failTask != null) {
-                                failed.add(failTask)
-                            }
-                        }
-                        return Pair(successEps, failed)
-                    }
-
-                    var (stageEps, failedTasks) = fetchStaggered(pendingTasks)
-                    allEpisodes.addAll(stageEps)
-
-                    var retryCount = 1
-                    while (failedTasks.isNotEmpty() && retryCount <= MAX_AJAX_RETRIES) {
-                        kotlinx.coroutines.delay(800L)
-                        val (retryEps, stillFailed) = fetchStaggered(failedTasks)
-                        allEpisodes.addAll(retryEps)
-                        failedTasks = stillFailed
-                        retryCount++
-                    }
+                    "الحلقة $epNum"
                 }
 
-                val distinctEpisodes = allEpisodes.distinctBy { it.data }
-                    .sortedWith(compareBy({ it.season }, { it.episode }))
-
-                val seriesPageUrl = seriesUrlFromEpisode?.let { resolveUrl(url, it) } ?: url
-                return newTvSeriesLoadResponse(finalTitle, seriesPageUrl, TvType.TvSeries, distinctEpisodes) {
+                newEpisode(epHref) {
+                    this.name = epName
+                    this.season = seasonNumber
+                    this.episode = epNum
                     this.posterUrl = poster
-                    this.year = year
-                    this.plot = plot
-                    this.tags = tags
-                    this.recommendations = recommendations
                 }
-            } else if (!seriesUrlFromEpisode.isNullOrBlank()) {
-                return load(resolveUrl(url, seriesUrlFromEpisode))
-            } else {
-                var movieWatchUrl = url
-                val hasServersInPage = document.selectFirst("ul#watch li[data-watch], ul.List--Download--Wecima--Single li a[href]") != null
+            }
+        }
 
-                if (!hasServersInPage && !postId.isNullOrBlank()) {
+        val htmlText = doc.html()
+        val ajaxBase = Regex("""var\s+AjaxtURL\s*=\s*"([^"]+)"""")
+            .find(htmlText)?.groupValues?.get(1)
+            ?: "$currentBase/wp-content/themes/mycima/Ajaxt/"
+        val ajaxUrl = "${ajaxBase.trimEnd('/')}/Single/Episodes.php"
+        val postId = extractPostId(doc)
+
+        // ================= معالجة المسلسلات =================
+        if (isSeriesPage) {
+            val allAnchors = doc.select("div.SeasonsList ul li a, .Seasons--Episodes ul li a, div.SeasonsList a")
+            val seasonAnchors = allAnchors.filter { a ->
+                val text = a.text().trim()
+                !text.contains("حلقة") && (text.contains("الموسم") || text.contains("موسم") || a.hasAttr("data-season"))
+            }
+
+            val allEpisodes = mutableListOf<Episode>()
+
+            if (seasonAnchors.isEmpty()) {
+                val anchors = doc.select("div.EpisodesList a[href], div.Episodes--Seasons--Episodes a[href]")
+                allEpisodes.addAll(parseEpisodesFromAnchors(anchors, null, 1))
+            } else {
+                data class SeasonTask(
+                    val id: String,
+                    val label: String,
+                    val number: Int
+                )
+
+                val parsedNums = seasonAnchors.map { parseSeasonNumber(it.text()) }
+                val usedNumbers = parsedNums.filterNotNull().toMutableSet()
+                var nextMissing = 1
+                val resolvedSeasonNums = parsedNums.map { known ->
+                    if (known != null) {
+                        known
+                    } else {
+                        while (usedNumbers.contains(nextMissing)) nextMissing++
+                        val assigned = nextMissing
+                        usedNumbers.add(assigned)
+                        nextMissing++
+                        assigned
+                    }
+                }
+
+                val pendingTasks = mutableListOf<SeasonTask>()
+                val activeBox = doc.select("div.EpisodesList a[href], div.Episodes--Seasons--Episodes a[href]")
+
+                seasonAnchors.forEachIndexed { idx, seasonEl ->
+                    val seasonNumber = resolvedSeasonNums[idx]
+                    val rawSeasonText = seasonEl.text().trim()
+                    val seasonLabel = rawSeasonText
+                        .replace(Regex("\\s*(مترجم|مدبلج).*"), "")
+                        .trim()
+                        .ifBlank { "الموسم $seasonNumber" }
+
+                    val seasonId = seasonEl.attr("data-season").ifBlank { seasonEl.attr("data-season-id") }
+                    val isActiveSeason = seasonEl.parent()?.hasClass("active") == true || seasonEl.hasClass("active")
+
+                    if (isActiveSeason && activeBox.isNotEmpty()) {
+                        val inPageEpisodes = parseEpisodesFromAnchors(activeBox, seasonLabel, seasonNumber)
+                        if (inPageEpisodes.isNotEmpty()) {
+                            allEpisodes.addAll(inPageEpisodes)
+                            return@forEachIndexed
+                        }
+                    }
+
+                    if (seasonId.isNotBlank()) {
+                        pendingTasks.add(SeasonTask(seasonId, seasonLabel, seasonNumber))
+                    }
+                }
+
+                suspend fun fetchStaggered(tasks: List<SeasonTask>): Pair<List<Episode>, List<SeasonTask>> {
+                    val failed = mutableListOf<SeasonTask>()
+                    val fetched = coroutineScope {
+                        tasks.mapIndexed { index, task ->
+                            if (index > 0) {
+                                kotlinx.coroutines.delay(REQUEST_DELAY)
+                            }
+                            async(Dispatchers.IO) {
+                                try {
+                                    if (!postId.isNullOrBlank()) {
+                                        val seasonDoc = smartPost(
+                                            ajaxUrl,
+                                            data = mapOf("season" to task.id, "post_id" to postId),
+                                            referer = currentBase,
+                                            timeoutSeconds = 12L
+                                        )
+                                        val anchors = seasonDoc.select("a[href]")
+                                        val eps = parseEpisodesFromAnchors(anchors, task.label, task.number)
+                                        if (eps.isNotEmpty()) {
+                                            return@async Pair(eps, null)
+                                        }
+                                    }
+                                } catch (_: Exception) {}
+                                Pair(emptyList<Episode>(), task)
+                            }
+                        }.awaitAll()
+                    }
+
+                    val successEps = mutableListOf<Episode>()
+                    fetched.forEach { (eps, failTask) ->
+                        if (eps.isNotEmpty()) {
+                            successEps.addAll(eps)
+                        } else if (failTask != null) {
+                            failed.add(failTask)
+                        }
+                    }
+                    return Pair(successEps, failed)
+                }
+
+                var (stageEps, failedTasks) = fetchStaggered(pendingTasks)
+                allEpisodes.addAll(stageEps)
+
+                var retryCount = 1
+                while (failedTasks.isNotEmpty() && retryCount <= MAX_AJAX_RETRIES) {
+                    kotlinx.coroutines.delay(800L)
+                    val (retryEps, stillFailed) = fetchStaggered(failedTasks)
+                    allEpisodes.addAll(retryEps)
+                    failedTasks = stillFailed
+                    retryCount++
+                }
+            }
+
+            val distinctEpisodes = allEpisodes.distinctBy { it.data }
+                .sortedWith(compareBy({ it.season }, { it.episode }))
+
+            val seriesPageUrl = seriesUrlFromEpisode?.let { resolveUrl(url, it) } ?: url
+            return newTvSeriesLoadResponse(finalTitle, seriesPageUrl, TvType.TvSeries, distinctEpisodes) {
+                this.posterUrl = poster
+                this.year = year
+                this.plot = plot
+                this.tags = tags
+                this.recommendations = recommendations
+            }
+        } else if (!seriesUrlFromEpisode.isNullOrBlank()) {
+            return load(resolveUrl(url, seriesUrlFromEpisode))
+        } else {
+            // ================= معالجة الأفلام مع Fallback AJAX كامل =================
+            var movieWatchUrl = url
+            val hasServersInPage = doc.selectFirst("ul#watch li[data-watch], ul.List--Download--Wecima--Single li a[href]") != null
+
+            // إذا لم توجد سيرفرات (بسبب خطأ 503 أو صفحة بدون سيرفرات)، نقوم بعمل محاولات AJAX
+            if (!hasServersInPage && !postId.isNullOrBlank()) {
+                for (retry in 1..3) {
                     try {
                         val ajaxDoc = smartPost(
                             ajaxUrl,
@@ -549,26 +583,22 @@ class MyCimaProvider : MainAPI() {
                         val ajaxWatchLink = ajaxDoc.selectFirst("ul#watch li[data-watch], a[href]")?.attr("href")
                         if (!ajaxWatchLink.isNullOrBlank()) {
                             movieWatchUrl = resolveUrl(url, ajaxWatchLink)
+                            break
                         }
-                    } catch (_: Exception) {
-                    }
-                }
-
-                return newMovieLoadResponse(finalTitle, url, TvType.Movie, movieWatchUrl) {
-                    this.posterUrl = poster
-                    this.year = year
-                    this.plot = plot
-                    this.tags = tags
-                    this.recommendations = recommendations
+                    } catch (_: Exception) {}
+                    kotlinx.coroutines.delay(600L)
                 }
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error loading page: $url", e)
-            e.printStackTrace()
-            return null
+
+            return newMovieLoadResponse(finalTitle, url, TvType.Movie, movieWatchUrl) {
+                this.posterUrl = poster
+                this.year = year
+                this.plot = plot
+                this.tags = tags
+                this.recommendations = recommendations
+            }
         }
     }
-
     private fun decodeWecimaUrl(encodedStr: String): String? {
         return try {
             if (encodedStr.isBlank()) return null
