@@ -180,6 +180,9 @@ class MyCimaProvider : MainAPI() {
 
     override val mainPage = mainPageOf(
         "$mainUrl/" to "احدث الاضافات",
+        "$mainUrl/movies/" to "افلام جديدة",
+        "$mainUrl/series/" to "مسلسلات جديدة"٫,
+        "$mainUrl/category/مسلسلات-عربي/" to "مسلسلات عربي",
         
     )
 
