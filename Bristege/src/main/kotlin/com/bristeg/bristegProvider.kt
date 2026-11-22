@@ -22,10 +22,9 @@ fun getQualityFromName(name: String?): Int {
     }
 }
 
-
 class BrstejProvider : MainAPI() {
 
-    override var mainUrl = "https://amd.brstej.com"
+    override var mainUrl = "https://hd1.brstej.com"
     override var name = "bristege"
     override val hasMainPage = true
     override var lang = "ar"
@@ -57,65 +56,115 @@ class BrstejProvider : MainAPI() {
         return u
     }
 
+    private fun buildAbsoluteUrl(href: String?, base: String = mainUrl): String {
+        if (href.isNullOrBlank()) return ""
+        var h = href.trim()
+        if (h.startsWith("http://") || h.startsWith("https://")) return h
+        if (h.startsWith("./")) h = h.removePrefix("./")
+        val baseTrim = base.trimEnd('/')
+        return if (h.startsWith("/")) "$baseTrim$h" else "$baseTrim/$h"
+    }
+
     private fun Element.toSearchResponse(): SearchResponse? {
-        val titleLinkElement = this.selectFirst("div.caption h3 a") ?: return null
+        // 1. فحص كروت المسلسلات العلوية في الأقسام الحديثة (pcg-series-card)
+        val seriesCard = this.selectFirst("a.pcg-series-card")
+        if (seriesCard != null) {
+            val href = seriesCard.attr("href")
+            val title = seriesCard.attr("title").ifBlank {
+                seriesCard.selectFirst(".pcg-series-name span")?.text() ?: ""
+            }.trim()
+
+            if (href.isBlank() || title.isBlank()) return null
+
+            val img = seriesCard.selectFirst(".pcg-series-image img")
+            val rawPoster = img?.attr("src") ?: img?.attr("data-original")
+            val posterUrl = cleanPosterUrl(rawPoster)
+
+            return newTvSeriesSearchResponse(title, buildAbsoluteUrl(href), TvType.TvSeries) {
+                this.posterUrl = posterUrl
+            }
+        }
+
+        // 2. فحص كروت الحلقات والأفلام (سواء التصميم الحديث pcg-card أو التصميم القديم)
+        val titleLinkElement = this.selectFirst(".pcg-caption h3 a, div.caption h3 a, a.pcg-card-title")
+            ?: this.selectFirst("div.pm-video-thumb a:has(img), .pcg-media a:has(img)")
+            ?: return null
 
         val href = titleLinkElement.attr("href")
-        if (href.isBlank() || href == "#modal-login-form") {
+        if (href.isBlank() || href.startsWith("#") || href.contains("modal-login")) {
             return null
         }
 
-        val title = titleLinkElement.attr("title")?.trim() ?: titleLinkElement.text().trim()
+        val title = titleLinkElement.attr("title").ifBlank { titleLinkElement.text() }.trim()
         if (title.isBlank()) {
             return null
         }
 
-        val img = this.selectFirst("div.pm-video-thumb img")
-        val rawPoster = img?.attr("data-echo") ?: img?.attr("data-original") ?: img?.attr("src")
+        val img = this.selectFirst(".pcg-media img, div.pm-video-thumb img")
+        val rawPoster = img?.attr("data-echo")
+            ?: img?.attr("data-original")
+            ?: img?.attr("src")
         val posterUrl = cleanPosterUrl(rawPoster)
 
-        val type = if (href.contains("series1.php") || href.contains("view-serie.php")) {
+        val fullUrl = buildAbsoluteUrl(href)
+        val type = if (fullUrl.contains("series1.php") || fullUrl.contains("view-serie.php")) {
             TvType.TvSeries
         } else {
             TvType.Movie
         }
 
         return if (type == TvType.TvSeries) {
-            newTvSeriesSearchResponse(title, href, type) {
+            newTvSeriesSearchResponse(title, fullUrl, type) {
                 this.posterUrl = posterUrl
             }
         } else {
-            newMovieSearchResponse(title, href, type) {
+            newMovieSearchResponse(title, fullUrl, type) {
                 this.posterUrl = posterUrl
             }
         }
     }
 
     override val mainPage = mainPageOf(
-        "index.php" to "الرئيسية",
-        "category818.php?cat=prss7-2025" to "مسلسلات برستيج",
-        "category.php?cat=movies2-2224" to "افلام",
-        "category.php?cat=ramdan1-2024" to "مسلسلات رمضان 2024",
-        "newvideo.php" to "أخر الاضافات"
+        "home03" to "الرئيسية",
+        "cat03.php?cat=prss7-2025" to "مسلسلات برستيج",
+        "cat03.php?cat=movies2-2224" to "افلام",
+        "cat03.php?cat=ramdan2026" to "مسلسلات رمضان 2026",
+        "cat03.php?cat=arab8-2025" to "مسلسلات عربية",
+        "cat03.php?cat=ty9-2025" to "مسلسلات تركية 2026",
+        "cat03.php?cat=eg8-2025" to "مسلسلات مصرية",
+        "cat03.php?cat=syy5-2025" to "مسلسلات شامية",
+        "cat03.php?cat=5a7-2024" to "مسلسلات خليجية",
+        "new-videos.php" to "أحدث الإضافات"
     )
 
     override suspend fun getMainPage(
         page: Int,
         request: MainPageRequest
     ): HomePageResponse {
-        val url = "$mainUrl/${request.data}" + (if (page > 1) "&page=$page" else "")
+        val separator = if (request.data.contains("?")) "&" else "?"
+        val url = if (page > 1) {
+            "$mainUrl/${request.data}${separator}page=$page"
+        } else {
+            "$mainUrl/${request.data}"
+        }
 
         try {
             val document = app.get(url).document
 
-            val selector =
-                "ul[class*='pm-ul-browse-videos'] > li, ul[class*='pm-ul-carousel-videos'] > li"
+            // السليكتور يغطي كروت الحلقات، والمسلسلات، وأهم الحلقات، والتصاميم القديمة والجديدة
+            val selector = """
+                ul.pcg-series-grid > li, 
+                ul.pcg-episodes-grid > li, 
+                ul.pcg-featured-grid > li, 
+                ul[class*='pm-ul-browse-videos'] > li, 
+                ul[class*='pm-ul-carousel-videos'] > li
+            """.trimIndent()
 
             val items = document.select(selector)
 
             val home = items.mapNotNull {
                 it.toSearchResponse()
-            }
+            }.distinctBy { it.url }
 
             return newHomePageResponse(request.name, home)
         } catch (e: Exception) {
@@ -129,43 +178,34 @@ class BrstejProvider : MainAPI() {
         try {
             val document = app.get(url).document
 
-            val selector = "ul.pm-ul-browse-videos > li"
+            val selector = "ul.pm-ul-browse-videos > li, ul.pcg-episodes-grid > li, div.thumbnail"
 
             val items = document.select(selector)
 
             val results = items.mapNotNull {
                 it.toSearchResponse()
-            }
+            }.distinctBy { it.url }
+
             return results
         } catch (e: Exception) {
             throw e
         }
     }
 
-
-    private fun buildAbsoluteUrl(href: String?, base: String = mainUrl): String {
-        if (href.isNullOrBlank()) return ""
-        var h = href.trim()
-        if (h.startsWith("http://") || h.startsWith("https://")) return h
-        if (h.startsWith("./")) h = h.removePrefix("./")
-        val baseTrim = base.trimEnd('/')
-        return if (h.startsWith("/")) "$baseTrim$h" else "$baseTrim/$h"
-    }
-
     override suspend fun load(url: String): LoadResponse? {
         try {
             val document = app.get(url, timeout = 15).document
 
-            val title = document.selectFirst("div.pm-video-heading h1")?.text()?.trim()
+            val title = document.selectFirst("div.pm-video-heading h1, h1#pcg-title, h1")?.text()?.trim()
             if (title.isNullOrBlank()) {
                 return null
             }
 
             val poster = cleanPosterUrl(document.selectFirst("meta[property=og:image]")?.attr("content"))
 
-            val description = document.selectFirst("div.pm-video-description > div.txtv")?.text()?.trim()
+            val description = document.selectFirst("div.pm-video-description > div.txtv, div.pm-category-description, p.pcg-intro-summary")?.text()?.trim()
 
-            val categoryTags = document.select("dl.dl-horizontal p strong:contains(اقسام) ~ span a span")
+            val categoryTags = document.select("dl.dl-horizontal p strong:contains(اقسام) ~ span a span, .pcg-breadcrumb li a")
                 .map { it.text().trim() }
                 .filter { it.isNotBlank() }
 
@@ -183,7 +223,7 @@ class BrstejProvider : MainAPI() {
                 document.select("div.SeasonsEpisodes[data-serie='${seasonId}'] a").isNotEmpty()
             }
 
-            val isSeries = hasSeasonBox && hasActualEpisodes && !isMovieByTag
+            val isSeries = (hasSeasonBox && hasActualEpisodes && !isMovieByTag) || url.contains("series1.php")
 
             if (isSeries) {
                 val episodes = mutableListOf<Episode>()
@@ -242,6 +282,7 @@ class BrstejProvider : MainAPI() {
             return null
         }
     }
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -281,10 +322,7 @@ class BrstejProvider : MainAPI() {
                     """eval\(function\s*\(p,a,c,k,e,d\)\s*\{[\s\S]*?\}\s*\(\s*(['"])(.*?)\1\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])(.*?)\5\.split\(['"]\|['"]\)\s*\)\s*\)""",
                     RegexOption.DOT_MATCHES_ALL
                 )
-                val m = regex.find(packedJs)
-                if (m == null) {
-                    return null
-                }
+                val m = regex.find(packedJs) ?: return null
 
                 val payloadRaw = m.groupValues[2]
                 val base = m.groupValues[3].toIntOrNull() ?: return null
@@ -304,10 +342,7 @@ class BrstejProvider : MainAPI() {
                     lookup[mr.value] ?: mr.value
                 }
 
-                if (unpacked.isBlank()) {
-                    return null
-                }
-                return unpacked
+                return if (unpacked.isBlank()) null else unpacked
             } catch (_: Exception) {
                 return null
             }
