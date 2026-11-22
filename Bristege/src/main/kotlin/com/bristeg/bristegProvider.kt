@@ -66,7 +66,6 @@ class BrstejProvider : MainAPI() {
     }
 
     private fun Element.toSearchResponse(): SearchResponse? {
-        // 1. فحص كروت المسلسلات العلوية في الأقسام الحديثة (pcg-series-card)
         val seriesCard = this.selectFirst("a.pcg-series-card")
         if (seriesCard != null) {
             val href = seriesCard.attr("href")
@@ -84,8 +83,6 @@ class BrstejProvider : MainAPI() {
                 this.posterUrl = posterUrl
             }
         }
-
-        // 2. فحص كروت الحلقات والأفلام (سواء التصميم الحديث pcg-card أو التصميم القديم)
         val titleLinkElement = this.selectFirst(".pcg-caption h3 a, div.caption h3 a, a.pcg-card-title")
             ?: this.selectFirst("div.pm-video-thumb a:has(img), .pcg-media a:has(img)")
             ?: return null
@@ -150,8 +147,6 @@ class BrstejProvider : MainAPI() {
 
         try {
             val document = app.get(url).document
-
-            // السليكتور يغطي كروت الحلقات، والمسلسلات، وأهم الحلقات، والتصاميم القديمة والجديدة
             val selector = """
                 ul.pcg-series-grid > li, 
                 ul.pcg-episodes-grid > li, 
