@@ -66,6 +66,7 @@ class BrstejProvider : MainAPI() {
     }
 
     private fun Element.toSearchResponse(): SearchResponse? {
+        // 1. فحص كروت المسلسلات (pcg-series-card)
         val seriesCard = this.selectFirst("a.pcg-series-card")
         if (seriesCard != null) {
             val href = seriesCard.attr("href")
@@ -83,6 +84,8 @@ class BrstejProvider : MainAPI() {
                 this.posterUrl = posterUrl
             }
         }
+
+        // 2. فحص كروت نتائج البحث (prs-card) وبطاقات الحلقات والأفلام (pcg-card / pm-video-thumb)
         val titleLinkElement = this.selectFirst(".prs-caption h3 a, .pcg-caption h3 a, div.caption h3 a, a.pcg-card-title")
             ?: this.selectFirst("a.prs-image, div.pm-video-thumb a:has(img), .pcg-media a:has(img)")
             ?: return null
@@ -215,6 +218,8 @@ class BrstejProvider : MainAPI() {
             val isMovie = allTags.any { it.contains("افلام") || it.contains("فلم") } || title.contains("فيلم")
 
             val episodes = mutableListOf<Episode>()
+
+            // 1. استخراج الحلقات من صفحة المسلسل الرسمية (series1.php)
             val seasonSections = document.select("section.pds-season")
             if (seasonSections.isNotEmpty()) {
                 for (seasonSec in seasonSections) {
@@ -243,6 +248,8 @@ class BrstejProvider : MainAPI() {
                     }
                 }
             }
+
+            // 2. استخراج الحلقات من صفحة المشاهدة الموحدة (video.php) إن وجدت قائمة الحلقات
             val watchSeasonPanels = document.select("div.pwr-season-panel")
             if (watchSeasonPanels.isNotEmpty()) {
                 for (panel in watchSeasonPanels) {
@@ -266,6 +273,8 @@ class BrstejProvider : MainAPI() {
                     }
                 }
             }
+
+            // إذا وجدنا حلقات أو كان الرابط لمسلسل
             if (episodes.isNotEmpty() || url.contains("series1.php")) {
                 val sorted = episodes.distinctBy { it.data }.sortedWith(
                     compareBy<Episode> { it.season ?: 1 }
@@ -278,6 +287,8 @@ class BrstejProvider : MainAPI() {
                     this.tags = allTags
                 }
             }
+
+            // إذا كان فيلماً أو حلقة فردية مستقلة
             return if (isMovie) {
                 newMovieLoadResponse(title, url, TvType.Movie, url) {
                     this.posterUrl = poster
