@@ -66,7 +66,6 @@ class BrstejProvider : MainAPI() {
     }
 
     private fun Element.toSearchResponse(): SearchResponse? {
-        // 1. كروت المسلسلات العلوية في الأقسام (pcg-series-card)
         val seriesCard = this.selectFirst("a.pcg-series-card")
         if (seriesCard != null) {
             val href = seriesCard.attr("href")
@@ -84,8 +83,6 @@ class BrstejProvider : MainAPI() {
                 this.posterUrl = posterUrl
             }
         }
-
-        // 2. كروت البحث (prs-card) وكروت الحلقات والأفلام (pcg-card / pm-video-thumb)
         val titleLinkElement = this.selectFirst(".prs-caption h3 a, .pcg-caption h3 a, div.caption h3 a, a.pcg-card-title")
             ?: this.selectFirst("a.prs-image, div.pm-video-thumb a:has(img), .pcg-media a:has(img)")
             ?: return null
@@ -99,8 +96,6 @@ class BrstejProvider : MainAPI() {
         if (title.isBlank()) {
             return null
         }
-
-        // التقاط الصورة من عناصر البحث الجديدة أو الأقسام
         val img = this.selectFirst(".prs-image img, .pcg-media img, div.pm-video-thumb img")
         val rawPoster = img?.attr("data-echo")
             ?: img?.attr("data-original")
@@ -173,13 +168,10 @@ class BrstejProvider : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        // البحث على الرابط الجديد
         val url = "$mainUrl/search.php?keywords=$query"
 
         try {
             val document = app.get(url).document
-
-            // السليكتور الجديد المخصص لنتائج البحث prs-grid
             val selector = """
                 ul.prs-grid > li,
                 article.prs-card,
