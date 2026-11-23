@@ -66,6 +66,7 @@ class BrstejProvider : MainAPI() {
     }
 
     private fun Element.toSearchResponse(): SearchResponse? {
+        // 1. فحص كروت المسلسلات (pcg-series-card)
         val seriesCard = this.selectFirst("a.pcg-series-card")
         if (seriesCard != null) {
             val href = seriesCard.attr("href")
@@ -83,6 +84,8 @@ class BrstejProvider : MainAPI() {
                 this.posterUrl = posterUrl
             }
         }
+
+        // 2. فحص كروت نتائج البحث (prs-card) وبطاقات الحلقات والأفلام (pcg-card / pm-video-thumb)
         val titleLinkElement = this.selectFirst(".prs-caption h3 a, .pcg-caption h3 a, div.caption h3 a, a.pcg-card-title")
             ?: this.selectFirst("a.prs-image, div.pm-video-thumb a:has(img), .pcg-media a:has(img)")
             ?: return null
@@ -96,6 +99,7 @@ class BrstejProvider : MainAPI() {
         if (title.isBlank()) {
             return null
         }
+
         val img = this.selectFirst(".prs-image img, .pcg-media img, div.pm-video-thumb img")
         val rawPoster = img?.attr("data-echo")
             ?: img?.attr("data-original")
@@ -103,18 +107,14 @@ class BrstejProvider : MainAPI() {
         val posterUrl = cleanPosterUrl(rawPoster)
 
         val fullUrl = buildAbsoluteUrl(href)
-        val type = if (fullUrl.contains("series1.php") || fullUrl.contains("view-serie.php") || title.contains("مسلسل")) {
-            TvType.TvSeries
-        } else {
-            TvType.Movie
-        }
+        val isSeries = fullUrl.contains("series1.php") || fullUrl.contains("view-serie.php") || title.contains("مسلسل")
 
-        return if (type == TvType.TvSeries) {
-            newTvSeriesSearchResponse(title, fullUrl, type) {
+        return if (isSeries) {
+            newTvSeriesSearchResponse(title, fullUrl, TvType.TvSeries) {
                 this.posterUrl = posterUrl
             }
         } else {
-            newMovieSearchResponse(title, fullUrl, type) {
+            newMovieSearchResponse(title, fullUrl, TvType.Movie) {
                 this.posterUrl = posterUrl
             }
         }
@@ -172,6 +172,7 @@ class BrstejProvider : MainAPI() {
 
         try {
             val document = app.get(url).document
+
             val selector = """
                 ul.prs-grid > li,
                 article.prs-card,
@@ -195,87 +196,120 @@ class BrstejProvider : MainAPI() {
         try {
             val document = app.get(url, timeout = 15).document
 
-            val title = document.selectFirst("div.pm-video-heading h1, h1#pcg-title, h1")?.text()?.trim()
-            if (title.isNullOrBlank()) {
-                return null
-            }
+            val title = document.selectFirst("#pds-title, .pwr-heading h1, div.pm-video-heading h1, h1")?.text()?.trim()
+                ?: return null
 
-            val poster = cleanPosterUrl(document.selectFirst("meta[property=og:image]")?.attr("content"))
+            val poster = cleanPosterUrl(
+                document.selectFirst("meta[property=og:image]")?.attr("content")
+                    ?: document.selectFirst(".pds-art img, .pwu-poster-image, #BiBplayer img")?.attr("src")
+            )
 
-            val description = document.selectFirst("div.pm-video-description > div.txtv, div.pm-category-description, p.pcg-intro-summary")?.text()?.trim()
+            val description = document.selectFirst(".pds-description, .pwr-description p, div.pm-video-description > div.txtv, meta[property=og:description]")?.text()?.trim()
 
-            val categoryTags = document.select("dl.dl-horizontal p strong:contains(اقسام) ~ span a span, .pcg-breadcrumb li a")
+            val categoryTags = document.select(".pds-crumb li a, .pwr-breadcrumb a, dl.dl-horizontal p strong:contains(اقسام) ~ span a span")
                 .map { it.text().trim() }
-                .filter { it.isNotBlank() }
+                .filter { it.isNotBlank() && !it.contains("الرئيسية") && !it.contains("الأقسام") }
 
-            val keywordTags = document.select("dl.dl-horizontal strong:contains(الكلمات الدلالية) ~ a")
+            val keywordTags = document.select(".pwr-meta dd a, dl.dl-horizontal strong:contains(الكلمات الدلالية) ~ a, meta[name=keywords]")
                 .map { it.text().trim() }
                 .filter { it.isNotBlank() }
 
             val allTags = (categoryTags + keywordTags).distinct()
+            val isMovie = allTags.any { it.contains("افلام") || it.contains("فلم") } || title.contains("فيلم")
 
-            val isMovieByTag = allTags.any { it.contains("افلام", ignoreCase = true) || it.contains("فلم", ignoreCase = true) }
-            val hasSeasonBox = document.selectFirst("div.SeasonsBox") != null
-            val seasonListItems = document.select("div.SeasonsBoxUL ul li")
-            val hasActualEpisodes = seasonListItems.any {
-                val seasonId = it.attr("data-serie")
-                document.select("div.SeasonsEpisodes[data-serie='${seasonId}'] a").isNotEmpty()
-            }
+            val episodes = mutableListOf<Episode>()
 
-            val isSeries = (hasSeasonBox && hasActualEpisodes && !isMovieByTag) || url.contains("series1.php")
+            // 1. استخراج الحلقات من صفحة المسلسل الرسمية (series1.php)
+            val seasonSections = document.select("section.pds-season")
+            if (seasonSections.isNotEmpty()) {
+                for (seasonSec in seasonSections) {
+                    val seasonName = seasonSec.selectFirst(".pds-season-heading h3")?.text() ?: ""
+                    val seasonNum = Regex("""\d+""").find(seasonName)?.value?.toIntOrNull() 
+                        ?: Regex("""pds-season-(\d+)""").find(seasonSec.id())?.groupValues?.get(1)?.toIntOrNull() 
+                        ?: 1
 
-            if (isSeries) {
-                val episodes = mutableListOf<Episode>()
-
-                for (seasonLi in seasonListItems) {
-                    val seasonName = seasonLi.text().trim()
-                    val seasonId = seasonLi.attr("data-serie")
-                    val seasonNum = seasonId.toIntOrNull()
-
-                    if (seasonId.isNullOrBlank()) {
-                        continue
-                    }
-
-                    val episodesSelector = "div.SeasonsEpisodes[data-serie='${seasonId}'] a"
-                    val episodeElements = document.select(episodesSelector)
-
-                    episodeElements.forEach { epElement ->
-                        val epUrlRaw = epElement.attr("href")
-                        if (epUrlRaw.isBlank()) {
-                            return@forEach
-                        }
-
-                        val epUrl = buildAbsoluteUrl(epUrlRaw)
-                        val epName = epElement.attr("title").ifBlank { epElement.text() }
-                        val epNum = epElement.selectFirst("em")?.text()?.toIntOrNull()
+                    seasonSec.select(".pds-episodes article.pds-episode").forEach { epArticle ->
+                        val epLink = epArticle.selectFirst("h4 a, a.pds-thumb") ?: return@forEach
+                        val epUrl = buildAbsoluteUrl(epLink.attr("href"))
+                        val epName = epArticle.selectFirst("h4 a")?.attr("title")?.ifBlank { epArticle.selectFirst("h4 a")?.text() } 
+                            ?: epLink.text().trim()
+                        val epNum = Regex("""\d+""").find(epName)?.value?.toIntOrNull() 
+                            ?: epArticle.attr("data-order").toIntOrNull()?.plus(1)
+                        val epPoster = cleanPosterUrl(epArticle.selectFirst("img")?.attr("src")) ?: poster
 
                         episodes.add(
                             newEpisode(epUrl) {
-                                data = epUrl
-                                name = epName
-                                season = seasonNum
-                                episode = epNum
-                                posterUrl = poster
+                                this.name = epName
+                                this.season = seasonNum
+                                this.episode = epNum
+                                this.posterUrl = epPoster
                             }
                         )
                     }
                 }
+            }
 
-                val sorted = episodes.sortedWith(compareBy<Episode> { it.season ?: Int.MAX_VALUE }
-                    .thenBy { it.episode ?: Int.MAX_VALUE })
+            // 2. استخراج الحلقات من صفحة المشاهدة الموحدة (video.php) إن وجدت قائمة الحلقات
+            val watchSeasonPanels = document.select("div.pwr-season-panel")
+            if (watchSeasonPanels.isNotEmpty()) {
+                for (panel in watchSeasonPanels) {
+                    val fallbackHeading = panel.selectFirst("h3.pwr-season-fallback")?.text() ?: ""
+                    val seasonNum = Regex("""\d+""").find(fallbackHeading)?.value?.toIntOrNull() ?: 1
+
+                    panel.select("ul.pwr-episode-grid li a").forEach { epA ->
+                        val epUrl = buildAbsoluteUrl(epA.attr("href"))
+                        val epName = epA.attr("title").ifBlank { "الحلقة " + epA.selectFirst("strong")?.text() }
+                        val epNum = epA.selectFirst("strong")?.text()?.toIntOrNull() 
+                            ?: Regex("""\d+""").find(epName)?.value?.toIntOrNull()
+
+                        episodes.add(
+                            newEpisode(epUrl) {
+                                this.name = epName
+                                this.season = seasonNum
+                                this.episode = epNum
+                                this.posterUrl = poster
+                            }
+                        )
+                    }
+                }
+            }
+
+            // إذا وجدنا حلقات أو كان الرابط لمسلسل
+            if (episodes.isNotEmpty() || url.contains("series1.php")) {
+                val sorted = episodes.distinctBy { it.data }.sortedWith(
+                    compareBy<Episode> { it.season ?: 1 }
+                        .thenBy { it.episode ?: Int.MAX_VALUE }
+                )
 
                 return newTvSeriesLoadResponse(title, url, TvType.TvSeries, sorted) {
                     this.posterUrl = poster
                     this.plot = description
                     this.tags = allTags
                 }
+            }
+
+            // إذا كان فيلماً أو حلقة فردية مستقلة
+            return if (isMovie) {
+                newMovieLoadResponse(title, url, TvType.Movie, url) {
+                    this.posterUrl = poster
+                    this.plot = description
+                    this.tags = allTags
+                }
             } else {
-                return newMovieLoadResponse(title, url, TvType.Movie, url) {
+                newTvSeriesLoadResponse(title, url, TvType.TvSeries, listOf(
+                    newEpisode(url) {
+                        this.name = title
+                        this.season = 1
+                        this.episode = Regex("""الحلقة\s*(\d+)""").find(title)?.groupValues?.get(1)?.toIntOrNull() ?: 1
+                        this.posterUrl = poster
+                    }
+                )) {
                     this.posterUrl = poster
                     this.plot = description
                     this.tags = allTags
                 }
             }
+
         } catch (e: Exception) {
             e.printStackTrace()
             return null
@@ -459,12 +493,12 @@ class BrstejProvider : MainAPI() {
 
         try {
             val watchDoc = app.get(data, referer = mainUrl, timeout = 15).document
-            val playHrefRaw = watchDoc.selectFirst("a.xtgo")?.attr("href")
+            val playHrefRaw = watchDoc.selectFirst("a.xtgo, a.pwu-watch-link")?.attr("href")
 
             val embedLinksToProcess = mutableListOf<Triple<String, String, String?>>()
 
             if (!playHrefRaw.isNullOrBlank()) {
-                val playUrl = buildAbsoluteUrl(playHrefRaw)
+                val playUrl = buildAbsoluteUrl(playHrefRaw, data)
                 val playDoc = app.get(playUrl, referer = data, timeout = 15).document
 
                 playDoc.select("div#WatchServers button.watchButton, div#WatchServers button.watchbutton")
