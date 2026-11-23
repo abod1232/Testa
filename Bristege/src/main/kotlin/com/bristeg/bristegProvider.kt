@@ -66,6 +66,7 @@ class BrstejProvider : MainAPI() {
     }
 
     private fun Element.toSearchResponse(): SearchResponse? {
+        // 1. كروت المسلسلات العلوية في الأقسام (pcg-series-card)
         val seriesCard = this.selectFirst("a.pcg-series-card")
         if (seriesCard != null) {
             val href = seriesCard.attr("href")
@@ -83,8 +84,10 @@ class BrstejProvider : MainAPI() {
                 this.posterUrl = posterUrl
             }
         }
-        val titleLinkElement = this.selectFirst(".pcg-caption h3 a, div.caption h3 a, a.pcg-card-title")
-            ?: this.selectFirst("div.pm-video-thumb a:has(img), .pcg-media a:has(img)")
+
+        // 2. كروت البحث (prs-card) وكروت الحلقات والأفلام (pcg-card / pm-video-thumb)
+        val titleLinkElement = this.selectFirst(".prs-caption h3 a, .pcg-caption h3 a, div.caption h3 a, a.pcg-card-title")
+            ?: this.selectFirst("a.prs-image, div.pm-video-thumb a:has(img), .pcg-media a:has(img)")
             ?: return null
 
         val href = titleLinkElement.attr("href")
@@ -97,14 +100,15 @@ class BrstejProvider : MainAPI() {
             return null
         }
 
-        val img = this.selectFirst(".pcg-media img, div.pm-video-thumb img")
+        // التقاط الصورة من عناصر البحث الجديدة أو الأقسام
+        val img = this.selectFirst(".prs-image img, .pcg-media img, div.pm-video-thumb img")
         val rawPoster = img?.attr("data-echo")
             ?: img?.attr("data-original")
             ?: img?.attr("src")
         val posterUrl = cleanPosterUrl(rawPoster)
 
         val fullUrl = buildAbsoluteUrl(href)
-        val type = if (fullUrl.contains("series1.php") || fullUrl.contains("view-serie.php")) {
+        val type = if (fullUrl.contains("series1.php") || fullUrl.contains("view-serie.php") || title.contains("مسلسل")) {
             TvType.TvSeries
         } else {
             TvType.Movie
@@ -147,6 +151,7 @@ class BrstejProvider : MainAPI() {
 
         try {
             val document = app.get(url).document
+
             val selector = """
                 ul.pcg-series-grid > li, 
                 ul.pcg-episodes-grid > li, 
@@ -168,12 +173,19 @@ class BrstejProvider : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
+        // البحث على الرابط الجديد
         val url = "$mainUrl/search.php?keywords=$query"
 
         try {
             val document = app.get(url).document
 
-            val selector = "ul.pm-ul-browse-videos > li, ul.pcg-episodes-grid > li, div.thumbnail"
+            // السليكتور الجديد المخصص لنتائج البحث prs-grid
+            val selector = """
+                ul.prs-grid > li,
+                article.prs-card,
+                ul.pm-ul-browse-videos > li,
+                ul.pcg-episodes-grid > li
+            """.trimIndent()
 
             val items = document.select(selector)
 
