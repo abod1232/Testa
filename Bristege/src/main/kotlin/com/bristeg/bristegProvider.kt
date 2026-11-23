@@ -344,7 +344,10 @@ class BrstejProvider : MainAPI() {
                     """eval\(function\s*\(p,a,c,k,e,d\)\s*\{[\s\S]*?\}\s*\(\s*(['"])(.*?)\1\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])(.*?)\5\.split\(['"]\|['"]\)\s*\)\s*\)""",
                     RegexOption.DOT_MATCHES_ALL
                 )
-                val m = regex.find(packedJs) ?: return null
+                val m = regex.find(packedJs)
+                if (m == null) {
+                    return null
+                }
 
                 val payloadRaw = m.groupValues[2]
                 val base = m.groupValues[3].toIntOrNull() ?: return null
@@ -364,7 +367,10 @@ class BrstejProvider : MainAPI() {
                     lookup[mr.value] ?: mr.value
                 }
 
-                return if (unpacked.isBlank()) null else unpacked
+                if (unpacked.isBlank()) {
+                    return null
+                }
+                return unpacked
             } catch (_: Exception) {
                 return null
             }
@@ -482,12 +488,12 @@ class BrstejProvider : MainAPI() {
 
         try {
             val watchDoc = app.get(data, referer = mainUrl, timeout = 15).document
-            val playHrefRaw = watchDoc.selectFirst("a.xtgo, a.pwu-watch-link")?.attr("href")
+            val playHrefRaw = watchDoc.selectFirst("a.xtgo")?.attr("href")
 
             val embedLinksToProcess = mutableListOf<Triple<String, String, String?>>()
 
             if (!playHrefRaw.isNullOrBlank()) {
-                val playUrl = buildAbsoluteUrl(playHrefRaw, data)
+                val playUrl = buildAbsoluteUrl(playHrefRaw)
                 val playDoc = app.get(playUrl, referer = data, timeout = 15).document
 
                 playDoc.select("div#WatchServers button.watchButton, div#WatchServers button.watchbutton")
