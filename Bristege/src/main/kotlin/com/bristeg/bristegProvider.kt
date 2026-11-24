@@ -55,7 +55,6 @@ class BrstejProvider : MainAPI() {
         }
         return u
     }
-
     private fun Element.getImgUrl(): String? {
         val img = this.selectFirst("img")
         val source = this.selectFirst("source[srcset]")?.attr("srcset")?.substringBefore(" ")?.substringBefore(",")?.trim()
@@ -107,7 +106,6 @@ class BrstejProvider : MainAPI() {
         if (title.isBlank()) {
             return null
         }
-
         val posterUrl = this.getImgUrl()
 
         val fullUrl = buildAbsoluteUrl(href)
@@ -125,16 +123,13 @@ class BrstejProvider : MainAPI() {
     }
 
     override val mainPage = mainPageOf(
-        "home03" to "الرئيسية",
+        
         "cat03.php?cat=prss7-2025" to "مسلسلات برستيج",
-        "cat03.php?cat=movies2-2224" to "افلام",
         "cat03.php?cat=ramdan2026" to "مسلسلات رمضان 2026",
         "cat03.php?cat=arab8-2025" to "مسلسلات عربية",
-        "cat03.php?cat=ty9-2025" to "مسلسلات تركية 2026",
-        "cat03.php?cat=eg8-2025" to "مسلسلات مصرية",
-        "cat03.php?cat=syy5-2025" to "مسلسلات شامية",
-        "cat03.php?cat=5a7-2024" to "مسلسلات خليجية",
-        "new-videos.php" to "أحدث الإضافات"
+        "cat03.php?cat=ty9-2025" to "مسلسلات تركية 2026"
+ 
+        
     )
 
     override suspend fun getMainPage(
@@ -250,7 +245,6 @@ class BrstejProvider : MainAPI() {
                     }
                 }
             }
-
             val watchSeasonPanels = document.select("div.pwr-season-panel")
             if (watchSeasonPanels.isNotEmpty()) {
                 for (panel in watchSeasonPanels) {
@@ -274,7 +268,6 @@ class BrstejProvider : MainAPI() {
                     }
                 }
             }
-
             if (episodes.isNotEmpty() || url.contains("series1.php")) {
                 val sorted = episodes.distinctBy { it.data }.sortedWith(
                     compareBy<Episode> { it.season ?: 1 }
@@ -287,7 +280,6 @@ class BrstejProvider : MainAPI() {
                     this.tags = allTags
                 }
             }
-
             return if (isMovie) {
                 newMovieLoadResponse(title, url, TvType.Movie, url) {
                     this.posterUrl = poster
@@ -385,18 +377,16 @@ class BrstejProvider : MainAPI() {
                 return null
             }
         }
+
         fun findVideoInText(text: String): String? {
             val patterns = listOf(
                 Regex("""(?:file|src)\s*:\s*['"](https?://[^'"]+)['"]"""),
                 Regex("""['"](https?://[^\s'"]+\.(?:m3u8|mp4)[^\s'"]*)['"]"""),
-                Regex("""(https?://[^\s'"<>]+\.(?:m3u8|mp4)[^\s'"<>]*)""")
+                Regex("""(https?://[^\s'"]+\.(?:m3u8|mp4)[^\s'"]*)""")
             )
             for (p in patterns) {
                 p.find(text)?.groupValues?.get(1)?.let {
-                    val cleaned = it.replace("""\u0026""", "&").replace("&amp;", "&").replace("""\/""", "/")
-                    if (!cleaned.contains("okcdn.ru")) {
-                        return cleaned
-                    }
+                    return it
                 }
             }
             return null
@@ -410,11 +400,6 @@ class BrstejProvider : MainAPI() {
             callback: (ExtractorLink) -> Unit,
             subtitleCallback: (SubtitleFile) -> Unit
         ) {
-            if (embedUrl.contains("ok.ru") || embedUrl.contains("vk.com") || embedUrl.contains("odnoklassniki")) {
-                loadExtractor(embedUrl, referer, subtitleCallback, callback)
-                return
-            }
-
             suspend fun unpackAndExtractInternal(
                 packedJsCode: String,
                 currentEmbedUrl: String
@@ -436,18 +421,7 @@ class BrstejProvider : MainAPI() {
 
             try {
                 val embedText = app.get(embedUrl, referer = referer, timeout = 15).text
-                val okMatch = Regex("""(https?://(?:www\.)?(?:ok\.ru|odnoklassniki\.ru)/(?:video|videoembed)/\d+)""").find(embedText)
-                if (okMatch != null) {
-                    loadExtractor(okMatch.groupValues[1], embedUrl, subtitleCallback, callback)
-                    return
-                }
-                val innerIframe = Regex("""<iframe[^>]+src=["'](https?://[^"']+)["']""").find(embedText)?.groupValues?.get(1)
-                if (!innerIframe.isNullOrBlank()) {
-                    if (innerIframe.contains("ok.ru") || innerIframe.contains("vk.com")) {
-                        loadExtractor(innerIframe, embedUrl, subtitleCallback, callback)
-                        return
-                    }
-                }
+
                 findVideoInText(embedText)?.let {
                     callback(
                         newExtractorLink(
@@ -460,6 +434,7 @@ class BrstejProvider : MainAPI() {
                         })
                     return
                 }
+
                 val jwPlayerScriptMatch =
                     Regex("""jwplayer\.key\s*=\s*['"]([^'"]+)['"];[\s\S]*?(jwplayer\.setup\s*\(\{([\s\S]*?)\}\);)""").find(
                         embedText
@@ -481,6 +456,7 @@ class BrstejProvider : MainAPI() {
                         return
                     }
                 }
+
                 val packedJsMatch =
                     Regex("""eval\((function\s*\(.*)\)\)""", RegexOption.DOT_MATCHES_ALL).find(
                         embedText
@@ -500,6 +476,15 @@ class BrstejProvider : MainAPI() {
                             })
                         return
                     }
+                }
+                val innerIframe = Regex("""<iframe[^>]+src=["'](https?://[^"']+)["']""").find(embedText)?.groupValues?.get(1)
+                if (!innerIframe.isNullOrBlank()) {
+                    loadExtractor(
+                        innerIframe,
+                        embedUrl,
+                        subtitleCallback,
+                        callback
+                    )
                 }
                 loadExtractor(
                     embedUrl,
