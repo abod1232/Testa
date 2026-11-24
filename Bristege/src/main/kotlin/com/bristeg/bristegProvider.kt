@@ -5,6 +5,7 @@ import com.lagradost.cloudstream3.utils.loadExtractor
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.Qualities
 import org.jsoup.nodes.Element
+import org.jsoup.nodes.Document
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -32,6 +33,20 @@ class BrstejProvider : MainAPI() {
         TvType.TvSeries,
         TvType.Movie
     )
+
+    // ترويسات متصفح حقيقية لحل مشكلة unexpected end of stream
+    private val standardHeaders = mapOf(
+        "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language" to "ar,en-US;q=0.9,en;q=0.8",
+        "Connection" to "keep-alive"
+    )
+
+    private suspend fun getDocument(url: String, referer: String? = null): Document {
+        val headers = standardHeaders.toMutableMap()
+        if (referer != null) headers["Referer"] = referer
+        return app.get(url, headers = headers, timeout = 25).document
+    }
 
     private fun cleanPosterUrl(url: String?): String? {
         if (url == null || url.isBlank()) return null
@@ -83,6 +98,7 @@ class BrstejProvider : MainAPI() {
                 this.posterUrl = posterUrl
             }
         }
+
         val titleLinkElement = this.selectFirst(".prs-caption h3 a, .pcg-caption h3 a, div.caption h3 a, a.pcg-card-title")
             ?: this.selectFirst("a.prs-image, div.pm-video-thumb a:has(img), .pcg-media a:has(img)")
             ?: return null
@@ -142,7 +158,7 @@ class BrstejProvider : MainAPI() {
         }
 
         try {
-            val document = app.get(url).document
+            val document = getDocument(url)
 
             val selector = """
                 ul.pcg-series-grid > li, 
@@ -168,7 +184,7 @@ class BrstejProvider : MainAPI() {
         val url = "$mainUrl/search.php?keywords=$query"
 
         try {
-            val document = app.get(url).document
+            val document = getDocument(url)
 
             val selector = """
                 ul.prs-grid > li,
@@ -191,7 +207,7 @@ class BrstejProvider : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse? {
         try {
-            val document = app.get(url, timeout = 15).document
+            val document = getDocument(url)
 
             val title = document.selectFirst("#pds-title, .pwr-heading h1, div.pm-video-heading h1, h1")?.text()?.trim()
                 ?: return null
@@ -215,6 +231,8 @@ class BrstejProvider : MainAPI() {
             val isMovie = allTags.any { it.contains("افلام") || it.contains("فلم") } || title.contains("فيلم")
 
             val episodes = mutableListOf<Episode>()
+
+            // 1. استخراج الحلقات من صفحة المسلسل الرسمية (series1.php)
             val seasonSections = document.select("section.pds-season")
             if (seasonSections.isNotEmpty()) {
                 for (seasonSec in seasonSections) {
@@ -243,6 +261,8 @@ class BrstejProvider : MainAPI() {
                     }
                 }
             }
+
+            // 2. استخراج الحلقات من صفحة المشاهدة (video.php)
             val watchSeasonPanels = document.select("div.pwr-season-panel")
             if (watchSeasonPanels.isNotEmpty()) {
                 for (panel in watchSeasonPanels) {
@@ -266,6 +286,7 @@ class BrstejProvider : MainAPI() {
                     }
                 }
             }
+
             if (episodes.isNotEmpty() || url.contains("series1.php")) {
                 val sorted = episodes.distinctBy { it.data }.sortedWith(
                     compareBy<Episode> { it.season ?: 1 }
@@ -278,6 +299,7 @@ class BrstejProvider : MainAPI() {
                     this.tags = allTags
                 }
             }
+
             return if (isMovie) {
                 newMovieLoadResponse(title, url, TvType.Movie, url) {
                     this.posterUrl = poster
@@ -344,10 +366,7 @@ class BrstejProvider : MainAPI() {
                     """eval\(function\s*\(p,a,c,k,e,d\)\s*\{[\s\S]*?\}\s*\(\s*(['"])(.*?)\1\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])(.*?)\5\.split\(['"]\|['"]\)\s*\)\s*\)""",
                     RegexOption.DOT_MATCHES_ALL
                 )
-                val m = regex.find(packedJs)
-                if (m == null) {
-                    return null
-                }
+                val m = regex.find(packedJs) ?: return null
 
                 val payloadRaw = m.groupValues[2]
                 val base = m.groupValues[3].toIntOrNull() ?: return null
@@ -367,10 +386,7 @@ class BrstejProvider : MainAPI() {
                     lookup[mr.value] ?: mr.value
                 }
 
-                if (unpacked.isBlank()) {
-                    return null
-                }
-                return unpacked
+                return if (unpacked.isBlank()) null else unpacked
             } catch (_: Exception) {
                 return null
             }
@@ -398,33 +414,29 @@ class BrstejProvider : MainAPI() {
             callback: (ExtractorLink) -> Unit,
             subtitleCallback: (SubtitleFile) -> Unit
         ) {
-            suspend fun unpackAndExtractInternal(
-                packedJsCode: String,
-                currentEmbedUrl: String
-            ): String? {
-                var unpacked: String? = null
-                try {
-                    unpacked = JsUnpacker(packedJsCode).unpack()
-                } catch (_: Exception) {}
+            // 1. تجربة استدعاء loadExtractor مباشرة (خاصة لسيرفرات ok.ru أو vk أو dood أو غيرها)
+            val isKnownExtractor = loadExtractor(
+                embedUrl,
+                referer,
+                subtitleCallback,
+                callback
+            )
+            if (isKnownExtractor) return
 
-                if (unpacked.isNullOrBlank()) {
-                    unpacked = unpackJs(packedJsCode)
-                }
-
-                if (unpacked.isNullOrBlank()) {
-                    return null
-                }
-                return findVideoInText(unpacked)
-            }
-
+            // 2. إذا لم يكن سيرفر معروفاً في المكتبة، نقوم بفك تشفيره يدوياً
             try {
-                val embedText = app.get(embedUrl, referer = referer, timeout = 15).text
+                val embedHeaders = standardHeaders.toMutableMap().apply {
+                    put("Referer", referer)
+                }
+                val embedResponse = app.get(embedUrl, headers = embedHeaders, timeout = 15)
+                val embedText = embedResponse.text
 
+                // البحث عن رابط فيديو مباشر في النص العادي
                 findVideoInText(embedText)?.let {
                     callback(
                         newExtractorLink(
                             this@BrstejProvider.name,
-                            "$serverName (direct)",
+                            "$serverName (Direct)",
                             it
                         ) {
                             this.referer = embedUrl
@@ -433,114 +445,98 @@ class BrstejProvider : MainAPI() {
                     return
                 }
 
-                val jwPlayerScriptMatch =
-                    Regex("""jwplayer\.key\s*=\s*['"]([^'"]+)['"];[\s\S]*?(jwplayer\.setup\s*\(\{([\s\S]*?)\}\);)""").find(
-                        embedText
-                    )
-                if (jwPlayerScriptMatch != null) {
-                    val jwSetupStatement = jwPlayerScriptMatch.groupValues[2]
-                    val videoUrl = unpackAndExtractInternal(jwSetupStatement, embedUrl)
-
-                    if (videoUrl != null) {
-                        callback(
-                            newExtractorLink(
-                                this@BrstejProvider.name,
-                                "$serverName (JW Player)",
-                                videoUrl
-                            ) {
-                                this.referer = embedUrl
-                                this.quality = quality
-                            })
-                        return
-                    }
-                }
-
-                val packedJsMatch =
-                    Regex("""eval\((function\s*\(.*)\)\)""", RegexOption.DOT_MATCHES_ALL).find(
-                        embedText
-                    )
+                // فحص وفك تشفير الجافاسكربت المشفر (Packed JS)
+                val packedJsMatch = Regex("""eval\((function\s*\(.*)\)\)""", RegexOption.DOT_MATCHES_ALL).find(embedText)
                 if (packedJsMatch != null) {
                     val fullEval = "eval(${packedJsMatch.groupValues[1]})"
-                    val videoUrl = unpackAndExtractInternal(fullEval, embedUrl)
-                    if (videoUrl != null) {
-                        callback(
-                            newExtractorLink(
-                                this@BrstejProvider.name,
-                                "$serverName ",
-                                videoUrl
-                            ) {
-                                this.referer = embedUrl
-                                this.quality = quality
-                            })
-                        return
+                    var unpacked: String? = null
+                    try {
+                        unpacked = JsUnpacker(fullEval).unpack()
+                    } catch (_: Exception) {}
+                    if (unpacked.isNullOrBlank()) {
+                        unpacked = unpackJs(fullEval)
+                    }
+
+                    if (!unpacked.isNullOrBlank()) {
+                        findVideoInText(unpacked)?.let {
+                            callback(
+                                newExtractorLink(
+                                    this@BrstejProvider.name,
+                                    "$serverName",
+                                    it
+                                ) {
+                                    this.referer = embedUrl
+                                    this.quality = quality
+                                })
+                            return
+                        }
                     }
                 }
 
-                loadExtractor(
-                    embedUrl,
-                    referer,
-                    subtitleCallback,
-                    callback
-                )
+                // 3. إذا لم يجد، يفحص ما إذا كان السيرفر يحتوي على Iframe داخلي (مثل مشغلات الطرف الثالث)
+                val innerIframe = embedResponse.document.selectFirst("iframe")?.attr("src")
+                if (!innerIframe.isNullOrBlank()) {
+                    val fullInnerIframe = buildAbsoluteUrl(innerIframe, embedUrl)
+                    loadExtractor(
+                        fullInnerIframe,
+                        embedUrl,
+                        subtitleCallback,
+                        callback
+                    )
+                }
 
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+                // محاولة أخيرة عبر loadExtractor في حال فشل الاتصال اليدوي
+                try {
+                    loadExtractor(embedUrl, referer, subtitleCallback, callback)
+                } catch (_: Exception) {}
+            }
         }
 
         try {
-            val watchDoc = app.get(data, referer = mainUrl, timeout = 15).document
-            val playHrefRaw = watchDoc.selectFirst("a.xtgo")?.attr("href")
+            val watchDoc = getDocument(data, mainUrl)
+            val playHrefRaw = watchDoc.selectFirst("a.xtgo, a.pwu-watch-link")?.attr("href")
 
             val embedLinksToProcess = mutableListOf<Triple<String, String, String?>>()
 
-            if (!playHrefRaw.isNullOrBlank()) {
-                val playUrl = buildAbsoluteUrl(playHrefRaw)
-                val playDoc = app.get(playUrl, referer = data, timeout = 15).document
-
-                playDoc.select("div#WatchServers button.watchButton, div#WatchServers button.watchbutton")
-                    .forEach { btn ->
-                        val rawEmbedUrl = btn.attr("data-embed-url").ifBlank { btn.attr("data-embed") }
-                        val serverName = btn.text().trim()
-                        val qualityStr = "HD"
-                        if (rawEmbedUrl.isNotBlank()) {
-                            embedLinksToProcess.add(Triple(buildAbsoluteUrl(rawEmbedUrl, playUrl), serverName, qualityStr))
-                        }
-                    }
-
-                val iframeSrcFromPlayPage = playDoc.selectFirst("div#Playerholder iframe")?.attr("src")
-                if (!iframeSrcFromPlayPage.isNullOrBlank()) {
-                    embedLinksToProcess.add(Triple(buildAbsoluteUrl(iframeSrcFromPlayPage, playUrl), "Player Iframe", "HD"))
-                }
+            val targetDoc = if (!playHrefRaw.isNullOrBlank()) {
+                val playUrl = buildAbsoluteUrl(playHrefRaw, data)
+                getDocument(playUrl, data)
             } else {
-                watchDoc.select("div#WatchServers button.watchButton, div#WatchServers button.watchbutton")
-                    .forEach { btn ->
-                        val rawEmbedUrl = btn.attr("data-embed-url").ifBlank { btn.attr("data-embed") }
-                        val serverName = btn.text().trim()
-                        val qualityStr = "HD"
-                        if (rawEmbedUrl.isNotBlank()) {
-                            embedLinksToProcess.add(Triple(buildAbsoluteUrl(rawEmbedUrl, data), serverName, qualityStr))
-                        }
-                    }
-
-                val iframeSrcFromWatchPage = watchDoc.selectFirst("div#Playerholder iframe")?.attr("src")
-                if (!iframeSrcFromWatchPage.isNullOrBlank()) {
-                    embedLinksToProcess.add(Triple(buildAbsoluteUrl(iframeSrcFromWatchPage, data), "Player Iframe", "HD"))
-                }
+                watchDoc
             }
 
-            val processedUrls = mutableSetOf<String>()
+            val currentUrl = if (!playHrefRaw.isNullOrBlank()) buildAbsoluteUrl(playHrefRaw, data) else data
+
+            // استخراج أزرار السيرفرات بدون تكرار
+            targetDoc.select("div#WatchServers button.watchButton, div#WatchServers button.watchbutton")
+                .forEach { btn ->
+                    val rawEmbedUrl = btn.attr("data-embed-url").ifBlank { btn.attr("data-embed") }
+                    val serverName = btn.text().trim()
+                    if (rawEmbedUrl.isNotBlank()) {
+                        embedLinksToProcess.add(Triple(buildAbsoluteUrl(rawEmbedUrl, currentUrl), serverName, "HD"))
+                    }
+                }
+
+            // استخراج المشغل المعروض في الـ Iframe إن وجد
+            val iframeSrc = targetDoc.selectFirst("div#Playerholder iframe")?.attr("src")
+            if (!iframeSrc.isNullOrBlank()) {
+                embedLinksToProcess.add(Triple(buildAbsoluteUrl(iframeSrc, currentUrl), "سيرفر رئيسي", "HD"))
+            }
+
+            // تصفية الروابط لمنع التكرار نهائياً
+            val uniqueEmbeds = embedLinksToProcess.distinctBy { it.first }
+
             kotlinx.coroutines.coroutineScope {
-                for ((currentEmbedUrl, serverName, qualityStr) in embedLinksToProcess) {
-                    if (processedUrls.add(currentEmbedUrl)) {
-                        val quality = getQualityFromName(qualityStr)
-                        launch {
-                            val actualReferer = if (!playHrefRaw.isNullOrBlank()) buildAbsoluteUrl(playHrefRaw, data) else data
-                            extractFromEmbed(currentEmbedUrl, actualReferer, serverName, quality, callback, subtitleCallback)
-                        }
+                for ((currentEmbedUrl, serverName, qualityStr) in uniqueEmbeds) {
+                    val quality = getQualityFromName(qualityStr)
+                    launch {
+                        extractFromEmbed(currentEmbedUrl, currentUrl, serverName, quality, callback, subtitleCallback)
                     }
                 }
             }
 
-            return processedUrls.isNotEmpty()
+            return uniqueEmbeds.isNotEmpty()
         } catch (_: Exception) {
             return false
         }
