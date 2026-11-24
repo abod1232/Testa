@@ -385,8 +385,6 @@ class BrstejProvider : MainAPI() {
                 return null
             }
         }
-
-        // تم تنظيف الرابط واستثناء okcdn لتجنب التقاط روابط ناقصة وغير مشغلة
         fun findVideoInText(text: String): String? {
             val patterns = listOf(
                 Regex("""(?:file|src)\s*:\s*['"](https?://[^'"]+)['"]"""),
@@ -412,7 +410,6 @@ class BrstejProvider : MainAPI() {
             callback: (ExtractorLink) -> Unit,
             subtitleCallback: (SubtitleFile) -> Unit
         ) {
-            // 1. إذا كان الرابط يخص سيرفر مدعوم مثل ok.ru أو vk، دعه لـ loadExtractor مباشرة ولا تعترضه
             if (embedUrl.contains("ok.ru") || embedUrl.contains("vk.com") || embedUrl.contains("odnoklassniki")) {
                 loadExtractor(embedUrl, referer, subtitleCallback, callback)
                 return
@@ -439,15 +436,11 @@ class BrstejProvider : MainAPI() {
 
             try {
                 val embedText = app.get(embedUrl, referer = referer, timeout = 15).text
-
-                // 2. إذا وجد رابط ok.ru داخل السيرفر (كـ iframe أو نص)، أرسله مباشرة لـ loadExtractor
                 val okMatch = Regex("""(https?://(?:www\.)?(?:ok\.ru|odnoklassniki\.ru)/(?:video|videoembed)/\d+)""").find(embedText)
                 if (okMatch != null) {
                     loadExtractor(okMatch.groupValues[1], embedUrl, subtitleCallback, callback)
                     return
                 }
-
-                // 3. فحص أي iframe داخلي وتمريره لـ loadExtractor
                 val innerIframe = Regex("""<iframe[^>]+src=["'](https?://[^"']+)["']""").find(embedText)?.groupValues?.get(1)
                 if (!innerIframe.isNullOrBlank()) {
                     if (innerIframe.contains("ok.ru") || innerIframe.contains("vk.com")) {
@@ -455,8 +448,6 @@ class BrstejProvider : MainAPI() {
                         return
                     }
                 }
-
-                // 4. استخراج الرابط المباشر العادي للسيرفرات الأخرى
                 findVideoInText(embedText)?.let {
                     callback(
                         newExtractorLink(
@@ -469,8 +460,6 @@ class BrstejProvider : MainAPI() {
                         })
                     return
                 }
-
-                // 5. استخراج JW Player
                 val jwPlayerScriptMatch =
                     Regex("""jwplayer\.key\s*=\s*['"]([^'"]+)['"];[\s\S]*?(jwplayer\.setup\s*\(\{([\s\S]*?)\}\);)""").find(
                         embedText
@@ -492,8 +481,6 @@ class BrstejProvider : MainAPI() {
                         return
                     }
                 }
-
-                // 6. استخراج Packed JS
                 val packedJsMatch =
                     Regex("""eval\((function\s*\(.*)\)\)""", RegexOption.DOT_MATCHES_ALL).find(
                         embedText
@@ -514,8 +501,6 @@ class BrstejProvider : MainAPI() {
                         return
                     }
                 }
-
-                // 7. الحل الأخير: تمرير الرابط لـ loadExtractor
                 loadExtractor(
                     embedUrl,
                     referer,
