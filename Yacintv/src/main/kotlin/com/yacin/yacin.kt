@@ -606,7 +606,7 @@ class YacineTVProvider : MainAPI() {
 
                 val userAgent = streamHeaders["User-Agent"]
                     ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
-                val referer = streamHeaders["Referer"] ?: "http://yacinneeee.live⁠‍⁠ㅤ‌⁠‍⁠"
+                val referer = streamHeaders["Referer"] ?: "http://yacinneeee.live\u2060\u200D\u2060\u3164\u200C\u2060\u200D\u2060⁠‍⁠"
 
                 val finalStreamUrl = resolveDirectStreamUrl(rawUrl, referer, userAgent)
 
