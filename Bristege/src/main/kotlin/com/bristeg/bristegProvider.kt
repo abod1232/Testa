@@ -56,6 +56,20 @@ class BrstejProvider : MainAPI() {
         return u
     }
 
+    // دالة آمنة ومضمونة لاستخراج رابط الصورة وحل مشكلة النصوص الفارغة في Jsoup
+    private fun Element.getImgUrl(): String? {
+        val img = this.selectFirst("img")
+        val source = this.selectFirst("source[srcset]")?.attr("srcset")?.substringBefore(" ")?.substringBefore(",")?.trim()
+
+        val raw = img?.attr("src")?.takeIf { it.isNotBlank() && !it.startsWith("data:") }
+            ?: img?.attr("data-src")?.takeIf { it.isNotBlank() && !it.startsWith("data:") }
+            ?: img?.attr("data-original")?.takeIf { it.isNotBlank() && !it.startsWith("data:") }
+            ?: img?.attr("data-echo")?.takeIf { it.isNotBlank() && !it.startsWith("data:") }
+            ?: source?.takeIf { it.isNotBlank() && !it.startsWith("data:") }
+
+        return cleanPosterUrl(raw)
+    }
+
     private fun buildAbsoluteUrl(href: String?, base: String = mainUrl): String {
         if (href.isNullOrBlank()) return ""
         var h = href.trim()
@@ -74,16 +88,13 @@ class BrstejProvider : MainAPI() {
             }.trim()
 
             if (href.isBlank() || title.isBlank()) return null
-
-            val img = seriesCard.selectFirst(".pcg-series-image img, img")
-            val source = seriesCard.selectFirst("source[srcset]")?.attr("srcset")?.substringBefore(" ")?.substringBefore(",")
-            val rawPoster = img?.attr("data-src") ?: img?.attr("data-original") ?: source ?: img?.attr("src")
-            val posterUrl = cleanPosterUrl(rawPoster)
+            val posterUrl = seriesCard.getImgUrl()
 
             return newTvSeriesSearchResponse(title, buildAbsoluteUrl(href), TvType.TvSeries) {
                 this.posterUrl = posterUrl
             }
         }
+
         val titleLinkElement = this.selectFirst(".prs-caption h3 a, .pcg-caption h3 a, div.caption h3 a, a.pcg-card-title")
             ?: this.selectFirst("a.prs-image, div.pm-video-thumb a:has(img), .pcg-media a:has(img)")
             ?: return null
@@ -98,14 +109,8 @@ class BrstejProvider : MainAPI() {
             return null
         }
 
-        val img = this.selectFirst(".prs-image img, .pcg-media img, div.pm-video-thumb img, img")
-        val source = this.selectFirst("source[srcset]")?.attr("srcset")?.substringBefore(" ")?.substringBefore(",")
-        val rawPoster = img?.attr("data-src")
-            ?: img?.attr("data-original")
-            ?: img?.attr("data-echo")
-            ?: source
-            ?: img?.attr("src")
-        val posterUrl = cleanPosterUrl(rawPoster)
+        // جلب بوستر البحث والأقسام بشكل سليم
+        val posterUrl = this.getImgUrl()
 
         val fullUrl = buildAbsoluteUrl(href)
         val isSeries = fullUrl.contains("series1.php") || fullUrl.contains("view-serie.php") || title.contains("مسلسل")
@@ -175,9 +180,8 @@ class BrstejProvider : MainAPI() {
             val document = app.get(url).document
 
             val selector = """
-                ul.prs-grid > li,
-                article.prs-card,
-                ul.pm-ul-browse-videos > li,
+                ul.prs-grid > li, 
+                ul.pm-ul-browse-videos > li, 
                 ul.pcg-episodes-grid > li
             """.trimIndent()
 
@@ -235,9 +239,7 @@ class BrstejProvider : MainAPI() {
                             ?: epLink.text().trim()
                         val epNum = Regex("""\d+""").find(epName)?.value?.toIntOrNull() 
                             ?: epArticle.attr("data-order").toIntOrNull()?.plus(1)
-                        val epImg = epArticle.selectFirst("img")
-                        val epSource = epArticle.selectFirst("source[srcset]")?.attr("srcset")?.substringBefore(" ")?.substringBefore(",")
-                        val epPoster = cleanPosterUrl(epImg?.attr("data-src") ?: epImg?.attr("src") ?: epSource) ?: poster
+                        val epPoster = epArticle.getImgUrl() ?: poster
 
                         episodes.add(
                             newEpisode(epUrl) {
@@ -482,6 +484,8 @@ class BrstejProvider : MainAPI() {
                         return
                     }
                 }
+
+                // فحص أي iframe داخلي
                 val innerIframe = Regex("""<iframe[^>]+src=["'](https?://[^"']+)["']""").find(embedText)?.groupValues?.get(1)
                 if (!innerIframe.isNullOrBlank()) {
                     loadExtractor(
@@ -491,6 +495,8 @@ class BrstejProvider : MainAPI() {
                         callback
                     )
                 }
+
+                // المحاولة العادية عبر loadExtractor
                 loadExtractor(
                     embedUrl,
                     referer,
@@ -499,6 +505,7 @@ class BrstejProvider : MainAPI() {
                 )
 
             } catch (_: Exception) {
+                // إذا فشل الطلب (مثل حظر سيرفر ok.ru)، يمرر الرابط فوراً لـ loadExtractor
                 loadExtractor(
                     embedUrl,
                     referer,
