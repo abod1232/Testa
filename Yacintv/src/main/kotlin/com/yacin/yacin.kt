@@ -218,8 +218,6 @@ class YacineTVProvider : MainAPI() {
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
-
-    // ============ Logging helpers ============
     private fun ylog(tag: String, msg: String) { Log.d(LOG_TAG, "[$tag] $msg") }
     private fun ylogLong(tag: String, msg: String) {
         val chunk = 3000
@@ -238,8 +236,6 @@ class YacineTVProvider : MainAPI() {
         if (bytes.size > max) sb.append("...(${bytes.size}B)")
         return sb.toString()
     }
-
-    // يطبّع الـ Referer: يحذف كل محارف Unicode المخفية ويترك ASCII فقط
     private fun sanitizeReferer(raw: String): String {
         val cleaned = raw.filter { it.code in 0x20..0x7E }.trim()
         return if (cleaned.startsWith("http", ignoreCase = true) && cleaned.length > 7)
@@ -256,8 +252,6 @@ class YacineTVProvider : MainAPI() {
     }
 
     data class LinkData(val id: String, val name: String, val poster: String?)
-
-    // ============ Firebase ============
     private fun generateFid(): String {
         val randomBytes = ByteArray(17)
         SecureRandom().nextBytes(randomBytes)
@@ -330,8 +324,6 @@ class YacineTVProvider : MainAPI() {
         } catch (e: Exception) { }
         getSavedApiUrl()
     }
-
-    // ============ Decrypt (with logging) ============
     private fun decrypt(encryptedText: String, tHeader: String): String {
         return try {
             val fullKey = (baseKey + tHeader).toByteArray(Charsets.UTF_8)
@@ -347,8 +339,6 @@ class YacineTVProvider : MainAPI() {
             ""
         }
     }
-
-    // ============ API request (with logging) ============
     private fun executeYacineRequest(baseUrl: String, path: String): YacineResponse? {
         val fullUrl = "${baseUrl.trimEnd('/')}/${path.trimStart('/')}"
         ylog("API-REQ", "GET $fullUrl")
@@ -373,8 +363,6 @@ class YacineTVProvider : MainAPI() {
 
                 val decrypted = decrypt(body, tHeader)
                 if (decrypted.isEmpty()) { ylog("API-DECRYPT", "EMPTY!"); return null }
-
-                // طبع المحتوى المفكوك
                 if (path.contains("channel/")) {
                     ylogLong("API-DECRYPT", "PATH=$path\nJSON=$decrypted")
                 } else {
@@ -492,8 +480,6 @@ class YacineTVProvider : MainAPI() {
             location ?: rawUrl
         } catch (e: Exception) { rawUrl }
     }
-
-    // ============ loadLinks (with logging + sanitized referer) ============
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -529,8 +515,6 @@ class YacineTVProvider : MainAPI() {
             ylog("LOADLINKS", "  rawUrl=$rawUrl")
             ylog("LOADLINKS", "  rawReferer HEX=${hexDump(rawReferer.toByteArray(Charsets.UTF_8), 128)}")
             ylog("LOADLINKS", "  cleanReferer='$cleanReferer'")
-
-            // افرض الـ Referer المطبّع (يمنع تحويل Punycode)
             streamHeaders["Referer"] = cleanReferer
             if (!streamHeaders.containsKey("User-Agent")) streamHeaders["User-Agent"] = userAgent
 
@@ -552,8 +536,6 @@ class YacineTVProvider : MainAPI() {
         ylog("LOADLINKS", "===== END =====")
         true
     }
-
-    // ============ DTOs ============
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class FirebaseInstallationResponse(
         @JsonProperty("authToken") val authToken: AuthToken? = null
