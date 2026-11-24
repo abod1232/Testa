@@ -209,10 +209,6 @@ class YacineTVProvider : MainAPI() {
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
-
-    // ============================================================
-    //  Interceptor التجريبي — يسجّل كل طلب فيديو
-    // ============================================================
     override fun getVideoInterceptor(extractorLink: ExtractorLink): Interceptor? {
         Log.d(LOG_IC, "========== getVideoInterceptor CALLED ==========")
         Log.d(LOG_IC, "  url     = ${extractorLink.url}")
@@ -237,8 +233,6 @@ class YacineTVProvider : MainAPI() {
                     Log.d(LOG_IC, "  >> Referer.len = ${v.toByteArray().size}")
                 }
             }
-
-            // جرّب استبدال الـ Referer بالنسخة الخام (اختبار)
             val rawRef = "http://yacinneeee.live\u2060\u200D\u2060\u3164\u200C\u2060\u200D\u2060"
             val newReq = req.newBuilder()
                 .header("Referer", rawRef)
@@ -250,10 +244,6 @@ class YacineTVProvider : MainAPI() {
             chain.proceed(newReq)
         }
     }
-
-    // ============================================================
-    //  Helpers (سابقة، بدون تغيير)
-    // ============================================================
     private fun getSavedApiUrl(): String = try {
         getKey<String>(PREF_SAVED_DOMAIN_KEY) ?: cachedUrl
     } catch (e: Exception) { cachedUrl }
@@ -416,10 +406,6 @@ class YacineTVProvider : MainAPI() {
             this.plot = "شاهد بث مباشر لقناة ${d.name}"
         }
     }
-
-    // ============================================================
-    //  loadLinks — بدون وسيط، headers فقط
-    // ============================================================
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -463,10 +449,6 @@ class YacineTVProvider : MainAPI() {
         }
         true
     }
-
-    // ============================================================
-    //  DTOs
-    // ============================================================
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class FirebaseInstallationResponse(
         @JsonProperty("authToken") val authToken: AuthToken? = null
