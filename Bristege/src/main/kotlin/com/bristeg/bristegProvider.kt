@@ -55,8 +55,6 @@ class BrstejProvider : MainAPI() {
         }
         return u
     }
-
-    // دالة آمنة ومضمونة لاستخراج رابط الصورة وحل مشكلة النصوص الفارغة في Jsoup
     private fun Element.getImgUrl(): String? {
         val img = this.selectFirst("img")
         val source = this.selectFirst("source[srcset]")?.attr("srcset")?.substringBefore(" ")?.substringBefore(",")?.trim()
@@ -108,8 +106,6 @@ class BrstejProvider : MainAPI() {
         if (title.isBlank()) {
             return null
         }
-
-        // جلب بوستر البحث والأقسام بشكل سليم
         val posterUrl = this.getImgUrl()
 
         val fullUrl = buildAbsoluteUrl(href)
@@ -484,8 +480,6 @@ class BrstejProvider : MainAPI() {
                         return
                     }
                 }
-
-                // فحص أي iframe داخلي
                 val innerIframe = Regex("""<iframe[^>]+src=["'](https?://[^"']+)["']""").find(embedText)?.groupValues?.get(1)
                 if (!innerIframe.isNullOrBlank()) {
                     loadExtractor(
@@ -495,8 +489,6 @@ class BrstejProvider : MainAPI() {
                         callback
                     )
                 }
-
-                // المحاولة العادية عبر loadExtractor
                 loadExtractor(
                     embedUrl,
                     referer,
@@ -505,7 +497,6 @@ class BrstejProvider : MainAPI() {
                 )
 
             } catch (_: Exception) {
-                // إذا فشل الطلب (مثل حظر سيرفر ok.ru)، يمرر الرابط فوراً لـ loadExtractor
                 loadExtractor(
                     embedUrl,
                     referer,
