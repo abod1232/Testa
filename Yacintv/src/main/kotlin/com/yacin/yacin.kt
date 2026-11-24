@@ -232,7 +232,22 @@ class YacineTVProvider : MainAPI() {
 
         private const val LOG_TAG = "YACINE_DEBUG"
     }
-    @JsonIgnoreProperties(ignoreUnknown = true)
+    
+
+    override var mainUrl = "https://def11.ycnapi.com/api"
+    private val fallbackUrl = "https://deft.yacinelive.com/api"
+
+    override var name = "Yacine TV"
+    override val hasMainPage = true
+    override var lang = "ar"
+    override val supportedTypes = setOf(TvType.Live)
+
+    private val baseKey = "c!xZj+N9&G@Ev@vw"
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .build()
+        @JsonIgnoreProperties(ignoreUnknown = true)
 data class FirebaseInstallationResponse(
     @JsonProperty("authToken") val authToken: AuthToken? = null
 ) {
@@ -262,20 +277,6 @@ data class YacineData(
     @JsonProperty("url") val url: String? = null,
     @JsonProperty("headers") val headers: Map<String, Any>? = null
 )
-
-    override var mainUrl = "https://def11.ycnapi.com/api"
-    private val fallbackUrl = "https://deft.yacinelive.com/api"
-
-    override var name = "Yacine TV"
-    override val hasMainPage = true
-    override var lang = "ar"
-    override val supportedTypes = setOf(TvType.Live)
-
-    private val baseKey = "c!xZj+N9&G@Ev@vw"
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .build()
 
     private fun ylog(tag: String, msg: String) {
         Log.d(LOG_TAG, "[$tag] $msg")
