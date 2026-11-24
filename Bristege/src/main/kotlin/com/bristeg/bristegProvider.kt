@@ -33,8 +33,6 @@ class BrstejProvider : MainAPI() {
         TvType.TvSeries,
         TvType.Movie
     )
-
-    // ترويسات متصفح حقيقية لحل مشكلة unexpected end of stream
     private val standardHeaders = mapOf(
         "User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
@@ -231,8 +229,6 @@ class BrstejProvider : MainAPI() {
             val isMovie = allTags.any { it.contains("افلام") || it.contains("فلم") } || title.contains("فيلم")
 
             val episodes = mutableListOf<Episode>()
-
-            // 1. استخراج الحلقات من صفحة المسلسل الرسمية (series1.php)
             val seasonSections = document.select("section.pds-season")
             if (seasonSections.isNotEmpty()) {
                 for (seasonSec in seasonSections) {
@@ -261,8 +257,6 @@ class BrstejProvider : MainAPI() {
                     }
                 }
             }
-
-            // 2. استخراج الحلقات من صفحة المشاهدة (video.php)
             val watchSeasonPanels = document.select("div.pwr-season-panel")
             if (watchSeasonPanels.isNotEmpty()) {
                 for (panel in watchSeasonPanels) {
@@ -414,7 +408,6 @@ class BrstejProvider : MainAPI() {
             callback: (ExtractorLink) -> Unit,
             subtitleCallback: (SubtitleFile) -> Unit
         ) {
-            // 1. تجربة استدعاء loadExtractor مباشرة (خاصة لسيرفرات ok.ru أو vk أو dood أو غيرها)
             val isKnownExtractor = loadExtractor(
                 embedUrl,
                 referer,
@@ -422,16 +415,12 @@ class BrstejProvider : MainAPI() {
                 callback
             )
             if (isKnownExtractor) return
-
-            // 2. إذا لم يكن سيرفر معروفاً في المكتبة، نقوم بفك تشفيره يدوياً
             try {
                 val embedHeaders = standardHeaders.toMutableMap().apply {
                     put("Referer", referer)
                 }
                 val embedResponse = app.get(embedUrl, headers = embedHeaders, timeout = 15)
                 val embedText = embedResponse.text
-
-                // البحث عن رابط فيديو مباشر في النص العادي
                 findVideoInText(embedText)?.let {
                     callback(
                         newExtractorLink(
@@ -444,8 +433,6 @@ class BrstejProvider : MainAPI() {
                         })
                     return
                 }
-
-                // فحص وفك تشفير الجافاسكربت المشفر (Packed JS)
                 val packedJsMatch = Regex("""eval\((function\s*\(.*)\)\)""", RegexOption.DOT_MATCHES_ALL).find(embedText)
                 if (packedJsMatch != null) {
                     val fullEval = "eval(${packedJsMatch.groupValues[1]})"
@@ -472,8 +459,6 @@ class BrstejProvider : MainAPI() {
                         }
                     }
                 }
-
-                // 3. إذا لم يجد، يفحص ما إذا كان السيرفر يحتوي على Iframe داخلي (مثل مشغلات الطرف الثالث)
                 val innerIframe = embedResponse.document.selectFirst("iframe")?.attr("src")
                 if (!innerIframe.isNullOrBlank()) {
                     val fullInnerIframe = buildAbsoluteUrl(innerIframe, embedUrl)
@@ -486,7 +471,6 @@ class BrstejProvider : MainAPI() {
                 }
 
             } catch (_: Exception) {
-                // محاولة أخيرة عبر loadExtractor في حال فشل الاتصال اليدوي
                 try {
                     loadExtractor(embedUrl, referer, subtitleCallback, callback)
                 } catch (_: Exception) {}
@@ -507,8 +491,6 @@ class BrstejProvider : MainAPI() {
             }
 
             val currentUrl = if (!playHrefRaw.isNullOrBlank()) buildAbsoluteUrl(playHrefRaw, data) else data
-
-            // استخراج أزرار السيرفرات بدون تكرار
             targetDoc.select("div#WatchServers button.watchButton, div#WatchServers button.watchbutton")
                 .forEach { btn ->
                     val rawEmbedUrl = btn.attr("data-embed-url").ifBlank { btn.attr("data-embed") }
@@ -517,14 +499,10 @@ class BrstejProvider : MainAPI() {
                         embedLinksToProcess.add(Triple(buildAbsoluteUrl(rawEmbedUrl, currentUrl), serverName, "HD"))
                     }
                 }
-
-            // استخراج المشغل المعروض في الـ Iframe إن وجد
             val iframeSrc = targetDoc.selectFirst("div#Playerholder iframe")?.attr("src")
             if (!iframeSrc.isNullOrBlank()) {
                 embedLinksToProcess.add(Triple(buildAbsoluteUrl(iframeSrc, currentUrl), "سيرفر رئيسي", "HD"))
             }
-
-            // تصفية الروابط لمنع التكرار نهائياً
             val uniqueEmbeds = embedLinksToProcess.distinctBy { it.first }
 
             kotlinx.coroutines.coroutineScope {
