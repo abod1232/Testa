@@ -482,8 +482,6 @@ class BrstejProvider : MainAPI() {
                         return
                     }
                 }
-
-                // فحص أي iframe داخلي
                 val innerIframe = Regex("""<iframe[^>]+src=["'](https?://[^"']+)["']""").find(embedText)?.groupValues?.get(1)
                 if (!innerIframe.isNullOrBlank()) {
                     loadExtractor(
@@ -493,8 +491,6 @@ class BrstejProvider : MainAPI() {
                         callback
                     )
                 }
-
-                // المحاولة العادية مع loadExtractor
                 loadExtractor(
                     embedUrl,
                     referer,
@@ -503,7 +499,6 @@ class BrstejProvider : MainAPI() {
                 )
 
             } catch (_: Exception) {
-                // إذا فشل الـ app.get أعلاه (مثل منع سيرفر ok.ru)، يمرر الرابط فوراً لـ loadExtractor
                 loadExtractor(
                     embedUrl,
                     referer,
