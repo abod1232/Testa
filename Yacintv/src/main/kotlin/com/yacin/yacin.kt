@@ -232,6 +232,36 @@ class YacineTVProvider : MainAPI() {
 
         private const val LOG_TAG = "YACINE_DEBUG"
     }
+    @JsonIgnoreProperties(ignoreUnknown = true)
+data class FirebaseInstallationResponse(
+    @JsonProperty("authToken") val authToken: AuthToken? = null
+) {
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    data class AuthToken(
+        @JsonProperty("token") val token: String? = null
+    )
+}
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class RemoteConfigResponse(
+    @JsonProperty("state") val state: String? = null,
+    @JsonProperty("entries") val entries: Map<String, String>? = null,
+    @JsonProperty("templateVersion") val templateVersion: String? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class YacineResponse(
+    @JsonProperty("data") val data: List<YacineData>? = null
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class YacineData(
+    @JsonProperty("id") val id: String? = null,
+    @JsonProperty("name") val name: String? = null,
+    @JsonProperty("logo") val logo: String? = null,
+    @JsonProperty("url") val url: String? = null,
+    @JsonProperty("headers") val headers: Map<String, Any>? = null
+)
 
     override var mainUrl = "https://def11.ycnapi.com/api"
     private val fallbackUrl = "https://deft.yacinelive.com/api"
