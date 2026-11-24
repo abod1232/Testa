@@ -34,7 +34,7 @@ class BrstejProvider : MainAPI() {
     )
 
     private fun cleanPosterUrl(url: String?): String? {
-        if (url == null || url.isBlank()) return null
+        if (url == null || url.isBlank() || url.startsWith("data:")) return null
         var u = url.trim()
         val wpProxy = Regex("""https?://i\d+\.wp\.com/(.+)""")
         val m = wpProxy.find(u)
@@ -75,8 +75,9 @@ class BrstejProvider : MainAPI() {
 
             if (href.isBlank() || title.isBlank()) return null
 
-            val img = seriesCard.selectFirst(".pcg-series-image img")
-            val rawPoster = img?.attr("src") ?: img?.attr("data-original")
+            val img = seriesCard.selectFirst(".pcg-series-image img, img")
+            val source = seriesCard.selectFirst("source[srcset]")?.attr("srcset")?.substringBefore(" ")?.substringBefore(",")
+            val rawPoster = img?.attr("data-src") ?: img?.attr("data-original") ?: source ?: img?.attr("src")
             val posterUrl = cleanPosterUrl(rawPoster)
 
             return newTvSeriesSearchResponse(title, buildAbsoluteUrl(href), TvType.TvSeries) {
@@ -97,9 +98,12 @@ class BrstejProvider : MainAPI() {
             return null
         }
 
-        val img = this.selectFirst(".prs-image img, .pcg-media img, div.pm-video-thumb img")
-        val rawPoster = img?.attr("data-echo")
+        val img = this.selectFirst(".prs-image img, .pcg-media img, div.pm-video-thumb img, img")
+        val source = this.selectFirst("source[srcset]")?.attr("srcset")?.substringBefore(" ")?.substringBefore(",")
+        val rawPoster = img?.attr("data-src")
             ?: img?.attr("data-original")
+            ?: img?.attr("data-echo")
+            ?: source
             ?: img?.attr("src")
         val posterUrl = cleanPosterUrl(rawPoster)
 
@@ -199,6 +203,7 @@ class BrstejProvider : MainAPI() {
             val poster = cleanPosterUrl(
                 document.selectFirst("meta[property=og:image]")?.attr("content")
                     ?: document.selectFirst(".pds-art img, .pwu-poster-image, #BiBplayer img")?.attr("src")
+                    ?: document.selectFirst(".pds-art source")?.attr("srcset")?.substringBefore(" ")
             )
 
             val description = document.selectFirst(".pds-description, .pwr-description p, div.pm-video-description > div.txtv, meta[property=og:description]")?.text()?.trim()
@@ -230,7 +235,9 @@ class BrstejProvider : MainAPI() {
                             ?: epLink.text().trim()
                         val epNum = Regex("""\d+""").find(epName)?.value?.toIntOrNull() 
                             ?: epArticle.attr("data-order").toIntOrNull()?.plus(1)
-                        val epPoster = cleanPosterUrl(epArticle.selectFirst("img")?.attr("src")) ?: poster
+                        val epImg = epArticle.selectFirst("img")
+                        val epSource = epArticle.selectFirst("source[srcset]")?.attr("srcset")?.substringBefore(" ")?.substringBefore(",")
+                        val epPoster = cleanPosterUrl(epImg?.attr("data-src") ?: epImg?.attr("src") ?: epSource) ?: poster
 
                         episodes.add(
                             newEpisode(epUrl) {
@@ -476,6 +483,18 @@ class BrstejProvider : MainAPI() {
                     }
                 }
 
+                // فحص أي iframe داخلي
+                val innerIframe = Regex("""<iframe[^>]+src=["'](https?://[^"']+)["']""").find(embedText)?.groupValues?.get(1)
+                if (!innerIframe.isNullOrBlank()) {
+                    loadExtractor(
+                        innerIframe,
+                        embedUrl,
+                        subtitleCallback,
+                        callback
+                    )
+                }
+
+                // المحاولة العادية مع loadExtractor
                 loadExtractor(
                     embedUrl,
                     referer,
@@ -483,7 +502,15 @@ class BrstejProvider : MainAPI() {
                     callback
                 )
 
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+                // إذا فشل الـ app.get أعلاه (مثل منع سيرفر ok.ru)، يمرر الرابط فوراً لـ loadExtractor
+                loadExtractor(
+                    embedUrl,
+                    referer,
+                    subtitleCallback,
+                    callback
+                )
+            }
         }
 
         try {
