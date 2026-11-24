@@ -1,7 +1,5 @@
 package com.yacin
 
-
-
 import android.content.Context
 import android.content.Intent
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
@@ -14,11 +12,11 @@ import android.graphics.drawable.RippleDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.util.Base64
+import android.util.Log
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -30,8 +28,6 @@ import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
-import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
@@ -55,18 +51,17 @@ import java.io.InputStreamReader
 import java.net.Socket
 import java.net.URI
 import java.security.SecureRandom
-import java.security.cert.X509Certificate
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 import javax.net.ssl.HttpsURLConnection
-import javax.net.ssl.SSLContext
-import javax.net.ssl.TrustManager
-import javax.net.ssl.X509TrustManager
 
 
+// ============================================================
+//  Plugin
+// ============================================================
 
 @CloudstreamPlugin
 class YacineTVPlugin : Plugin() {
@@ -81,7 +76,9 @@ class YacineTVPlugin : Plugin() {
 }
 
 
-
+// ============================================================
+//  Settings sheet (unchanged)
+// ============================================================
 
 class YacineSettings : BottomSheetDialogFragment() {
 
@@ -105,10 +102,10 @@ class YacineSettings : BottomSheetDialogFragment() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(12), dp(20), dp(28))
             background = GradientDrawable().apply {
-                setColor(Color.parseColor("#181926")) // خلفية داكنة حديثة
+                setColor(Color.parseColor("#181926"))
                 cornerRadii = floatArrayOf(
-                    dp(24).toFloat(), dp(24).toFloat(), // زاوية أعلى يسار
-                    dp(24).toFloat(), dp(24).toFloat(), // زاوية أعلى يمين
+                    dp(24).toFloat(), dp(24).toFloat(),
+                    dp(24).toFloat(), dp(24).toFloat(),
                     0f, 0f, 0f, 0f
                 )
             }
@@ -124,6 +121,7 @@ class YacineSettings : BottomSheetDialogFragment() {
             }
         }
         root.addView(handle)
+
         val title = TextView(ctx).apply {
             text = "مجتمع ودعم الإضافة"
             textSize = 19f
@@ -141,6 +139,7 @@ class YacineSettings : BottomSheetDialogFragment() {
             setPadding(0, dp(4), 0, dp(22))
         }
         root.addView(subtitle)
+
         fun createPlatformCard(
             badgeIcon: String,
             badgeColor: String,
@@ -162,7 +161,6 @@ class YacineSettings : BottomSheetDialogFragment() {
                     shape,
                     shape
                 )
-
                 isClickable = true
                 isFocusable = true
                 setOnClickListener {
@@ -170,13 +168,10 @@ class YacineSettings : BottomSheetDialogFragment() {
                         startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)))
                     } catch (e: Exception) { }
                 }
-
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    bottomMargin = dp(12)
-                }
+                ).apply { bottomMargin = dp(12) }
             }
             val iconBadge = TextView(ctx).apply {
                 text = badgeIcon
@@ -191,72 +186,49 @@ class YacineSettings : BottomSheetDialogFragment() {
                 }
             }
             card.addView(iconBadge)
+
             val textContainer = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             }
-
-            val cardTitle = TextView(ctx).apply {
+            textContainer.addView(TextView(ctx).apply {
                 text = titleText
                 textSize = 15f
                 setTypeface(null, Typeface.BOLD)
                 setTextColor(Color.parseColor("#CAD3F5"))
-            }
-            textContainer.addView(cardTitle)
-
-            val cardDesc = TextView(ctx).apply {
+            })
+            textContainer.addView(TextView(ctx).apply {
                 text = descText
                 textSize = 12f
                 setTextColor(Color.parseColor("#A5ADCB"))
                 setPadding(0, dp(2), 0, 0)
-            }
-            textContainer.addView(cardDesc)
-
+            })
             card.addView(textContainer)
-            val arrow = TextView(ctx).apply {
+
+            card.addView(TextView(ctx).apply {
                 text = "↗"
                 textSize = 17f
                 setTextColor(Color.parseColor("#6E738D"))
                 setTypeface(null, Typeface.BOLD)
-            }
-            card.addView(arrow)
-
+            })
             return card
         }
-        root.addView(
-            createPlatformCard(
-                badgeIcon = "📧",
-                badgeColor = "#229ED9",
-                titleText = "قناة التليجرام",
-                descText = "أحدث الإصدارات، الروابط والأخبار",
-                targetUrl = "https://t.me/cs3iq"
-            )
-        )
 
-        root.addView(
-            createPlatformCard(
-                badgeIcon = "☄️",
-                badgeColor = "#5865F2",
-                titleText = "سيرفر الديسكورد",
-                descText = "نقاشات المجتمع، الدعم الفني والاقتراحات",
-                targetUrl = "https://discord.gg/xY63qaQRw"
-            )
-        )
-
-        root.addView(
-            createPlatformCard(
-                badgeIcon = "🔗",
-                badgeColor = "#313244",
-                titleText = "مشروع GitHub",
-                descText = "المستودع المفتوح، الإبلاغ عن مشاكل والمساهمة",
-                targetUrl = "https://github.com/Abodabodd/re-3arabi"
-            )
-        )
+        root.addView(createPlatformCard("📧", "#229ED9", "قناة التليجرام",
+            "أحدث الإصدارات، الروابط والأخبار", "https://t.me/cs3iq"))
+        root.addView(createPlatformCard("☄️", "#5865F2", "سيرفر الديسكورد",
+            "نقاشات المجتمع، الدعم الفني والاقتراحات", "https://discord.gg/xY63qaQRw"))
+        root.addView(createPlatformCard("🔗", "#313244", "مشروع GitHub",
+            "المستودع المفتوح، الإبلاغ عن مشاكل والمساهمة", "https://github.com/Abodabodd/re-3arabi"))
 
         return root
     }
 }
 
+
+// ============================================================
+//  Provider (with detailed logs)
+// ============================================================
 
 class YacineTVProvider : MainAPI() {
     companion object {
@@ -272,6 +244,8 @@ class YacineTVProvider : MainAPI() {
         @Volatile private var cachedEtag: String? = null
         @Volatile private var cachedFid: String? = null
         @Volatile private var cachedToken: String? = null
+
+        private const val LOG_TAG = "YACINE_DEBUG"
     }
 
     override var mainUrl = "https://def11.ycnapi.com/api"
@@ -287,6 +261,52 @@ class YacineTVProvider : MainAPI() {
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
+
+    // ============================================================
+    //  Logging helpers
+    // ============================================================
+
+    private fun ylog(tag: String, msg: String) {
+        Log.d(LOG_TAG, "[$tag] $msg")
+    }
+
+    private fun ylogLong(tag: String, msg: String) {
+        val chunk = 3000
+        if (msg.length <= chunk) { ylog(tag, msg); return }
+        var i = 0
+        var part = 1
+        while (i < msg.length) {
+            val end = minOf(i + chunk, msg.length)
+            ylog(tag, "(${part}) " + msg.substring(i, end))
+            i = end
+            part++
+        }
+    }
+
+    private fun hexDump(bytes: ByteArray, max: Int = 64): String {
+        val n = minOf(bytes.size, max)
+        val sb = StringBuilder()
+        for (i in 0 until n) sb.append(String.format("%02X ", bytes[i]))
+        if (bytes.size > max) sb.append("... (${bytes.size} bytes total)")
+        return sb.toString()
+    }
+
+    private fun printableBytes(bytes: ByteArray): String {
+        val sb = StringBuilder()
+        for (b in bytes) {
+            val c = b.toInt() and 0xFF
+            when {
+                c == 0x20 -> sb.append('␠')
+                c in 0x21..0x7E -> sb.append(c.toChar())
+                else -> sb.append(String.format("\\x%02X", c))
+            }
+        }
+        return sb.toString()
+    }
+
+    // ============================================================
+    //  Domain persistence
+    // ============================================================
 
     private fun getSavedApiUrl(): String {
         return try {
@@ -309,6 +329,10 @@ class YacineTVProvider : MainAPI() {
         val poster: String?
     )
 
+    // ============================================================
+    //  Firebase / RemoteConfig
+    // ============================================================
+
     private fun generateFid(): String {
         val randomBytes = ByteArray(17)
         SecureRandom().nextBytes(randomBytes)
@@ -321,6 +345,9 @@ class YacineTVProvider : MainAPI() {
         val jsonBody = """
             {"fid":"$fid","appId":"$FB_APP_ID","authVersion":"FIS_v2","sdkVersion":"a:18.0.0"}
         """.trimIndent()
+
+        ylog("FB-INSTALL", "POST $url")
+        ylog("FB-INSTALL", "body=$jsonBody")
 
         val request = Request.Builder()
             .url(url)
@@ -335,22 +362,31 @@ class YacineTVProvider : MainAPI() {
 
         return try {
             client.newCall(request).execute().use { res ->
+                ylog("FB-INSTALL", "code=${res.code}")
+                ylog("FB-INSTALL", "headers:")
+                for ((k, v) in res.headers) ylog("FB-INSTALL", "  $k: $v")
+                val body = res.body?.string() ?: ""
+                ylogLong("FB-INSTALL", "body=$body")
+
                 if (res.isSuccessful) {
-                    val body = res.body?.string() ?: ""
                     parseJson<FirebaseInstallationResponse>(body).authToken?.token
+                        .also { ylog("FB-INSTALL", "token=${it ?: "<null>"}") }
                 } else null
             }
         } catch (e: Exception) {
+            ylog("FB-INSTALL", "EXCEPTION: ${e.javaClass.simpleName}: ${e.message}")
             null
         }
     }
 
     private suspend fun syncDynamicApiUrl(): String = withContext(Dispatchers.IO) {
+        ylog("FB-RC", "syncDynamicApiUrl() START")
         var fid = cachedFid
         var token = cachedToken
 
         if (fid.isNullOrEmpty() || token.isNullOrEmpty()) {
             fid = generateFid()
+            ylog("FB-RC", "generated fid=$fid")
             token = getFirebaseToken(fid)
             if (token != null) {
                 cachedFid = fid
@@ -358,7 +394,10 @@ class YacineTVProvider : MainAPI() {
             }
         }
 
-        if (token.isNullOrEmpty() || fid.isNullOrEmpty()) return@withContext getSavedApiUrl()
+        if (token.isNullOrEmpty() || fid.isNullOrEmpty()) {
+            ylog("FB-RC", "no token/fid → return saved=${getSavedApiUrl()}")
+            return@withContext getSavedApiUrl()
+        }
 
         val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
             timeZone = TimeZone.getTimeZone("UTC")
@@ -383,49 +422,83 @@ class YacineTVProvider : MainAPI() {
 
         if (!cachedEtag.isNullOrEmpty()) {
             reqBuilder.header("If-None-Match", cachedEtag!!)
+            ylog("FB-RC", "If-None-Match: $cachedEtag")
         }
+
+        ylog("FB-RC", "POST $url")
+        ylogLong("FB-RC", "payload=$jsonPayload")
 
         try {
             client.newCall(reqBuilder.build()).execute().use { res ->
                 val newEtag = res.header("ETag")
                 if (newEtag != null) cachedEtag = newEtag
+                ylog("FB-RC", "code=${res.code} etag=$newEtag")
+                ylog("FB-RC", "headers:")
+                for ((k, v) in res.headers) ylog("FB-RC", "  $k: $v")
 
                 if (res.isSuccessful) {
                     val body = res.body?.string() ?: ""
+                    ylogLong("FB-RC", "body=$body")
                     val config = parseJson<RemoteConfigResponse>(body)
+                    ylog("FB-RC", "state=${config.state} entries=${config.entries}")
 
                     if (config.state == "UPDATE") {
                         val newDomain = config.entries?.get("defaults")
                         if (!newDomain.isNullOrEmpty()) {
                             val updatedUrl = "https://$newDomain/api"
+                            ylog("FB-RC", "UPDATE → newUrl=$updatedUrl")
                             saveApiUrl(updatedUrl)
                             return@withContext updatedUrl
                         }
                     }
                 }
             }
-        } catch (e: Exception) { }
+        } catch (e: Exception) {
+            ylog("FB-RC", "EXCEPTION: ${e.javaClass.simpleName}: ${e.message}")
+        }
+        ylog("FB-RC", "fallback saved=${getSavedApiUrl()}")
         getSavedApiUrl()
     }
+
+    // ============================================================
+    //  Decryption
+    // ============================================================
 
     private fun decrypt(encryptedText: String, tHeader: String): String {
         return try {
             val fullKey = (baseKey + tHeader).toByteArray(Charsets.UTF_8)
             val decodedBytes = Base64.decode(encryptedText.trim(), Base64.DEFAULT)
+
+            ylog("DECRYPT", "t-header='$tHeader' | keyLen=${fullKey.size} | cipherBytes=${decodedBytes.size}")
+            ylog("DECRYPT", "cipherHex[..64]=${hexDump(decodedBytes)}")
+
             val result = ByteArray(decodedBytes.size)
             for (i in decodedBytes.indices) {
                 result[i] = (decodedBytes[i].toInt() xor fullKey[i % fullKey.size].toInt()).toByte()
             }
-            String(result, Charsets.UTF_8)
+            val plain = String(result, Charsets.UTF_8)
+
+            ylog("DECRYPT", "plainLen=${plain.length}")
+            ylogLong("DECRYPT", "plainJson=$plain")
+            plain
         } catch (e: Exception) {
+            ylog("DECRYPT", "EXCEPTION: ${e.javaClass.simpleName}: ${e.message}")
             ""
         }
     }
+
+    // ============================================================
+    //  Yacine HTTP layer
+    // ============================================================
 
     private fun executeYacineRequest(baseUrl: String, path: String): YacineResponse? {
         val cleanBase = baseUrl.trimEnd('/')
         val cleanPath = path.trimStart('/')
         val fullUrl = "$cleanBase/$cleanPath"
+
+        ylog("HTTP-REQ", "GET $fullUrl")
+        ylog("HTTP-REQ", "  User-Agent: okhttp/4.12.0")
+        ylog("HTTP-REQ", "  Accept: application/json")
 
         return try {
             val request = Request.Builder()
@@ -435,54 +508,116 @@ class YacineTVProvider : MainAPI() {
                 .build()
 
             client.newCall(request).execute().use { response ->
-                if (response.code == 200) {
-                    val body = response.body?.string() ?: ""
-                    val tHeader = response.header("t") ?: ""
+                ylog("HTTP-RESP", "url=$fullUrl")
+                ylog("HTTP-RESP", "code=${response.code} ${response.message}")
+                ylog("HTTP-RESP", "headers:")
+                for ((k, v) in response.headers) ylog("HTTP-RESP", "  $k: $v")
 
-                    if (body.isNotEmpty()) {
-                        val decryptedJson = decrypt(body, tHeader)
-                        if (decryptedJson.isNotEmpty()) {
-                            return parseJson<YacineResponse>(decryptedJson)
+                if (response.code != 200) {
+                    ylog("HTTP-RESP", "NON-200 → body:")
+                    ylogLong("HTTP-RESP", response.body?.string() ?: "<null>")
+                    return null
+                }
+
+                val body = response.body?.string() ?: ""
+                val tHeader = response.header("t") ?: ""
+
+                ylog("HTTP-RESP", "t-header='$tHeader'")
+                ylog("HTTP-RESP", "rawBodyLen=${body.length}")
+                ylogLong("HTTP-RESP", "rawBody[base64]=$body")
+
+                if (body.isEmpty()) {
+                    ylog("HTTP-RESP", "EMPTY BODY → abort")
+                    return null
+                }
+
+                val decryptedJson = decrypt(body, tHeader)
+                if (decryptedJson.isEmpty()) {
+                    ylog("HTTP-RESP", "DECRYPT EMPTY → abort")
+                    return null
+                }
+
+                val parsed = try {
+                    parseJson<YacineResponse>(decryptedJson)
+                } catch (e: Exception) {
+                    ylog("PARSE", "parseJson EXCEPTION: ${e.javaClass.simpleName}: ${e.message}")
+                    ylogLong("PARSE", "json was: $decryptedJson")
+                    return null
+                }
+
+                ylog("PARSE", "OK → data.size=${parsed?.data?.size}")
+                parsed?.data?.forEachIndexed { i, d ->
+                    ylog("PARSE", "  [$i] id=${d.id} name='${d.name}'")
+                    ylog("PARSE", "       url='${d.url}'")
+                    if (d.headers != null) {
+                        d.headers.forEach { (k, v) ->
+                            ylog("PARSE", "       header $k = $v")
+                            if (v is String && (
+                                k.equals("referer", true) ||
+                                k.equals("referrer", true) ||
+                                k.equals("origin", true))
+                            ) {
+                                val bytes = v.toByteArray(Charsets.UTF_8)
+                                ylog("PARSE", "       >> $k RAW BYTES: ${hexDump(bytes, 128)}")
+                                ylog("PARSE", "       >> $k PRINTABLE: ${printableBytes(bytes)}")
+                            }
                         }
                     }
                 }
-                null
+                parsed
             }
         } catch (e: Exception) {
+            ylog("HTTP-REQ", "EXCEPTION on $fullUrl: ${e.javaClass.simpleName}: ${e.message}")
             null
         }
     }
 
     private suspend fun fetchYacine(path: String): YacineResponse? = withContext(Dispatchers.IO) {
+        ylog("FETCH", "fetchYacine('$path')")
         val currentSavedUrl = getSavedApiUrl()
         val initialEndpoints = listOf(currentSavedUrl, fallbackUrl).distinct()
+        ylog("FETCH", "endpoints=$initialEndpoints")
 
         for (baseUrl in initialEndpoints) {
+            ylog("FETCH", "trying $baseUrl")
             val res = executeYacineRequest(baseUrl, path)
             if (res != null) {
+                ylog("FETCH", "SUCCESS at $baseUrl")
                 saveApiUrl(baseUrl)
                 return@withContext res
             }
+            ylog("FETCH", "FAILED at $baseUrl")
         }
 
+        ylog("FETCH", "trying syncDynamicApiUrl()...")
         val newDynamicUrl = syncDynamicApiUrl()
+        ylog("FETCH", "dynamicUrl=$newDynamicUrl")
 
         if (!initialEndpoints.contains(newDynamicUrl)) {
             val res = executeYacineRequest(newDynamicUrl, path)
             if (res != null) {
+                ylog("FETCH", "SUCCESS at dynamic $newDynamicUrl")
                 saveApiUrl(newDynamicUrl)
                 return@withContext res
             }
         }
 
+        ylog("FETCH", "ALL FAILED for '$path'")
         null
     }
 
+    // ============================================================
+    //  MainAPI overrides
+    // ============================================================
+
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse = withContext(Dispatchers.IO) {
+        ylog("MAIN", "getMainPage(page=$page)")
         val categories = fetchYacine("categories")?.data ?: emptyList()
+        ylog("MAIN", "categories.size=${categories.size}")
 
         val homePageLists = categories.map { cat ->
             async {
+                ylog("MAIN", "fetching channels for cat=${cat.id} '${cat.name}'")
                 val channels = fetchYacine("categories/${cat.id}/channels")?.data ?: emptyList()
                 if (channels.isEmpty()) return@async null
 
@@ -496,10 +631,12 @@ class YacineTVProvider : MainAPI() {
             }
         }.awaitAll().filterNotNull()
 
+        ylog("MAIN", "homePageLists.size=${homePageLists.size}")
         newHomePageResponse(homePageLists)
     }
 
     override suspend fun search(query: String): List<SearchResponse> = withContext(Dispatchers.IO) {
+        ylog("SEARCH", "query='$query'")
         val categories = fetchYacine("categories")?.data ?: emptyList()
         val deferredList = categories.map { cat ->
             async {
@@ -512,11 +649,14 @@ class YacineTVProvider : MainAPI() {
                 }
             }
         }
-        deferredList.awaitAll().flatten()
+        val result = deferredList.awaitAll().flatten()
+        ylog("SEARCH", "results=${result.size}")
+        result
     }
 
     override suspend fun load(url: String): LoadResponse {
         val data = parseJson<LinkData>(url)
+        ylog("LOAD", "load('$url') → name='${data.name}' id='${data.id}'")
         return newMovieLoadResponse(
             data.name,
             url,
@@ -528,16 +668,33 @@ class YacineTVProvider : MainAPI() {
         }
     }
 
+    // ============================================================
+    //  Stream resolution (with heavy logs)
+    // ============================================================
+
     private fun resolveDirectStreamUrl(rawUrl: String, rawReferer: String, userAgent: String): String {
-        if (!rawUrl.contains("varie-redirect.com")) return rawUrl
+        if (!rawUrl.contains("varie-redirect.com")) {
+            ylog("RESOLVE", "skip (not varie-redirect): $rawUrl")
+            return rawUrl
+        }
+
+        ylog("RESOLVE", "resolving: $rawUrl")
+        ylog("RESOLVE", "  referer='$rawReferer'")
+        ylog("RESOLVE", "  referer HEX: ${hexDump(rawReferer.toByteArray(Charsets.UTF_8), 128)}")
+        ylog("RESOLVE", "  UA='$userAgent'")
 
         return try {
             val uri = URI(rawUrl)
-            val host = uri.host ?: return rawUrl
+            val host = uri.host ?: run {
+                ylog("RESOLVE", "no host → return raw")
+                return rawUrl
+            }
             val isHttps = rawUrl.startsWith("https://", ignoreCase = true)
             val port = if (uri.port != -1) uri.port else (if (isHttps) 443 else 80)
             val path = (if (uri.rawPath.isNullOrEmpty()) "/" else uri.rawPath) +
                     (if (uri.rawQuery != null) "?${uri.rawQuery}" else "")
+
+            ylog("RESOLVE", "  -> host=$host port=$port https=$isHttps path=$path")
 
             val socket = if (isHttps) {
                 HttpsURLConnection.getDefaultSSLSocketFactory().createSocket(host, port)
@@ -558,15 +715,19 @@ class YacineTVProvider : MainAPI() {
                     "sec-fetch-dest: video\r\n" +
                     "Connection: close\r\n\r\n"
 
+            ylogLong("RESOLVE", "REQUEST SENT:\n$rawRequest")
+
             socket.getOutputStream().write(rawRequest.toByteArray(Charsets.UTF_8))
             socket.getOutputStream().flush()
 
             val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
             var line: String?
             var location: String? = null
+            val allLines = mutableListOf<String>()
 
             while (reader.readLine().also { line = it } != null) {
                 if (line.isNullOrEmpty()) break
+                allLines.add(line!!)
                 if (line!!.startsWith("Location:", ignoreCase = true)) {
                     location = line!!.substring(9).trim()
                     break
@@ -574,11 +735,25 @@ class YacineTVProvider : MainAPI() {
             }
             socket.close()
 
-            location ?: rawUrl
+            ylog("RESOLVE", "RAW RESPONSE LINES:")
+            allLines.forEachIndexed { i, l -> ylog("RESOLVE", "  [$i] $l") }
+
+            if (location == null) {
+                ylog("RESOLVE", "NO Location header → returning rawUrl")
+                rawUrl
+            } else {
+                ylog("RESOLVE", "final location: $location")
+                location
+            }
         } catch (e: Exception) {
+            ylog("RESOLVE", "EXCEPTION: ${e.javaClass.simpleName}: ${e.message}")
             rawUrl
         }
     }
+
+    // ============================================================
+    //  loadLinks (with heavy logs)
+    // ============================================================
 
     override suspend fun loadLinks(
         data: String,
@@ -586,74 +761,79 @@ class YacineTVProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean = withContext(Dispatchers.IO) {
+        ylog("LOADLINKS", "===== START =====")
+        ylog("LOADLINKS", "rawData=$data")
+
         val linkData = try {
             parseJson<LinkData>(data)
         } catch (e: Exception) {
+            ylog("LOADLINKS", "parseJson<LinkData> FAILED: ${e.message}")
+            return@withContext false
+        }
+        ylog("LOADLINKS", "linkData.id=${linkData.id} name=${linkData.name}")
+
+        val responseData = fetchYacine("channel/${linkData.id}")
+        ylog("LOADLINKS", "fetchYacine returned data.size=${responseData?.data?.size}")
+        val streams = responseData?.data ?: run {
+            ylog("LOADLINKS", "NO STREAMS → abort")
             return@withContext false
         }
 
-        val responseData = fetchYacine("channel/${linkData.id}")
-        val streams = responseData?.data ?: return@withContext false
-
         streams.forEachIndexed { index, stream ->
-            val rawUrl = stream.url?.replace("www.elahmad.coo", "www.elahmad.com") ?: ""
-            if (rawUrl.isNotEmpty()) {
-                val streamHeaders = mutableMapOf<String, String>()
+            ylog("LOADLINKS", "---- stream[$index] ----")
+            ylog("LOADLINKS", "  name='${stream.name}'")
+            ylog("LOADLINKS", "  rawUrl='${stream.url}'")
+            ylog("LOADLINKS", "  headers=${stream.headers}")
 
-                stream.headers?.forEach { (key, value) ->
-                    if (value is String) streamHeaders[key] = value
+            stream.headers?.get("Referer")?.let { refVal ->
+                if (refVal is String) {
+                    val bytes = refVal.toByteArray(Charsets.UTF_8)
+                    ylog("LOADLINKS", "  API-Referer HEX: ${hexDump(bytes, 128)}")
+                    ylog("LOADLINKS", "  API-Referer PRINTABLE: ${printableBytes(bytes)}")
                 }
-
-                val userAgent = streamHeaders["User-Agent"]
-                    ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
-                val referer = streamHeaders["Referer"] ?: "http://yacinneeee.live"
-
-                val finalStreamUrl = resolveDirectStreamUrl(rawUrl, referer, userAgent)
-
-                callback.invoke(
-                    newExtractorLink(
-                        this@YacineTVProvider.name,
-                        stream.name ?: "Server ${index + 1}",
-                        finalStreamUrl
-                    ) {
-                        this.headers = streamHeaders
-                        this.quality = Qualities.Unknown.value
-                        this.referer = referer
-                    }
-                )
             }
+
+            val rawUrl = stream.url?.replace("www.elahmad.coo", "www.elahmad.com") ?: ""
+            if (rawUrl.isEmpty()) {
+                ylog("LOADLINKS", "  rawUrl empty → skip")
+                return@forEachIndexed
+            }
+
+            val streamHeaders = mutableMapOf<String, String>()
+            stream.headers?.forEach { (key, value) ->
+                if (value is String) streamHeaders[key] = value
+            }
+
+            val userAgent = streamHeaders["User-Agent"]
+                ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+            val referer = streamHeaders["Referer"] ?: "http://yacinneeee.live"
+
+            ylog("LOADLINKS", "  chosenUA=$userAgent")
+            ylog("LOADLINKS", "  chosenReferer=$referer")
+            ylog("LOADLINKS", "  chosenReferer HEX: ${hexDump(referer.toByteArray(Charsets.UTF_8), 128)}")
+
+            val finalStreamUrl = resolveDirectStreamUrl(rawUrl, referer, userAgent)
+            ylog("LOADLINKS", "  finalStreamUrl=$finalStreamUrl")
+
+            callback.invoke(
+                newExtractorLink(
+                    this@YacineTVProvider.name,
+                    stream.name ?: "Server ${index + 1}",
+                    finalStreamUrl
+                ) {
+                    this.headers = streamHeaders
+                    this.quality = Qualities.Unknown.value
+                    this.referer = referer
+                }
+            )
         }
+        ylog("LOADLINKS", "===== END =====")
         true
     }
 
+    // ============================================================
+    //  DTOs
+    // ============================================================
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class FirebaseInstallationResponse(
-        @JsonProperty("authToken") val authToken: AuthToken? = null
-    ) {
-        @JsonIgnoreProperties(ignoreUnknown = true)
-        data class AuthToken(
-            @JsonProperty("token") val token: String? = null
-        )
-    }
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    data class RemoteConfigResponse(
-        @JsonProperty("state") val state: String? = null,
-        @JsonProperty("entries") val entries: Map<String, String>? = null,
-        @JsonProperty("templateVersion") val templateVersion: String? = null
-    )
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    data class YacineResponse(
-        @JsonProperty("data") val data: List<YacineData>? = null
-    )
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    data class YacineData(
-        @JsonProperty("id") val id: String? = null,
-        @JsonProperty("name") val name: String? = null,
-        @JsonProperty("logo") val logo: String? = null,
-        @JsonProperty("url") val url: String? = null,
-        @JsonProperty("headers") val headers: Map<String, Any>? = null
-    )
-}
