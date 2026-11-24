@@ -123,16 +123,13 @@ class BrstejProvider : MainAPI() {
     }
 
     override val mainPage = mainPageOf(
-        "home03" to "الرئيسية",
+        
         "cat03.php?cat=prss7-2025" to "مسلسلات برستيج",
-        "cat03.php?cat=movies2-2224" to "افلام",
         "cat03.php?cat=ramdan2026" to "مسلسلات رمضان 2026",
         "cat03.php?cat=arab8-2025" to "مسلسلات عربية",
-        "cat03.php?cat=ty9-2025" to "مسلسلات تركية 2026",
-        "cat03.php?cat=eg8-2025" to "مسلسلات مصرية",
-        "cat03.php?cat=syy5-2025" to "مسلسلات شامية",
-        "cat03.php?cat=5a7-2024" to "مسلسلات خليجية",
-        "new-videos.php" to "أحدث الإضافات"
+        "cat03.php?cat=ty9-2025" to "مسلسلات تركية 2026"
+ 
+        
     )
 
     override suspend fun getMainPage(
