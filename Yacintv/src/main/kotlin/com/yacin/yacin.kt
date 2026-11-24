@@ -598,14 +598,10 @@ class YacineTVProvider : MainAPI() {
     streams.forEachIndexed { index, stream ->
         val rawUrl = stream.url?.replace("www.elahmad.coo", "www.elahmad.com") ?: ""
         if (rawUrl.isEmpty()) return@forEachIndexed
-
-        // اقرأ Referer من API حرفياً (بدون أي تعديل)
         val refererFromApi = (stream.headers?.get("Referer") as? String)
             ?: "http://yacinneeee.live\u2060\u200D\u2060\u3164\u200C\u2060\u200D\u2060"
         val userAgent = (stream.headers?.get("User-Agent") as? String)
             ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
-
-        // اطبع البايتات قبل الإرسال
         val refBytes = refererFromApi.toByteArray(Charsets.UTF_8)
         android.util.Log.d("YACINE_TEST", "referer length=${refBytes.size}")
         android.util.Log.d("YACINE_TEST", "referer hex=" +
@@ -619,13 +615,11 @@ class YacineTVProvider : MainAPI() {
                 stream.name ?: "Server ${index + 1}",
                 finalStreamUrl
             ) {
-                // ← الاختبار: headers فقط، بدون this.referer
                 this.headers = mapOf(
                     "Referer" to refererFromApi,
                     "User-Agent" to userAgent
                 )
                 this.quality = Qualities.Unknown.value
-                // this.referer = ...   ← معطّل
             }
         )
     }
