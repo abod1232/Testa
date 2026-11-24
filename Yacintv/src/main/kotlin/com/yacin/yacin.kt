@@ -1,7 +1,5 @@
 package com.yacin
 
-
-
 import android.content.Context
 import android.content.Intent
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
@@ -14,11 +12,11 @@ import android.graphics.drawable.RippleDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.util.Base64
+import android.util.Log
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -30,8 +28,6 @@ import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
-import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
 import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
@@ -45,6 +41,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
 
+import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -55,18 +52,12 @@ import java.io.InputStreamReader
 import java.net.Socket
 import java.net.URI
 import java.security.SecureRandom
-import java.security.cert.X509Certificate
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 import javax.net.ssl.HttpsURLConnection
-import javax.net.ssl.SSLContext
-import javax.net.ssl.TrustManager
-import javax.net.ssl.X509TrustManager
-
-
 
 @CloudstreamPlugin
 class YacineTVPlugin : Plugin() {
@@ -80,11 +71,7 @@ class YacineTVPlugin : Plugin() {
     }
 }
 
-
-
-
 class YacineSettings : BottomSheetDialogFragment() {
-
     private fun dp(dp: Int): Int = (dp * resources.displayMetrics.density + 0.5f).toInt()
 
     override fun onStart() {
@@ -105,15 +92,15 @@ class YacineSettings : BottomSheetDialogFragment() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(12), dp(20), dp(28))
             background = GradientDrawable().apply {
-                setColor(Color.parseColor("#181926")) // خلفية داكنة حديثة
+                setColor(Color.parseColor("#181926"))
                 cornerRadii = floatArrayOf(
-                    dp(24).toFloat(), dp(24).toFloat(), // زاوية أعلى يسار
-                    dp(24).toFloat(), dp(24).toFloat(), // زاوية أعلى يمين
+                    dp(24).toFloat(), dp(24).toFloat(),
+                    dp(24).toFloat(), dp(24).toFloat(),
                     0f, 0f, 0f, 0f
                 )
             }
         }
-        val handle = View(ctx).apply {
+        root.addView(View(ctx).apply {
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#45475A"))
                 cornerRadius = dp(3).toFloat()
@@ -122,33 +109,24 @@ class YacineSettings : BottomSheetDialogFragment() {
                 gravity = Gravity.CENTER_HORIZONTAL
                 bottomMargin = dp(20)
             }
-        }
-        root.addView(handle)
-        val title = TextView(ctx).apply {
+        })
+        root.addView(TextView(ctx).apply {
             text = "مجتمع ودعم الإضافة"
             textSize = 19f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor("#CAD3F5"))
             gravity = Gravity.CENTER
-        }
-        root.addView(title)
-
-        val subtitle = TextView(ctx).apply {
+        })
+        root.addView(TextView(ctx).apply {
             text = "تابع التحديثات وانضم لمجتمع النقاش والمطورين"
             textSize = 12.5f
             setTextColor(Color.parseColor("#8087A2"))
             gravity = Gravity.CENTER
             setPadding(0, dp(4), 0, dp(22))
-        }
-        root.addView(subtitle)
-        fun createPlatformCard(
-            badgeIcon: String,
-            badgeColor: String,
-            titleText: String,
-            descText: String,
-            targetUrl: String
-        ): View {
-            val card = LinearLayout(ctx).apply {
+        })
+
+        fun card(icon: String, color: String, t: String, d: String, url: String) =
+            LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(16), dp(14), dp(16), dp(14))
@@ -157,106 +135,47 @@ class YacineSettings : BottomSheetDialogFragment() {
                     cornerRadius = dp(16).toFloat()
                     setStroke(dp(1), Color.parseColor("#363A4F"))
                 }
-                background = RippleDrawable(
-                    ColorStateList.valueOf(Color.parseColor("#3B4252")),
-                    shape,
-                    shape
-                )
-
+                background = RippleDrawable(ColorStateList.valueOf(Color.parseColor("#3B4252")), shape, shape)
                 isClickable = true
-                isFocusable = true
                 setOnClickListener {
-                    try {
-                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)))
-                    } catch (e: Exception) { }
+                    try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } catch (_: Exception) {}
                 }
-
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    bottomMargin = dp(12)
-                }
+                ).apply { bottomMargin = dp(12) }
+
+                addView(TextView(ctx).apply {
+                    text = icon; textSize = 18f; gravity = Gravity.CENTER
+                    background = GradientDrawable().apply {
+                        setColor(Color.parseColor(color)); cornerRadius = dp(12).toFloat()
+                    }
+                    layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginEnd = dp(14) }
+                })
+                addView(LinearLayout(ctx).apply {
+                    orientation = LinearLayout.VERTICAL
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                    addView(TextView(ctx).apply {
+                        text = t; textSize = 15f; setTypeface(null, Typeface.BOLD)
+                        setTextColor(Color.parseColor("#CAD3F5"))
+                    })
+                    addView(TextView(ctx).apply {
+                        text = d; textSize = 12f; setTextColor(Color.parseColor("#A5ADCB"))
+                        setPadding(0, dp(2), 0, 0)
+                    })
+                })
+                addView(TextView(ctx).apply {
+                    text = "↗"; textSize = 17f; setTextColor(Color.parseColor("#6E738D"))
+                    setTypeface(null, Typeface.BOLD)
+                })
             }
-            val iconBadge = TextView(ctx).apply {
-                text = badgeIcon
-                textSize = 18f
-                gravity = Gravity.CENTER
-                background = GradientDrawable().apply {
-                    setColor(Color.parseColor(badgeColor))
-                    cornerRadius = dp(12).toFloat()
-                }
-                layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).apply {
-                    marginEnd = dp(14)
-                }
-            }
-            card.addView(iconBadge)
-            val textContainer = LinearLayout(ctx).apply {
-                orientation = LinearLayout.VERTICAL
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            }
 
-            val cardTitle = TextView(ctx).apply {
-                text = titleText
-                textSize = 15f
-                setTypeface(null, Typeface.BOLD)
-                setTextColor(Color.parseColor("#CAD3F5"))
-            }
-            textContainer.addView(cardTitle)
-
-            val cardDesc = TextView(ctx).apply {
-                text = descText
-                textSize = 12f
-                setTextColor(Color.parseColor("#A5ADCB"))
-                setPadding(0, dp(2), 0, 0)
-            }
-            textContainer.addView(cardDesc)
-
-            card.addView(textContainer)
-            val arrow = TextView(ctx).apply {
-                text = "↗"
-                textSize = 17f
-                setTextColor(Color.parseColor("#6E738D"))
-                setTypeface(null, Typeface.BOLD)
-            }
-            card.addView(arrow)
-
-            return card
-        }
-        root.addView(
-            createPlatformCard(
-                badgeIcon = "📧",
-                badgeColor = "#229ED9",
-                titleText = "قناة التليجرام",
-                descText = "أحدث الإصدارات، الروابط والأخبار",
-                targetUrl = "https://t.me/cs3iq"
-            )
-        )
-
-        root.addView(
-            createPlatformCard(
-                badgeIcon = "☄️",
-                badgeColor = "#5865F2",
-                titleText = "سيرفر الديسكورد",
-                descText = "نقاشات المجتمع، الدعم الفني والاقتراحات",
-                targetUrl = "https://discord.gg/xY63qaQRw"
-            )
-        )
-
-        root.addView(
-            createPlatformCard(
-                badgeIcon = "🔗",
-                badgeColor = "#313244",
-                titleText = "مشروع GitHub",
-                descText = "المستودع المفتوح، الإبلاغ عن مشاكل والمساهمة",
-                targetUrl = "https://github.com/Abodabodd/re-3arabi"
-            )
-        )
-
+        root.addView(card("📧", "#229ED9", "قناة التليجرام", "أحدث الإصدارات", "https://t.me/cs3iq"))
+        root.addView(card("☄️", "#5865F2", "سيرفر الديسكورد", "نقاشات المجتمع", "https://discord.gg/xY63qaQRw"))
+        root.addView(card("🔗", "#313244", "مشروع GitHub", "المستودع المفتوح", "https://github.com/Abodabodd/re-3arabi"))
         return root
     }
 }
-
 
 class YacineTVProvider : MainAPI() {
     companion object {
@@ -272,6 +191,9 @@ class YacineTVProvider : MainAPI() {
         @Volatile private var cachedEtag: String? = null
         @Volatile private var cachedFid: String? = null
         @Volatile private var cachedToken: String? = null
+
+        private const val LOG_IC = "YACINE_IC"
+        private const val LOG_MAIN = "YACINE"
     }
 
     override var mainUrl = "https://def11.ycnapi.com/api"
@@ -288,26 +210,60 @@ class YacineTVProvider : MainAPI() {
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
 
-    private fun getSavedApiUrl(): String {
-        return try {
-            getKey<String>(PREF_SAVED_DOMAIN_KEY) ?: cachedUrl
-        } catch (e: Exception) {
-            cachedUrl
+    // ============================================================
+    //  Interceptor التجريبي — يسجّل كل طلب فيديو
+    // ============================================================
+    override fun getVideoInterceptor(extractorLink: ExtractorLink): Interceptor? {
+        Log.d(LOG_IC, "========== getVideoInterceptor CALLED ==========")
+        Log.d(LOG_IC, "  url     = ${extractorLink.url}")
+        Log.d(LOG_IC, "  referer = ${extractorLink.referer}")
+        Log.d(LOG_IC, "  referer.hex = " +
+            (extractorLink.referer ?: "").toByteArray()
+                .joinToString(" ") { String.format("%02X", it) })
+        Log.d(LOG_IC, "  headers = ${extractorLink.headers}")
+
+        return Interceptor { chain ->
+            val req = chain.request()
+
+            Log.d(LOG_IC, "---- REQUEST INTERCEPTED ----")
+            Log.d(LOG_IC, "  url = ${req.url}")
+            Log.d(LOG_IC, "  method = ${req.method}")
+
+            for ((k, v) in req.headers) {
+                Log.d(LOG_IC, "  header[$k] = $v")
+                if (k.equals("Referer", true) || k.equals("referer", true)) {
+                    val hex = v.toByteArray().joinToString(" ") { String.format("%02X", it) }
+                    Log.d(LOG_IC, "  >> Referer.hex = $hex")
+                    Log.d(LOG_IC, "  >> Referer.len = ${v.toByteArray().size}")
+                }
+            }
+
+            // جرّب استبدال الـ Referer بالنسخة الخام (اختبار)
+            val rawRef = "http://yacinneeee.live\u2060\u200D\u2060\u3164\u200C\u2060\u200D\u2060"
+            val newReq = req.newBuilder()
+                .header("Referer", rawRef)
+                .build()
+
+            Log.d(LOG_IC, "  >> SET Referer to RAW, hex = " +
+                rawRef.toByteArray().joinToString(" ") { String.format("%02X", it) })
+
+            chain.proceed(newReq)
         }
     }
 
+    // ============================================================
+    //  Helpers (سابقة، بدون تغيير)
+    // ============================================================
+    private fun getSavedApiUrl(): String = try {
+        getKey<String>(PREF_SAVED_DOMAIN_KEY) ?: cachedUrl
+    } catch (e: Exception) { cachedUrl }
+
     private fun saveApiUrl(url: String) {
         cachedUrl = url
-        try {
-            setKey(PREF_SAVED_DOMAIN_KEY, url)
-        } catch (e: Exception) { }
+        try { setKey(PREF_SAVED_DOMAIN_KEY, url) } catch (_: Exception) {}
     }
 
-    data class LinkData(
-        val id: String,
-        val name: String,
-        val poster: String?
-    )
+    data class LinkData(val id: String, val name: String, val poster: String?)
 
     private fun generateFid(): String {
         val randomBytes = ByteArray(17)
@@ -318,12 +274,8 @@ class YacineTVProvider : MainAPI() {
 
     private fun getFirebaseToken(fid: String): String? {
         val url = "https://firebaseinstallations.googleapis.com/v1/projects/$FB_PROJECT_ID/installations"
-        val jsonBody = """
-            {"fid":"$fid","appId":"$FB_APP_ID","authVersion":"FIS_v2","sdkVersion":"a:18.0.0"}
-        """.trimIndent()
-
-        val request = Request.Builder()
-            .url(url)
+        val jsonBody = """{"fid":"$fid","appId":"$FB_APP_ID","authVersion":"FIS_v2","sdkVersion":"a:18.0.0"}"""
+        val req = Request.Builder().url(url)
             .header("Content-Type", "application/json")
             .header("X-Android-Package", FB_PKG)
             .header("X-Android-Cert", FB_CERT)
@@ -332,46 +284,31 @@ class YacineTVProvider : MainAPI() {
             .header("User-Agent", "Dalvik/2.1.0 (Linux; U; Android 16; RMX5061 Build/BP2A.250605.015)")
             .post(jsonBody.toRequestBody("application/json".toMediaType()))
             .build()
-
         return try {
-            client.newCall(request).execute().use { res ->
-                if (res.isSuccessful) {
-                    val body = res.body?.string() ?: ""
-                    parseJson<FirebaseInstallationResponse>(body).authToken?.token
-                } else null
+            client.newCall(req).execute().use { res ->
+                if (res.isSuccessful) parseJson<FirebaseInstallationResponse>(res.body?.string() ?: "").authToken?.token
+                else null
             }
-        } catch (e: Exception) {
-            null
-        }
+        } catch (_: Exception) { null }
     }
 
     private suspend fun syncDynamicApiUrl(): String = withContext(Dispatchers.IO) {
         var fid = cachedFid
         var token = cachedToken
-
         if (fid.isNullOrEmpty() || token.isNullOrEmpty()) {
-            fid = generateFid()
-            token = getFirebaseToken(fid)
-            if (token != null) {
-                cachedFid = fid
-                cachedToken = token
-            }
+            fid = generateFid(); token = getFirebaseToken(fid)
+            if (token != null) { cachedFid = fid; cachedToken = token }
         }
-
         if (token.isNullOrEmpty() || fid.isNullOrEmpty()) return@withContext getSavedApiUrl()
 
-        val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+        val iso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
             timeZone = TimeZone.getTimeZone("UTC")
-        }
-        val currentTimeIso = isoFormat.format(Date())
+        }.format(Date())
 
         val url = "https://firebaseremoteconfig.googleapis.com/v1/projects/$FB_PROJECT_NUMBER/namespaces/firebase:fetch"
-        val jsonPayload = """
-            {"appVersion":"3.1","firstOpenTime":"$currentTimeIso","timeZone":"Asia/Baghdad","appInstanceIdToken":"$token","languageCode":"ar-IQ","appBuild":"4","appInstanceId":"$fid","countryCode":"IQ","analyticsUserProperties":{},"appId":"$FB_APP_ID","platformVersion":"36","sdkVersion":"22.0.0","packageName":"$FB_PKG"}
-        """.trimIndent()
+        val payload = """{"appVersion":"3.1","firstOpenTime":"$iso","timeZone":"Asia/Baghdad","appInstanceIdToken":"$token","languageCode":"ar-IQ","appBuild":"4","appInstanceId":"$fid","countryCode":"IQ","analyticsUserProperties":{},"appId":"$FB_APP_ID","platformVersion":"36","sdkVersion":"22.0.0","packageName":"$FB_PKG"}"""
 
-        val reqBuilder = Request.Builder()
-            .url(url)
+        val rb = Request.Builder().url(url)
             .header("Content-Type", "application/json")
             .header("X-Goog-Api-Key", FB_API_KEY)
             .header("X-Android-Package", FB_PKG)
@@ -379,32 +316,23 @@ class YacineTVProvider : MainAPI() {
             .header("X-Goog-Firebase-Installations-Auth", token)
             .header("X-Firebase-RC-Fetch-Type", "BASE/1")
             .header("User-Agent", "Dalvik/2.1.0 (Linux; U; Android 16; RMX5061 Build/BP2A.250605.015)")
-            .post(jsonPayload.toRequestBody("application/json".toMediaType()))
-
-        if (!cachedEtag.isNullOrEmpty()) {
-            reqBuilder.header("If-None-Match", cachedEtag!!)
-        }
+            .post(payload.toRequestBody("application/json".toMediaType()))
+        if (!cachedEtag.isNullOrEmpty()) rb.header("If-None-Match", cachedEtag!!)
 
         try {
-            client.newCall(reqBuilder.build()).execute().use { res ->
-                val newEtag = res.header("ETag")
-                if (newEtag != null) cachedEtag = newEtag
-
+            client.newCall(rb.build()).execute().use { res ->
+                val et = res.header("ETag"); if (et != null) cachedEtag = et
                 if (res.isSuccessful) {
-                    val body = res.body?.string() ?: ""
-                    val config = parseJson<RemoteConfigResponse>(body)
-
-                    if (config.state == "UPDATE") {
-                        val newDomain = config.entries?.get("defaults")
-                        if (!newDomain.isNullOrEmpty()) {
-                            val updatedUrl = "https://$newDomain/api"
-                            saveApiUrl(updatedUrl)
-                            return@withContext updatedUrl
+                    val cfg = parseJson<RemoteConfigResponse>(res.body?.string() ?: "")
+                    if (cfg.state == "UPDATE") {
+                        cfg.entries?.get("defaults")?.takeIf { it.isNotEmpty() }?.let {
+                            val u = "https://$it/api"
+                            saveApiUrl(u); return@withContext u
                         }
                     }
                 }
             }
-        } catch (e: Exception) { }
+        } catch (_: Exception) {}
         getSavedApiUrl()
     }
 
@@ -417,222 +345,134 @@ class YacineTVProvider : MainAPI() {
                 result[i] = (decodedBytes[i].toInt() xor fullKey[i % fullKey.size].toInt()).toByte()
             }
             String(result, Charsets.UTF_8)
-        } catch (e: Exception) {
-            ""
-        }
+        } catch (_: Exception) { "" }
     }
 
     private fun executeYacineRequest(baseUrl: String, path: String): YacineResponse? {
-        val cleanBase = baseUrl.trimEnd('/')
-        val cleanPath = path.trimStart('/')
-        val fullUrl = "$cleanBase/$cleanPath"
-
+        val fullUrl = "${baseUrl.trimEnd('/')}/${path.trimStart('/')}"
         return try {
-            val request = Request.Builder()
-                .url(fullUrl)
+            val req = Request.Builder().url(fullUrl)
                 .header("User-Agent", "okhttp/4.12.0")
                 .header("Accept", "application/json")
                 .build()
-
-            client.newCall(request).execute().use { response ->
-                if (response.code == 200) {
-                    val body = response.body?.string() ?: ""
-                    val tHeader = response.header("t") ?: ""
-
+            client.newCall(req).execute().use { r ->
+                if (r.code == 200) {
+                    val body = r.body?.string() ?: ""
+                    val t = r.header("t") ?: ""
                     if (body.isNotEmpty()) {
-                        val decryptedJson = decrypt(body, tHeader)
-                        if (decryptedJson.isNotEmpty()) {
-                            return parseJson<YacineResponse>(decryptedJson)
-                        }
+                        val js = decrypt(body, t)
+                        if (js.isNotEmpty()) return parseJson<YacineResponse>(js)
                     }
                 }
                 null
             }
-        } catch (e: Exception) {
-            null
-        }
+        } catch (_: Exception) { null }
     }
 
     private suspend fun fetchYacine(path: String): YacineResponse? = withContext(Dispatchers.IO) {
-        val currentSavedUrl = getSavedApiUrl()
-        val initialEndpoints = listOf(currentSavedUrl, fallbackUrl).distinct()
-
-        for (baseUrl in initialEndpoints) {
-            val res = executeYacineRequest(baseUrl, path)
-            if (res != null) {
-                saveApiUrl(baseUrl)
-                return@withContext res
-            }
+        val eps = listOf(getSavedApiUrl(), fallbackUrl).distinct()
+        for (b in eps) {
+            executeYacineRequest(b, path)?.let { saveApiUrl(b); return@withContext it }
         }
-
-        val newDynamicUrl = syncDynamicApiUrl()
-
-        if (!initialEndpoints.contains(newDynamicUrl)) {
-            val res = executeYacineRequest(newDynamicUrl, path)
-            if (res != null) {
-                saveApiUrl(newDynamicUrl)
-                return@withContext res
-            }
+        val dyn = syncDynamicApiUrl()
+        if (!eps.contains(dyn)) {
+            executeYacineRequest(dyn, path)?.let { saveApiUrl(dyn); return@withContext it }
         }
-
         null
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse = withContext(Dispatchers.IO) {
-        val categories = fetchYacine("categories")?.data ?: emptyList()
-
-        val homePageLists = categories.map { cat ->
+        val cats = fetchYacine("categories")?.data ?: emptyList()
+        val lists = cats.map { cat ->
             async {
-                val channels = fetchYacine("categories/${cat.id}/channels")?.data ?: emptyList()
-                if (channels.isEmpty()) return@async null
-
-                val channelItems = channels.map { chan ->
-                    val data = LinkData(chan.id ?: "", chan.name ?: "Unknown", chan.logo).toJson()
-                    newLiveSearchResponse(chan.name ?: "Unknown", data, TvType.Live) {
-                        this.posterUrl = chan.logo
-                    }
-                }
-                HomePageList(cat.name ?: "Category", channelItems)
+                val chans = fetchYacine("categories/${cat.id}/channels")?.data ?: emptyList()
+                if (chans.isEmpty()) return@async null
+                HomePageList(cat.name ?: "Category", chans.map { c ->
+                    val d = LinkData(c.id ?: "", c.name ?: "Unknown", c.logo).toJson()
+                    newLiveSearchResponse(c.name ?: "Unknown", d, TvType.Live) { this.posterUrl = c.logo }
+                })
             }
         }.awaitAll().filterNotNull()
-
-        newHomePageResponse(homePageLists)
+        newHomePageResponse(lists)
     }
 
     override suspend fun search(query: String): List<SearchResponse> = withContext(Dispatchers.IO) {
-        val categories = fetchYacine("categories")?.data ?: emptyList()
-        val deferredList = categories.map { cat ->
+        val cats = fetchYacine("categories")?.data ?: emptyList()
+        cats.map { cat ->
             async {
-                val channels = fetchYacine("categories/${cat.id}/channels")?.data ?: emptyList()
-                channels.filter { it.name?.contains(query, ignoreCase = true) == true }.map { chan ->
-                    val data = LinkData(chan.id ?: "", chan.name ?: "Unknown", chan.logo).toJson()
-                    newLiveSearchResponse(chan.name ?: "Unknown", data, TvType.Live) {
-                        this.posterUrl = chan.logo
-                    }
+                val chans = fetchYacine("categories/${cat.id}/channels")?.data ?: emptyList()
+                chans.filter { it.name?.contains(query, true) == true }.map { c ->
+                    val d = LinkData(c.id ?: "", c.name ?: "Unknown", c.logo).toJson()
+                    newLiveSearchResponse(c.name ?: "Unknown", d, TvType.Live) { this.posterUrl = c.logo }
                 }
             }
-        }
-        deferredList.awaitAll().flatten()
+        }.awaitAll().flatten()
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val data = parseJson<LinkData>(url)
-        return newMovieLoadResponse(
-            data.name,
-            url,
-            TvType.Live,
-            url
-        ) {
-            this.posterUrl = data.poster
-            this.plot = "شاهد بث مباشر لقناة ${data.name}"
+        val d = parseJson<LinkData>(url)
+        return newMovieLoadResponse(d.name, url, TvType.Live, url) {
+            this.posterUrl = d.poster
+            this.plot = "شاهد بث مباشر لقناة ${d.name}"
         }
     }
 
-    private fun resolveDirectStreamUrl(rawUrl: String, rawReferer: String, userAgent: String): String {
-        if (!rawUrl.contains("varie-redirect.com")) return rawUrl
-
-        return try {
-            val uri = URI(rawUrl)
-            val host = uri.host ?: return rawUrl
-            val isHttps = rawUrl.startsWith("https://", ignoreCase = true)
-            val port = if (uri.port != -1) uri.port else (if (isHttps) 443 else 80)
-            val path = (if (uri.rawPath.isNullOrEmpty()) "/" else uri.rawPath) +
-                    (if (uri.rawQuery != null) "?${uri.rawQuery}" else "")
-
-            val socket = if (isHttps) {
-                HttpsURLConnection.getDefaultSSLSocketFactory().createSocket(host, port)
-            } else {
-                Socket(host, port)
-            }
-            socket.soTimeout = 8000
-
-            val rawRequest = "GET $path HTTP/1.1\r\n" +
-                    "Host: $host\r\n" +
-                    "User-Agent: $userAgent\r\n" +
-                    "Referer: $rawReferer\r\n" +
-                    "sec-ch-ua: \"Chromium\";v=\"91\", \" Not;A Brand\";v=\"99\"\r\n" +
-                    "sec-ch-ua-mobile: ?0\r\n" +
-                    "sec-fetch-mode: navigate\r\n" +
-                    "sec-fetch-user: ?1\r\n" +
-                    "accept: */*\r\n" +
-                    "sec-fetch-dest: video\r\n" +
-                    "Connection: close\r\n\r\n"
-
-            socket.getOutputStream().write(rawRequest.toByteArray(Charsets.UTF_8))
-            socket.getOutputStream().flush()
-
-            val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
-            var line: String?
-            var location: String? = null
-
-            while (reader.readLine().also { line = it } != null) {
-                if (line.isNullOrEmpty()) break
-                if (line!!.startsWith("Location:", ignoreCase = true)) {
-                    location = line!!.substring(9).trim()
-                    break
-                }
-            }
-            socket.close()
-
-            location ?: rawUrl
-        } catch (e: Exception) {
-            rawUrl
-        }
-    }
-
+    // ============================================================
+    //  loadLinks — بدون وسيط، headers فقط
+    // ============================================================
     override suspend fun loadLinks(
-    data: String,
-    isCasting: Boolean,
-    subtitleCallback: (SubtitleFile) -> Unit,
-    callback: (ExtractorLink) -> Unit
-): Boolean = withContext(Dispatchers.IO) {
-    val linkData = try {
-        parseJson<LinkData>(data)
-    } catch (e: Exception) {
-        return@withContext false
+        data: String,
+        isCasting: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean = withContext(Dispatchers.IO) {
+        Log.d(LOG_MAIN, "========== loadLinks START ==========")
+        val linkData = try { parseJson<LinkData>(data) } catch (_: Exception) { return@withContext false }
+
+        val streams = fetchYacine("channel/${linkData.id}")?.data ?: return@withContext false
+        Log.d(LOG_MAIN, "streams.size=${streams.size}")
+
+        streams.forEachIndexed { index, stream ->
+            val rawUrl = stream.url?.replace("www.elahmad.coo", "www.elahmad.com") ?: ""
+            if (rawUrl.isEmpty()) return@forEachIndexed
+
+            val rawReferer = (stream.headers?.get("Referer") as? String)
+                ?: "http://yacinneeee.live\u2060\u200D\u2060\u3164\u200C\u2060\u200D\u2060"
+            val ua = (stream.headers?.get("User-Agent") as? String)
+                ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+
+            Log.d(LOG_MAIN, "  [$index] ${stream.name}")
+            Log.d(LOG_MAIN, "    url=$rawUrl")
+            Log.d(LOG_MAIN, "    referer.len=${rawReferer.toByteArray().size}")
+            Log.d(LOG_MAIN, "    referer.hex=" +
+                rawReferer.toByteArray().joinToString(" ") { String.format("%02X", it) })
+
+            callback.invoke(
+                newExtractorLink(
+                    this@YacineTVProvider.name,
+                    stream.name ?: "Server ${index + 1}",
+                    rawUrl
+                ) {
+                    this.headers = mapOf(
+                        "Referer" to rawReferer,
+                        "User-Agent" to ua
+                    )
+                    this.quality = Qualities.Unknown.value
+                }
+            )
+        }
+        true
     }
 
-    val responseData = fetchYacine("channel/${linkData.id}")
-    val streams = responseData?.data ?: return@withContext false
-
-    streams.forEachIndexed { index, stream ->
-        val rawUrl = stream.url?.replace("www.elahmad.coo", "www.elahmad.com") ?: ""
-        if (rawUrl.isEmpty()) return@forEachIndexed
-        val refererFromApi = (stream.headers?.get("Referer") as? String)
-            ?: "http://yacinneeee.live\u2060\u200D\u2060\u3164\u200C\u2060\u200D\u2060"
-        val userAgent = (stream.headers?.get("User-Agent") as? String)
-            ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
-        val refBytes = refererFromApi.toByteArray(Charsets.UTF_8)
-        android.util.Log.d("YACINE_TEST", "referer length=${refBytes.size}")
-        android.util.Log.d("YACINE_TEST", "referer hex=" +
-            refBytes.joinToString(" ") { String.format("%02X", it) })
-
-        val finalStreamUrl = resolveDirectStreamUrl(rawUrl, refererFromApi, userAgent)
-
-        callback.invoke(
-            newExtractorLink(
-                this@YacineTVProvider.name,
-                stream.name ?: "Server ${index + 1}",
-                finalStreamUrl
-            ) {
-                this.headers = mapOf(
-                    "Referer" to refererFromApi,
-                    "User-Agent" to userAgent
-                )
-                this.quality = Qualities.Unknown.value
-            }
-        )
-    }
-    true
-}
+    // ============================================================
+    //  DTOs
+    // ============================================================
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class FirebaseInstallationResponse(
         @JsonProperty("authToken") val authToken: AuthToken? = null
     ) {
         @JsonIgnoreProperties(ignoreUnknown = true)
-        data class AuthToken(
-            @JsonProperty("token") val token: String? = null
-        )
+        data class AuthToken(@JsonProperty("token") val token: String? = null)
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
