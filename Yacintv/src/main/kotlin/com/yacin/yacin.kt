@@ -58,11 +58,6 @@ import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 import javax.net.ssl.HttpsURLConnection
 
-
-// ============================================================
-//  Plugin
-// ============================================================
-
 @CloudstreamPlugin
 class YacineTVPlugin : Plugin() {
     override fun load(context: Context) {
@@ -74,11 +69,6 @@ class YacineTVPlugin : Plugin() {
         }
     }
 }
-
-
-// ============================================================
-//  Settings sheet (unchanged)
-// ============================================================
 
 class YacineSettings : BottomSheetDialogFragment() {
 
@@ -225,11 +215,6 @@ class YacineSettings : BottomSheetDialogFragment() {
     }
 }
 
-
-// ============================================================
-//  Provider (with detailed logs)
-// ============================================================
-
 class YacineTVProvider : MainAPI() {
     companion object {
         private const val FB_PROJECT_ID = "ycntv-7a08e"
@@ -261,10 +246,6 @@ class YacineTVProvider : MainAPI() {
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
-
-    // ============================================================
-    //  Logging helpers
-    // ============================================================
 
     private fun ylog(tag: String, msg: String) {
         Log.d(LOG_TAG, "[$tag] $msg")
@@ -304,10 +285,6 @@ class YacineTVProvider : MainAPI() {
         return sb.toString()
     }
 
-    // ============================================================
-    //  Domain persistence
-    // ============================================================
-
     private fun getSavedApiUrl(): String {
         return try {
             getKey<String>(PREF_SAVED_DOMAIN_KEY) ?: cachedUrl
@@ -328,10 +305,6 @@ class YacineTVProvider : MainAPI() {
         val name: String,
         val poster: String?
     )
-
-    // ============================================================
-    //  Firebase / RemoteConfig
-    // ============================================================
 
     private fun generateFid(): String {
         val randomBytes = ByteArray(17)
@@ -460,10 +433,6 @@ class YacineTVProvider : MainAPI() {
         getSavedApiUrl()
     }
 
-    // ============================================================
-    //  Decryption
-    // ============================================================
-
     private fun decrypt(encryptedText: String, tHeader: String): String {
         return try {
             val fullKey = (baseKey + tHeader).toByteArray(Charsets.UTF_8)
@@ -486,10 +455,6 @@ class YacineTVProvider : MainAPI() {
             ""
         }
     }
-
-    // ============================================================
-    //  Yacine HTTP layer
-    // ============================================================
 
     private fun executeYacineRequest(baseUrl: String, path: String): YacineResponse? {
         val cleanBase = baseUrl.trimEnd('/')
@@ -606,10 +571,6 @@ class YacineTVProvider : MainAPI() {
         null
     }
 
-    // ============================================================
-    //  MainAPI overrides
-    // ============================================================
-
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse = withContext(Dispatchers.IO) {
         ylog("MAIN", "getMainPage(page=$page)")
         val categories = fetchYacine("categories")?.data ?: emptyList()
@@ -667,10 +628,6 @@ class YacineTVProvider : MainAPI() {
             this.plot = "شاهد بث مباشر لقناة ${data.name}"
         }
     }
-
-    // ============================================================
-    //  Stream resolution (with heavy logs)
-    // ============================================================
 
     private fun resolveDirectStreamUrl(rawUrl: String, rawReferer: String, userAgent: String): String {
         if (!rawUrl.contains("varie-redirect.com")) {
@@ -751,10 +708,6 @@ class YacineTVProvider : MainAPI() {
         }
     }
 
-    // ============================================================
-    //  loadLinks (with heavy logs)
-    // ============================================================
-
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -830,10 +783,6 @@ class YacineTVProvider : MainAPI() {
         ylog("LOADLINKS", "===== END =====")
         true
     }
-
-    // ============================================================
-    //  DTOs
-    // ============================================================
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class FirebaseInstallationResponse(
