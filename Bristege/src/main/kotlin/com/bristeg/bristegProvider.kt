@@ -55,8 +55,6 @@ class BrstejProvider : MainAPI() {
         }
         return u
     }
-
-    // دالة شاملة لاستخراج بوستر البطاقة من src أو srcset أو data-attributes
     private fun Element.getCardPoster(): String? {
         val img = this.selectFirst("img")
         val source = this.selectFirst("picture source[srcset], source[srcset]")
@@ -438,8 +436,6 @@ class BrstejProvider : MainAPI() {
 
             try {
                 val embedText = app.get(embedUrl, referer = referer, timeout = 15).text
-
-                // فحص الفيديو المباشر في النص
                 findVideoInText(embedText)?.let {
                     callback(
                         newExtractorLink(
@@ -452,8 +448,6 @@ class BrstejProvider : MainAPI() {
                         })
                     foundDirect = true
                 }
-
-                // فحص JW Player
                 if (!foundDirect) {
                     val jwPlayerScriptMatch =
                         Regex("""jwplayer\.key\s*=\s*['"]([^'"]+)['"];[\s\S]*?(jwplayer\.setup\s*\(\{([\s\S]*?)\}\);)""").find(
@@ -477,8 +471,6 @@ class BrstejProvider : MainAPI() {
                         }
                     }
                 }
-
-                // فحص Packed JS
                 if (!foundDirect) {
                     val packedJsMatch =
                         Regex("""eval\((function\s*\(.*)\)\)""", RegexOption.DOT_MATCHES_ALL).find(
@@ -501,8 +493,6 @@ class BrstejProvider : MainAPI() {
                         }
                     }
                 }
-
-                // فحص ما إذا كان هناك Iframe داخلي (مثل تضمين ok.ru داخل السيرفر)
                 if (!foundDirect) {
                     val innerIframe = Regex("""<iframe[^>]+src=["'](https?://[^"']+)["']""").find(embedText)?.groupValues?.get(1)
                     if (!innerIframe.isNullOrBlank()) {
@@ -516,8 +506,6 @@ class BrstejProvider : MainAPI() {
                 }
 
             } catch (_: Exception) {}
-
-            // إذا لم يتم استخراج أي رابط بالطرق السابقة، نرسله لمكتبة loadExtractor (مثل ok.ru, vk, إلخ)
             if (!foundDirect) {
                 try {
                     loadExtractor(
@@ -570,8 +558,6 @@ class BrstejProvider : MainAPI() {
                     embedLinksToProcess.add(Triple(buildAbsoluteUrl(iframeSrcFromWatchPage, data), "سيرفر رئيسي", "HD"))
                 }
             }
-
-            // إزالة السيرفرات المكررة
             val uniqueEmbeds = embedLinksToProcess.distinctBy { it.first }
 
             val processedUrls = mutableSetOf<String>()
