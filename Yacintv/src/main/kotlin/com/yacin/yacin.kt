@@ -233,7 +233,7 @@ class YacineTVProvider : MainAPI() {
                     Log.d(LOG_IC, "  >> Referer.len = ${v.toByteArray().size}")
                 }
             }
-            val rawRef = "http://yacinneeee.live\u2060\u200D\u2060\u3164\u200C\u2060\u200D\u2060"
+            val rawRef = "http://yacinneeee.live⁠‍⁠ㅤ‌⁠‍⁠"
             val newReq = req.newBuilder()
                 .header("Referer", rawRef)
                 .build()
@@ -423,7 +423,7 @@ class YacineTVProvider : MainAPI() {
             if (rawUrl.isEmpty()) return@forEachIndexed
 
             val rawReferer = (stream.headers?.get("Referer") as? String)
-                ?: "http://yacinneeee.live\u2060\u200D\u2060\u3164\u200C\u2060\u200D\u2060"
+                ?: "http://yacinneeee.live⁠‍⁠ㅤ‌⁠‍⁠"
             val ua = (stream.headers?.get("User-Agent") as? String)
                 ?: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
 
