@@ -379,19 +379,33 @@ class BrstejProvider : MainAPI() {
         }
 
         fun findVideoInText(text: String): String? {
-            val patterns = listOf(
-                Regex("""(?:file|src)\s*:\s*['"](https?://[^'"]+)['"]"""),
-                Regex("""['"](https?://[^\s'"]+\.(?:m3u8|mp4)[^\s'"]*)['"]"""),
-                Regex("""(https?://[^\s'"]+\.(?:m3u8|mp4)[^\s'"]*)""")
-            )
-            for (p in patterns) {
-                p.find(text)?.groupValues?.get(1)?.let {
-                    return it
-                }
-            }
-            return null
-        }
+    // 1) فك ترميز HTML و Unicode أولاً (مثل بايثون)
+    val cleaned = text
+        .replace("&quot;", "\"")
+        .replace("&amp;", "&")
+        .replace("\\u0026", "&")
+        .replace("\\/", "/")
+        .replace("\\u003D", "=")
+        .replace("\\u003F", "?")
 
+    // 2) أنماط OK.ru أولاً (الأدق)
+    Regex(""""ondemandHls"\s*:\s*"(https?://[^"]+)"""")
+        .find(cleaned)?.groupValues?.get(1)?.let { return it }
+
+    Regex(""""name"\s*:\s*"([^"]+)"\s*,\s*"url"\s*:\s*"(https?://[^"]+)"""")
+        .find(cleaned)?.groupValues?.get(2)?.let { return it }
+
+    // 3) الأنماط العامة كاحتياط
+    val patterns = listOf(
+        Regex("""(?:file|src)\s*:\s*['"](https?://[^'"]+)['"]"""),
+        Regex("""['"](https?://[^\s'"]+\.(?:m3u8|mp4)[^\s'"]*)['"]"""),
+        Regex("""(https?://[^\s'"]+\.(?:m3u8|mp4)[^\s'"]*)""")
+    )
+    for (p in patterns) {
+        p.find(cleaned)?.groupValues?.get(1)?.let { return it }
+    }
+    return null
+}
         suspend fun extractFromEmbed(
             embedUrl: String,
             referer: String,
