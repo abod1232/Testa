@@ -313,245 +313,56 @@ class BrstejProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-
-        fun intToBaseStr(n: Int, baseNum: Int): String {
-            val digits = "0123456789abcdefghijklmnopqrstuvwxyz"
-            return if (n < baseNum) digits.getOrNull(n)?.toString() ?: ""
-            else intToBaseStr(n / baseNum, baseNum) + (digits.getOrNull(n % baseNum) ?: "")
-        }
-
-        fun jsUnescape(s: String): String {
-            var r = s
-            r = Regex("""\\x([0-9a-fA-F]{2})""").replace(r) { mr ->
-                try {
-                    mr.groupValues[1].toInt(16).toChar().toString()
-                } catch (_: Exception) {
-                    mr.value
-                }
-            }
-            r = Regex("""\\u([0-9a-fA-F]{4})""").replace(r) { mr ->
-                try {
-                    mr.groupValues[1].toInt(16).toChar().toString()
-                } catch (_: Exception) {
-                    mr.value
-                }
-            }
-            return r.replace("""\"""", "\"").replace("""\'""", "'").replace("""\\""", "\\")
-                .replace("""\n""", "\n").replace("""\r""", "\r").replace("""\t""", "\t")
-        }
-
-        fun unpackJs(packedJs: String): String? {
-            try {
-                val regex = Regex(
-                    """eval\(function\s*\(p,a,c,k,e,d\)\s*\{[\s\S]*?\}\s*\(\s*(['"])(.*?)\1\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])(.*?)\5\.split\(['"]\|['"]\)\s*\)\s*\)""",
-                    RegexOption.DOT_MATCHES_ALL
-                )
-                val m = regex.find(packedJs)
-                if (m == null) {
-                    return null
-                }
-
-                val payloadRaw = m.groupValues[2]
-                val base = m.groupValues[3].toIntOrNull() ?: return null
-                val count = m.groupValues[4].toIntOrNull() ?: return null
-                val dictRaw = m.groupValues[6]
-                val dictionary = dictRaw.split("|")
-
-                val payload = jsUnescape(payloadRaw)
-                val lookup = mutableMapOf<String, String>()
-                for (i in (count - 1) downTo 0) {
-                    val key = intToBaseStr(i, base).ifBlank { i.toString() }
-                    val value = dictionary.getOrNull(i)?.ifBlank { key } ?: key
-                    lookup[key] = value
-                }
-
-                val unpacked = Regex("""\b\w+\b""").replace(payload) { mr ->
-                    lookup[mr.value] ?: mr.value
-                }
-
-                if (unpacked.isBlank()) {
-                    return null
-                }
-                return unpacked
-            } catch (_: Exception) {
-                return null
-            }
-        }
-
-        fun findVideoInText(text: String): String? {
-            val patterns = listOf(
-                Regex("""(?:file|src)\s*:\s*['"](https?://[^'"]+)['"]"""),
-                Regex("""['"](https?://[^\s'"]+\.(?:m3u8|mp4)[^\s'"]*)['"]"""),
-                Regex("""(https?://[^\s'"]+\.(?:m3u8|mp4)[^\s'"]*)""")
-            )
-            for (p in patterns) {
-                p.find(text)?.groupValues?.get(1)?.let {
-                    return it
-                }
-            }
-            return null
-        }
-
-        suspend fun extractFromEmbed(
-            embedUrl: String,
-            referer: String,
-            serverName: String,
-            quality: Int,
-            callback: (ExtractorLink) -> Unit,
-            subtitleCallback: (SubtitleFile) -> Unit
-        ) {
-            suspend fun unpackAndExtractInternal(
-                packedJsCode: String,
-                currentEmbedUrl: String
-            ): String? {
-                var unpacked: String? = null
-                try {
-                    unpacked = JsUnpacker(packedJsCode).unpack()
-                } catch (_: Exception) {}
-
-                if (unpacked.isNullOrBlank()) {
-                    unpacked = unpackJs(packedJsCode)
-                }
-
-                if (unpacked.isNullOrBlank()) {
-                    return null
-                }
-                return findVideoInText(unpacked)
-            }
-
-            try {
-                val embedText = app.get(embedUrl, referer = referer, timeout = 15).text
-
-                findVideoInText(embedText)?.let {
-                    callback(
-                        newExtractorLink(
-                            this@BrstejProvider.name,
-                            "$serverName (direct)",
-                            it
-                        ) {
-                            this.referer = embedUrl
-                            this.quality = quality
-                        })
-                    return
-                }
-
-                val jwPlayerScriptMatch =
-                    Regex("""jwplayer\.key\s*=\s*['"]([^'"]+)['"];[\s\S]*?(jwplayer\.setup\s*\(\{([\s\S]*?)\}\);)""").find(
-                        embedText
-                    )
-                if (jwPlayerScriptMatch != null) {
-                    val jwSetupStatement = jwPlayerScriptMatch.groupValues[2]
-                    val videoUrl = unpackAndExtractInternal(jwSetupStatement, embedUrl)
-
-                    if (videoUrl != null) {
-                        callback(
-                            newExtractorLink(
-                                this@BrstejProvider.name,
-                                "$serverName (JW Player)",
-                                videoUrl
-                            ) {
-                                this.referer = embedUrl
-                                this.quality = quality
-                            })
-                        return
-                    }
-                }
-
-                val packedJsMatch =
-                    Regex("""eval\((function\s*\(.*)\)\)""", RegexOption.DOT_MATCHES_ALL).find(
-                        embedText
-                    )
-                if (packedJsMatch != null) {
-                    val fullEval = "eval(${packedJsMatch.groupValues[1]})"
-                    val videoUrl = unpackAndExtractInternal(fullEval, embedUrl)
-                    if (videoUrl != null) {
-                        callback(
-                            newExtractorLink(
-                                this@BrstejProvider.name,
-                                "$serverName ",
-                                videoUrl
-                            ) {
-                                this.referer = embedUrl
-                                this.quality = quality
-                            })
-                        return
-                    }
-                }
-                val innerIframe = Regex("""<iframe[^>]+src=["'](https?://[^"']+)["']""").find(embedText)?.groupValues?.get(1)
-                if (!innerIframe.isNullOrBlank()) {
-                    loadExtractor(
-                        innerIframe,
-                        embedUrl,
-                        subtitleCallback,
-                        callback
-                    )
-                }
-                loadExtractor(
-                    embedUrl,
-                    referer,
-                    subtitleCallback,
-                    callback
-                )
-
-            } catch (_: Exception) {
-                loadExtractor(
-                    embedUrl,
-                    referer,
-                    subtitleCallback,
-                    callback
-                )
-            }
-        }
-
         try {
             val watchDoc = app.get(data, referer = mainUrl, timeout = 15).document
             val playHrefRaw = watchDoc.selectFirst("a.xtgo")?.attr("href")
 
-            val embedLinksToProcess = mutableListOf<Triple<String, String, String?>>()
+            val embedLinksToProcess = mutableListOf<String>()
 
-            if (!playHrefRaw.isNullOrBlank()) {
+            val actualReferer = if (!playHrefRaw.isNullOrBlank()) {
                 val playUrl = buildAbsoluteUrl(playHrefRaw)
                 val playDoc = app.get(playUrl, referer = data, timeout = 15).document
 
                 playDoc.select("div#WatchServers button.watchButton, div#WatchServers button.watchbutton")
                     .forEach { btn ->
                         val rawEmbedUrl = btn.attr("data-embed-url").ifBlank { btn.attr("data-embed") }
-                        val serverName = btn.text().trim()
-                        val qualityStr = "HD"
                         if (rawEmbedUrl.isNotBlank()) {
-                            embedLinksToProcess.add(Triple(buildAbsoluteUrl(rawEmbedUrl, playUrl), serverName, qualityStr))
+                            embedLinksToProcess.add(buildAbsoluteUrl(rawEmbedUrl, playUrl))
                         }
                     }
 
                 val iframeSrcFromPlayPage = playDoc.selectFirst("div#Playerholder iframe")?.attr("src")
                 if (!iframeSrcFromPlayPage.isNullOrBlank()) {
-                    embedLinksToProcess.add(Triple(buildAbsoluteUrl(iframeSrcFromPlayPage, playUrl), "Player Iframe", "HD"))
+                    embedLinksToProcess.add(buildAbsoluteUrl(iframeSrcFromPlayPage, playUrl))
                 }
+                playUrl
             } else {
                 watchDoc.select("div#WatchServers button.watchButton, div#WatchServers button.watchbutton")
                     .forEach { btn ->
                         val rawEmbedUrl = btn.attr("data-embed-url").ifBlank { btn.attr("data-embed") }
-                        val serverName = btn.text().trim()
-                        val qualityStr = "HD"
                         if (rawEmbedUrl.isNotBlank()) {
-                            embedLinksToProcess.add(Triple(buildAbsoluteUrl(rawEmbedUrl, data), serverName, qualityStr))
+                            embedLinksToProcess.add(buildAbsoluteUrl(rawEmbedUrl, data))
                         }
                     }
 
                 val iframeSrcFromWatchPage = watchDoc.selectFirst("div#Playerholder iframe")?.attr("src")
                 if (!iframeSrcFromWatchPage.isNullOrBlank()) {
-                    embedLinksToProcess.add(Triple(buildAbsoluteUrl(iframeSrcFromWatchPage, data), "Player Iframe", "HD"))
+                    embedLinksToProcess.add(buildAbsoluteUrl(iframeSrcFromWatchPage, data))
                 }
+                data
             }
 
             val processedUrls = mutableSetOf<String>()
             kotlinx.coroutines.coroutineScope {
-                for ((currentEmbedUrl, serverName, qualityStr) in embedLinksToProcess) {
+                for (currentEmbedUrl in embedLinksToProcess) {
                     if (processedUrls.add(currentEmbedUrl)) {
-                        val quality = getQualityFromName(qualityStr)
                         launch {
-                            val actualReferer = if (!playHrefRaw.isNullOrBlank()) buildAbsoluteUrl(playHrefRaw, data) else data
-                            extractFromEmbed(currentEmbedUrl, actualReferer, serverName, quality, callback, subtitleCallback)
+                            loadExtractor(
+                                currentEmbedUrl,
+                                actualReferer,
+                                subtitleCallback,
+                                callback
+                            )
                         }
                     }
                 }
