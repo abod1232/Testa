@@ -19,7 +19,6 @@ import java.net.URLEncoder
 class EgyWatchProvider : MainAPI() {
 
     companion object {
-        // قائمة الدومينات - الدومين الشغال أولاً
         private val API_HOSTS = listOf(
             "https://gateway.egywatch.live/egywatchapp/public/api",
             "https://rn62mwg.com/egywatchapp/public/api"
@@ -43,8 +42,6 @@ class EgyWatchProvider : MainAPI() {
     )
 
     private var cachedHostsConfig: List<HostConfigItem>? = null
-
-    // جلب آمن مع تبديل تلقائي بين السيرفرات عند فشل أي منها
     private suspend fun fetchApi(urlOrPath: String, customHeaders: Map<String, String>? = null): String? {
         val path = if (urlOrPath.contains("/public/api/")) {
             urlOrPath.substringAfter("/public/api/")
@@ -55,8 +52,6 @@ class EgyWatchProvider : MainAPI() {
         }
 
         val headers = customHeaders ?: appHeaders
-
-        // تجربة الدومينات بالترتيب حتى يعمل أحدهم
         for (host in API_HOSTS) {
             val fullUrl = if (path.startsWith("http")) path else "$host/$path"
             try {
@@ -191,7 +186,6 @@ class EgyWatchProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse? {
-        // البث المباشر
         if (url.contains("/stream/show/")) {
             val res = fetchApiParsed<MediaDetail>(url) ?: return null
             val videosJson = res.videos?.toJson() ?: ""
@@ -201,16 +195,12 @@ class EgyWatchProvider : MainAPI() {
                 this.plot = res.overview
             }
         }
-
-        // المجموعات وسلاسل الأفلام
         if (url.contains("/collections/media/show/")) {
             val (episodes, poster) = fetchPaginatedMediaList(url)
             return newTvSeriesLoadResponse("سلسلة أفلام", url, TvType.Movie, episodes) {
                 this.posterUrl = poster
             }
         }
-
-        // أعمال الممثلين
         if (url.contains("/filmographie/detail/")) {
             val actorId = url.substringAfter("/detail/").substringBefore("/")
             val castInfo = fetchApiParsed<MediaDetail>("cast/detail/$actorId/$apiKey")
@@ -221,8 +211,6 @@ class EgyWatchProvider : MainAPI() {
                 this.plot = castInfo?.biography ?: "أعمال ومشاركات الممثل"
             }
         }
-
-        // الأفلام الفردية
         if (url.contains("/media/detail/")) {
             val res = fetchApiParsed<MediaDetail>(url) ?: return null
             val videosJson = res.videos?.toJson() ?: ""
@@ -234,8 +222,6 @@ class EgyWatchProvider : MainAPI() {
                 this.score = res.voteAverage?.let { Score.from10(it) }
             }
         }
-
-        // المسلسلات
         val res = fetchApiParsed<MediaDetail>(url) ?: return null
         val episodes = mutableListOf<Episode>()
 
@@ -258,8 +244,6 @@ class EgyWatchProvider : MainAPI() {
                 }
             }
         }
-
-        // ترتيب الحلقات تصاعدياً
         episodes.sortBy { ((it.season ?: 1) * 10000) + (it.episode ?: 0) }
 
         return newTvSeriesLoadResponse(res.name ?: res.title ?: "", url, TvType.TvSeries, episodes) {
