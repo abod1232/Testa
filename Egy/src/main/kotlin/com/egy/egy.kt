@@ -37,8 +37,6 @@ class EgyWatchProvider : MainAPI() {
     )
 
     private var cachedHostsConfig: List<HostConfigItem>? = null
-
-    // --- آلية التبديل التلقائي إلى الرابط الاحتياطي عند الفشل ---
     private suspend fun fetchApi(url: String, headers: Map<String, String> = appHeaders): String? {
         return try {
             val response = app.get(url, headers = headers)
@@ -48,7 +46,6 @@ class EgyWatchProvider : MainAPI() {
                 throw Exception("Response unsuccessful: ${response.code}")
             }
         } catch (e: Exception) {
-            // محاولة استخدام الرابط البديل عند فشل الأساسي
             val altUrl = when {
                 url.startsWith(primaryUrl) -> url.replace(primaryUrl, fallbackUrl)
                 url.startsWith(fallbackUrl) -> url.replace(fallbackUrl, primaryUrl)
@@ -195,16 +192,12 @@ class EgyWatchProvider : MainAPI() {
                 this.plot = res.overview
             }
         }
-
-        // معالجة المجموعات (Collections)
         if (url.contains("/collections/media/show/")) {
             val (episodes, poster) = fetchPaginatedMediaList(url)
             return newTvSeriesLoadResponse("سلسلة أفلام", url, TvType.Movie, episodes) {
                 this.posterUrl = poster
             }
         }
-
-        // معالجة أفلام الممثل (Filmography)
         if (url.contains("/filmographie/detail/")) {
             val actorId = url.substringAfter("/detail/").substringBefore("/")
             val castInfo = fetchApiParsed<MediaDetail>("$mainUrl/cast/detail/$actorId/$apiKey")
@@ -215,8 +208,6 @@ class EgyWatchProvider : MainAPI() {
                 this.plot = castInfo?.biography ?: "أعمال ومشاركات الممثل"
             }
         }
-
-        // معالجة الأفلام
         if (url.contains("/media/detail/")) {
             val res = fetchApiParsed<MediaDetail>(url) ?: return null
             val videosJson = res.videos?.toJson() ?: ""
@@ -228,8 +219,6 @@ class EgyWatchProvider : MainAPI() {
                 this.score = res.voteAverage?.let { Score.from10(it) }
             }
         }
-
-        // معالجة المسلسلات
         val res = fetchApiParsed<MediaDetail>(url) ?: return null
         val episodes = mutableListOf<Episode>()
 
@@ -252,8 +241,6 @@ class EgyWatchProvider : MainAPI() {
                 }
             }
         }
-
-        // ترتيب الحلقات تصاعدياً لتجنب اختلاط الترتيب بعد الـ parallelMap
         episodes.sortBy { ((it.season ?: 1) * 10000) + (it.episode ?: 0) }
 
         return newTvSeriesLoadResponse(res.name ?: res.title ?: "", url, TvType.TvSeries, episodes) {
@@ -262,8 +249,6 @@ class EgyWatchProvider : MainAPI() {
             this.score = res.voteAverage?.let { Score.from10(it) }
         }
     }
-
-    // دالة موحدة لجلب صفحات المجموعات والممثلين دون تكرار
     private suspend fun fetchPaginatedMediaList(url: String, maxPages: Int = 3): Pair<List<Episode>, String?> {
         val episodes = mutableListOf<Episode>()
         var poster: String? = null
