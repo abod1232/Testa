@@ -17,7 +17,10 @@ import org.json.JSONObject
 import java.net.URLEncoder
 
 class EgyWatchProvider : MainAPI() {
-    override var mainUrl = "https://rn62mwg.com/egywatchapp/public/api"
+    private val primaryUrl = "https://rn62mwg.com/egywatchapp/public/api"
+    private val fallbackUrl = "https://gateway.egywatch.live/egywatchapp/public/api"
+
+    override var mainUrl = primaryUrl
     override var name = "EgyWatch"
     override val hasMainPage = true
     override var lang = "ar"
@@ -35,6 +38,45 @@ class EgyWatchProvider : MainAPI() {
 
     private var cachedHostsConfig: List<HostConfigItem>? = null
 
+    // --- آلية التبديل التلقائي إلى الرابط الاحتياطي عند الفشل ---
+    private suspend fun fetchApi(url: String, headers: Map<String, String> = appHeaders): String? {
+        return try {
+            val response = app.get(url, headers = headers)
+            if (response.isSuccessful && response.text.isNotEmpty()) {
+                response.text
+            } else {
+                throw Exception("Response unsuccessful: ${response.code}")
+            }
+        } catch (e: Exception) {
+            // محاولة استخدام الرابط البديل عند فشل الأساسي
+            val altUrl = when {
+                url.startsWith(primaryUrl) -> url.replace(primaryUrl, fallbackUrl)
+                url.startsWith(fallbackUrl) -> url.replace(fallbackUrl, primaryUrl)
+                else -> null
+            }
+
+            if (altUrl != null) {
+                try {
+                    val fallbackResponse = app.get(altUrl, headers = headers)
+                    if (fallbackResponse.isSuccessful) fallbackResponse.text else null
+                } catch (e2: Exception) {
+                    null
+                }
+            } else {
+                null
+            }
+        }
+    }
+
+    private suspend inline fun <reified T : Any> fetchApiParsed(url: String, headers: Map<String, String> = appHeaders): T? {
+        val text = fetchApi(url, headers) ?: return null
+        return try {
+            parseJson<T>(text)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     override val mainPage = mainPageOf(
         "$mainUrl/media/homecontent/$apiKey" to "الصفحة الرئيسية"
     )
@@ -43,7 +85,7 @@ class EgyWatchProvider : MainAPI() {
         page: Int,
         request: MainPageRequest
     ): HomePageResponse? {
-        val responseText = app.get(request.data, headers = appHeaders).text
+        val responseText = fetchApi(request.data) ?: return null
         val json = JSONObject(responseText)
         val sectionsArray = json.optJSONArray("sections") ?: return null
 
@@ -70,6 +112,7 @@ class EgyWatchProvider : MainAPI() {
                 val posterPath = itemObj.optString("poster_path").ifEmpty { 
                     itemObj.optString("profile_path") 
                 }.takeIf { it.isNotEmpty() }
+
                 val directApiUrl = when {
                     sectionType == "channels" || rawType == "channel" -> "$mainUrl/stream/show/$id/$apiKey"
                     sectionType == "collections" -> "$mainUrl/collections/media/show/$id"
@@ -106,40 +149,37 @@ class EgyWatchProvider : MainAPI() {
     override suspend fun search(query: String): List<SearchResponse>? {
         val encodedQuery = URLEncoder.encode("$query|vide", "UTF-8")
         val searchUrl = "$mainUrl/search/$encodedQuery/$apiKey"
-        val responseText = app.get(searchUrl, headers = appHeaders).text
+        val responseText = fetchApi(searchUrl) ?: return null
         val json = JSONObject(responseText)
 
         val results = mutableListOf<SearchResponse>()
+        val searchArray = json.optJSONArray("search") ?: return results
 
-        val searchArray = json.optJSONArray("search")
-        if (searchArray != null) {
-            for (i in 0 until searchArray.length()) {
-                val item = searchArray.optJSONObject(i) ?: continue
-                val id = item.optInt("id", -1).takeIf { it != -1 } ?: continue
-                val title = item.optString("title").ifEmpty { item.optString("name") }
-                if (title.isEmpty()) continue
+        for (i in 0 until searchArray.length()) {
+            val item = searchArray.optJSONObject(i) ?: continue
+            val id = item.optInt("id", -1).takeIf { it != -1 } ?: continue
+            val title = item.optString("title").ifEmpty { item.optString("name") }
+            if (title.isEmpty()) continue
 
-                val type = item.optString("type").lowercase()
-                val posterPath = item.optString("poster_path").takeIf { it.isNotEmpty() }
+            val type = item.optString("type").lowercase()
+            val posterPath = item.optString("poster_path").takeIf { it.isNotEmpty() }
 
-                val directApiUrl = if (type == "movie") {
-                    "$mainUrl/media/detail/$id/$apiKey"
-                } else {
-                    "$mainUrl/series/show/$id/$apiKey"
-                }
-
-                val res = if (type == "movie") {
-                    newMovieSearchResponse(title, directApiUrl, TvType.Movie) {
-                        this.posterUrl = posterPath
-                    }
-                } else {
-                    newTvSeriesSearchResponse(title, directApiUrl, TvType.TvSeries) {
-                        this.posterUrl = posterPath
-                    }
-                }
-                results.add(res)
+            val directApiUrl = if (type == "movie") {
+                "$mainUrl/media/detail/$id/$apiKey"
+            } else {
+                "$mainUrl/series/show/$id/$apiKey"
             }
-            return results
+
+            val res = if (type == "movie") {
+                newMovieSearchResponse(title, directApiUrl, TvType.Movie) {
+                    this.posterUrl = posterPath
+                }
+            } else {
+                newTvSeriesSearchResponse(title, directApiUrl, TvType.TvSeries) {
+                    this.posterUrl = posterPath
+                }
+            }
+            results.add(res)
         }
 
         return results
@@ -147,7 +187,7 @@ class EgyWatchProvider : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse? {
         if (url.contains("/stream/show/")) {
-            val res = app.get(url, headers = appHeaders).parsedSafe<MediaDetail>() ?: return null
+            val res = fetchApiParsed<MediaDetail>(url) ?: return null
             val videosJson = res.videos?.toJson() ?: ""
 
             return newMovieLoadResponse(res.name ?: res.title ?: "بث مباشر", url, TvType.Live, videosJson) {
@@ -155,79 +195,30 @@ class EgyWatchProvider : MainAPI() {
                 this.plot = res.overview
             }
         }
+
+        // معالجة المجموعات (Collections)
         if (url.contains("/collections/media/show/")) {
-            val episodes = mutableListOf<Episode>()
-            var collectionName = "سلسلة أفلام"
-            var poster: String? = null
-
-            for (page in 1..3) {
-                val pageRes = app.get("$url?page=$page", headers = appHeaders).text
-                val json = JSONObject(pageRes)
-                val dataArray = json.optJSONArray("data") ?: break
-                if (dataArray.length() == 0) break
-
-                for (i in 0 until dataArray.length()) {
-                    val m = dataArray.optJSONObject(i) ?: continue
-                    val mId = m.optInt("id")
-                    val mTitle = m.optString("name").ifEmpty { m.optString("title") }
-                    val mPoster = m.optString("poster_path")
-                    if (poster == null) poster = mPoster
-
-                    val movieApiUrl = "$mainUrl/media/detail/$mId/$apiKey"
-                    episodes.add(
-                        newEpisode(movieApiUrl) {
-                            this.name = mTitle
-                            this.episode = episodes.size + 1
-                            this.posterUrl = mPoster
-                        }
-                    )
-                }
-
-                val lastPage = json.optInt("last_page", 1)
-                if (page >= lastPage) break
-            }
-
-            return newTvSeriesLoadResponse(collectionName, url, TvType.Movie, episodes) {
+            val (episodes, poster) = fetchPaginatedMediaList(url)
+            return newTvSeriesLoadResponse("سلسلة أفلام", url, TvType.Movie, episodes) {
                 this.posterUrl = poster
             }
         }
+
+        // معالجة أفلام الممثل (Filmography)
         if (url.contains("/filmographie/detail/")) {
             val actorId = url.substringAfter("/detail/").substringBefore("/")
-            val castInfo = app.get("$mainUrl/cast/detail/$actorId/$apiKey", headers = appHeaders).parsedSafe<MediaDetail>()
-
-            val episodes = mutableListOf<Episode>()
-            for (page in 1..3) {
-                val pageRes = app.get("$url?page=$page", headers = appHeaders).text
-                val json = JSONObject(pageRes)
-                val dataArray = json.optJSONArray("data") ?: break
-                if (dataArray.length() == 0) break
-
-                for (i in 0 until dataArray.length()) {
-                    val m = dataArray.optJSONObject(i) ?: continue
-                    val mId = m.optInt("id")
-                    val mTitle = m.optString("name").ifEmpty { m.optString("title") }
-                    val mPoster = m.optString("poster_path")
-
-                    val movieApiUrl = "$mainUrl/media/detail/$mId/$apiKey"
-                    episodes.add(
-                        newEpisode(movieApiUrl) {
-                            this.name = mTitle
-                            this.episode = episodes.size + 1
-                            this.posterUrl = mPoster
-                        }
-                    )
-                }
-                val lastPage = json.optInt("last_page", 1)
-                if (page >= lastPage) break
-            }
+            val castInfo = fetchApiParsed<MediaDetail>("$mainUrl/cast/detail/$actorId/$apiKey")
+            val (episodes, _) = fetchPaginatedMediaList(url)
 
             return newTvSeriesLoadResponse(castInfo?.name ?: "أفلام الممثل", url, TvType.TvSeries, episodes) {
                 this.posterUrl = castInfo?.profilePath ?: castInfo?.posterPath
                 this.plot = castInfo?.biography ?: "أعمال ومشاركات الممثل"
             }
         }
+
+        // معالجة الأفلام
         if (url.contains("/media/detail/")) {
-            val res = app.get(url, headers = appHeaders).parsedSafe<MediaDetail>() ?: return null
+            val res = fetchApiParsed<MediaDetail>(url) ?: return null
             val videosJson = res.videos?.toJson() ?: ""
 
             return newMovieLoadResponse(res.title ?: res.name ?: "", url, TvType.Movie, videosJson) {
@@ -237,12 +228,14 @@ class EgyWatchProvider : MainAPI() {
                 this.score = res.voteAverage?.let { Score.from10(it) }
             }
         }
-        val res = app.get(url, headers = appHeaders).parsedSafe<MediaDetail>() ?: return null
+
+        // معالجة المسلسلات
+        val res = fetchApiParsed<MediaDetail>(url) ?: return null
         val episodes = mutableListOf<Episode>()
 
         res.seasons?.parallelMap { season ->
             val seasonId = season.id ?: return@parallelMap
-            val seasonRes = app.get("$mainUrl/series/season/$seasonId/$apiKey", headers = appHeaders).parsedSafe<SeasonDetail>()
+            val seasonRes = fetchApiParsed<SeasonDetail>("$mainUrl/series/season/$seasonId/$apiKey")
             
             seasonRes?.episodes?.forEach { ep ->
                 val epVideosJson = ep.videos?.toJson() ?: ""
@@ -260,11 +253,47 @@ class EgyWatchProvider : MainAPI() {
             }
         }
 
+        // ترتيب الحلقات تصاعدياً لتجنب اختلاط الترتيب بعد الـ parallelMap
+        episodes.sortBy { ((it.season ?: 1) * 10000) + (it.episode ?: 0) }
+
         return newTvSeriesLoadResponse(res.name ?: res.title ?: "", url, TvType.TvSeries, episodes) {
             this.posterUrl = res.posterPath
             this.plot = res.overview
             this.score = res.voteAverage?.let { Score.from10(it) }
         }
+    }
+
+    // دالة موحدة لجلب صفحات المجموعات والممثلين دون تكرار
+    private suspend fun fetchPaginatedMediaList(url: String, maxPages: Int = 3): Pair<List<Episode>, String?> {
+        val episodes = mutableListOf<Episode>()
+        var poster: String? = null
+
+        for (page in 1..maxPages) {
+            val pageRes = fetchApi("$url?page=$page") ?: break
+            val json = try { JSONObject(pageRes) } catch (e: Exception) { break }
+            val dataArray = json.optJSONArray("data") ?: break
+            if (dataArray.length() == 0) break
+
+            for (i in 0 until dataArray.length()) {
+                val m = dataArray.optJSONObject(i) ?: continue
+                val mId = m.optInt("id")
+                val mTitle = m.optString("name").ifEmpty { m.optString("title") }
+                val mPoster = m.optString("poster_path").takeIf { it.isNotEmpty() }
+                if (poster == null) poster = mPoster
+
+                val movieApiUrl = "$mainUrl/media/detail/$mId/$apiKey"
+                episodes.add(
+                    newEpisode(movieApiUrl) {
+                        this.name = mTitle
+                        this.episode = episodes.size + 1
+                        this.posterUrl = mPoster
+                    }
+                )
+            }
+            val lastPage = json.optInt("last_page", 1)
+            if (page >= lastPage) break
+        }
+        return Pair(episodes, poster)
     }
 
     override suspend fun loadLinks(
@@ -274,7 +303,7 @@ class EgyWatchProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val videos = if (data.startsWith("http")) {
-            val res = app.get(data, headers = appHeaders).parsedSafe<MediaDetail>()
+            val res = fetchApiParsed<MediaDetail>(data)
             res?.videos ?: emptyList()
         } else {
             try {
@@ -291,6 +320,7 @@ class EgyWatchProvider : MainAPI() {
             val serverName = video.server ?: "سيرفر"
             val customHeader = video.header ?: ""
             val videoUserAgent = video.useragent ?: ""
+
             if (link.contains("cdnlink.developer-pro.workers.dev")) {
                 callback.invoke(
                     newExtractorLink(name = serverName, source = name, url = link) {
@@ -299,6 +329,7 @@ class EgyWatchProvider : MainAPI() {
                 )
                 return@parallelMap
             }
+
             val matchedRule = hostsRules.firstOrNull { rule ->
                 val rawPattern = rule.regexPattern ?: return@firstOrNull false
                 try {
@@ -312,6 +343,7 @@ class EgyWatchProvider : MainAPI() {
             }
 
             val cleanHeaders = getCleanHeaders(customHeader, videoUserAgent, matchedRule?.referer)
+
             if (matchedRule == null && (link.contains(".m3u8") || link.contains(".mp4"))) {
                 callback.invoke(
                     newExtractorLink(name = serverName, source = name, url = link) {
@@ -380,10 +412,10 @@ class EgyWatchProvider : MainAPI() {
     private suspend fun getHostsRules(): List<HostConfigItem> {
         if (cachedHostsConfig != null) return cachedHostsConfig!!
         return try {
-            val text = app.get(
+            val text = fetchApi(
                 "$mainUrl/hosts/config",
                 headers = mapOf("User-Agent" to "okhttp/5.0.0-alpha.6", "Accept" to "application/json")
-            ).text
+            ) ?: return emptyList()
             
             val array = parseJson<Array<HostConfigItem>>(text).toList()
             cachedHostsConfig = array
@@ -404,6 +436,7 @@ class EgyWatchProvider : MainAPI() {
             val enabledParts = rule.enableded?.split("|") ?: emptyList()
             val postUrl = enabledParts.getOrNull(1)?.takeIf { it.startsWith("http") }
             val urlSite = rule.urlsite
+
             if (postUrl != null) {
                 val html = app.get(link, headers = cleanHeaders).text
                 val postHeaders = mapOf(
@@ -421,6 +454,7 @@ class EgyWatchProvider : MainAPI() {
                     return true
                 }
             }
+
             if (!urlSite.isNullOrEmpty() && (urlSite.endsWith("=") || urlSite.endsWith("api="))) {
                 val getApiUrl = "$urlSite$link"
                 val apiRes = app.get(getApiUrl, headers = mapOf("User-Agent" to "okhttp/5.0.0-alpha.6")).text
@@ -428,10 +462,10 @@ class EgyWatchProvider : MainAPI() {
                     return true
                 }
             }
+
             val sitePattern = rule.site
             if (!sitePattern.isNullOrEmpty()) {
                 val html = app.get(link, headers = cleanHeaders).text
-                val cleanSitePattern = sitePattern.replace("\\/", "/")
                 val regex = Regex("""sources.*(https?:[^"']+)"""", RegexOption.IGNORE_CASE)
                 val match = regex.find(html) ?: Regex("""file\s*:\s*["']([^"']+)["']""").find(html)
 
@@ -481,6 +515,7 @@ class EgyWatchProvider : MainAPI() {
             }
             if (foundAny) return true
         }
+
         try {
             val jsonRes = JSONObject(cleanBody)
             if (jsonRes.optString("status") == "success") {
@@ -518,11 +553,13 @@ class EgyWatchProvider : MainAPI() {
             }
         } catch (e: Exception) {
         }
+
         if (foundAny) return true
+
         val universalVideoRegex = Regex("""https?://[^\s"'<>\\]+?\.(?:m3u8|mp4|mkv)(?:\?[^\s"'<>\\]*)?""", RegexOption.IGNORE_CASE)
         val extractedVideoUrls = universalVideoRegex.findAll(cleanBody)
             .map { it.value }
-            .distinct() // منع تكرار نفس الرابط إن ورد أكثر من مرة
+            .distinct()
             .toList()
 
         if (extractedVideoUrls.isNotEmpty()) {
