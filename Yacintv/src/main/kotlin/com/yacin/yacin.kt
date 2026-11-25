@@ -209,41 +209,7 @@ class YacineTVProvider : MainAPI() {
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
-    override fun getVideoInterceptor(extractorLink: ExtractorLink): Interceptor? {
-        Log.d(LOG_IC, "========== getVideoInterceptor CALLED ==========")
-        Log.d(LOG_IC, "  url     = ${extractorLink.url}")
-        Log.d(LOG_IC, "  referer = ${extractorLink.referer}")
-        Log.d(LOG_IC, "  referer.hex = " +
-            (extractorLink.referer ?: "").toByteArray()
-                .joinToString(" ") { String.format("%02X", it) })
-        Log.d(LOG_IC, "  headers = ${extractorLink.headers}")
-
-        return Interceptor { chain ->
-            val req = chain.request()
-
-            Log.d(LOG_IC, "---- REQUEST INTERCEPTED ----")
-            Log.d(LOG_IC, "  url = ${req.url}")
-            Log.d(LOG_IC, "  method = ${req.method}")
-
-            for ((k, v) in req.headers) {
-                Log.d(LOG_IC, "  header[$k] = $v")
-                if (k.equals("Referer", true) || k.equals("referer", true)) {
-                    val hex = v.toByteArray().joinToString(" ") { String.format("%02X", it) }
-                    Log.d(LOG_IC, "  >> Referer.hex = $hex")
-                    Log.d(LOG_IC, "  >> Referer.len = ${v.toByteArray().size}")
-                }
-            }
-            val rawRef = "http://yacinneeee.live⁠‍⁠ㅤ‌⁠‍⁠"
-            val newReq = req.newBuilder()
-                .header("Referer", rawRef)
-                .build()
-
-            Log.d(LOG_IC, "  >> SET Referer to RAW, hex = " +
-                rawRef.toByteArray().joinToString(" ") { String.format("%02X", it) })
-
-            chain.proceed(newReq)
-        }
-    }
+    
     private fun getSavedApiUrl(): String = try {
         getKey<String>(PREF_SAVED_DOMAIN_KEY) ?: cachedUrl
     } catch (e: Exception) { cachedUrl }
