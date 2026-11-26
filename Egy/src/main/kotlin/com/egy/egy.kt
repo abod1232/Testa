@@ -19,7 +19,6 @@ import java.net.URLEncoder
 class EgyWatchProvider : MainAPI() {
 
     companion object {
-        // الروابط المتاحة (الأساسي والاحتياطي)
         private val API_HOSTS = listOf(
             "https://rn62mwg.com/egywatchapp/public/api",
             "https://gateway.egywatch.live/egywatchapp/public/api"
@@ -43,8 +42,6 @@ class EgyWatchProvider : MainAPI() {
     )
 
     private var cachedHostsConfig: List<HostConfigItem>? = null
-
-    // استخراج المسار الصافي للطلب دون الدومين
     private fun getCleanPath(urlOrPath: String): String {
         return when {
             urlOrPath.contains("/public/api/") -> urlOrPath.substringAfter("/public/api/").removePrefix("/")
@@ -52,8 +49,6 @@ class EgyWatchProvider : MainAPI() {
             else -> urlOrPath.removePrefix("/")
         }
     }
-
-    // دالة فحص وتجربة الرابط الاحتياطي إذا كان الرد خاطئاً أو فارغاً
     private suspend fun fetchApiWithFallback(
         urlOrPath: String,
         validate: (String) -> Boolean = { it.isNotBlank() && !it.contains("not found", ignoreCase = true) }
@@ -95,8 +90,6 @@ class EgyWatchProvider : MainAPI() {
         request: MainPageRequest
     ): HomePageResponse? {
         val path = getCleanPath(request.data)
-
-        // محاولة جلب الأقسام؛ إذا كانت فارغة في السيرفر الأول يجرب الاحتياطي
         for (host in API_HOSTS) {
             try {
                 val responseText = app.get("$host/$path", headers = appHeaders, timeout = 12L).text
@@ -180,8 +173,6 @@ class EgyWatchProvider : MainAPI() {
     override suspend fun search(query: String): List<SearchResponse>? {
         val encodedQuery = URLEncoder.encode("$query|vide", "UTF-8")
         val searchPath = "search/$encodedQuery/$apiKey"
-
-        // إذا لم يعثر على نتائج في السيرفر الأول، يجرب الاحتياطي فوراً
         for (host in API_HOSTS) {
             try {
                 val responseText = app.get("$host/$searchPath", headers = appHeaders, timeout = 12L).text
@@ -233,8 +224,6 @@ class EgyWatchProvider : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse? {
         val path = getCleanPath(url)
-
-        // 1. معالجة القنوات والبث المباشر
         if (path.contains("stream/show/")) {
             val res = fetchApiParsed<MediaDetail>(path) { !it.contains("not found", true) } ?: return null
             val videosJson = res.videos?.toJson() ?: ""
@@ -243,8 +232,6 @@ class EgyWatchProvider : MainAPI() {
                 this.plot = res.overview
             }
         }
-
-        // 2. معالجة سلاسل الأفلام والمجموعات
         if (path.contains("collections/media/show/")) {
             val (episodes, poster) = fetchPaginatedMediaList(path)
             if (episodes.isNotEmpty()) {
@@ -253,8 +240,6 @@ class EgyWatchProvider : MainAPI() {
                 }
             }
         }
-
-        // 3. معالجة أعمال الممثلين
         if (path.contains("filmographie/detail/")) {
             val actorId = path.substringAfter("/detail/").substringBefore("/")
             val castInfo = fetchApiParsed<MediaDetail>("cast/detail/$actorId/$apiKey")
@@ -267,8 +252,6 @@ class EgyWatchProvider : MainAPI() {
                 }
             }
         }
-
-        // 4. معالجة الأفلام مع التحقق من وجود سيرفرات
         if (path.contains("media/detail/")) {
             for (host in API_HOSTS) {
                 val res = try {
@@ -289,8 +272,6 @@ class EgyWatchProvider : MainAPI() {
                 }
             }
         }
-
-        // 5. معالجة المسلسلات والأنمي
         val isAnime = path.contains("animes/")
         val seasonEndpoint = if (isAnime) "animes/season" else "series/season"
         val mediaType = if (isAnime) TvType.Anime else TvType.TvSeries
@@ -299,8 +280,6 @@ class EgyWatchProvider : MainAPI() {
             try {
                 val fullUrl = "$host/$path"
                 val resText = app.get(fullUrl, headers = appHeaders, timeout = 12L).text
-
-                // التحقق من أن العمل موجود وليس صفحة خطأ
                 if (resText.contains("not found", ignoreCase = true)) {
                     continue
                 }
@@ -402,7 +381,6 @@ class EgyWatchProvider : MainAPI() {
 
         if (data.startsWith("http")) {
             val path = getCleanPath(data)
-            // تجربة الرابط الاحتياطي إذا لم تكن هناك فيديوهات في الرابط الأساسي
             for (host in API_HOSTS) {
                 val res = fetchApiParsed<MediaDetail>("$host/$path")
                 if (!res?.videos.isNullOrEmpty()) {
