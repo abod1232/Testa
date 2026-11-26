@@ -336,6 +336,22 @@ class YacineTVProvider : MainAPI() {
         }
         null
     }
+    override fun getVideoInterceptor(extractorLink: ExtractorLink): Interceptor? {
+    Log.d("YACINE_IC", "========== getVideoInterceptor CALLED ==========")
+    Log.d("YACINE_IC", "  url = ${extractorLink.url}")
+    Log.d("YACINE_IC", "  headers = ${extractorLink.headers}")
+
+    return Interceptor { chain ->
+        Log.d("YACINE_IC", ">>>>>>>>>> INTERCEPTOR START <<<<<<<<<<")
+        val req = chain.request()
+        Log.d("YACINE_IC", "  req.url = ${req.url}")
+        for ((k, v) in req.headers) {
+            Log.d("YACINE_IC", "  req.header[$k] = $v")
+        }
+        Log.d("YACINE_IC", ">>>>>>>>>> INTERCEPTOR PROCEEDING <<<<<<<<<<")
+        chain.proceed(req)
+    }
+    }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse = withContext(Dispatchers.IO) {
         val cats = fetchYacine("categories")?.data ?: emptyList()
