@@ -349,8 +349,6 @@ class YacineTVProvider : MainAPI() {
         for ((k, v) in req.headers) {
             Log.d(LOG_IC, "  req.header[$k] = $v")
         }
-
-        // احذف Referer المشوّه
         val newReq = req.newBuilder()
             .removeHeader("Referer")
             .removeHeader("referer")
