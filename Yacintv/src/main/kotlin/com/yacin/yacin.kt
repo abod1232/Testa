@@ -336,23 +336,35 @@ class YacineTVProvider : MainAPI() {
         }
         null
     }
+    
     override fun getVideoInterceptor(extractorLink: ExtractorLink): Interceptor? {
-    Log.d("YACINE_IC", "========== getVideoInterceptor CALLED ==========")
-    Log.d("YACINE_IC", "  url = ${extractorLink.url}")
-    Log.d("YACINE_IC", "  headers = ${extractorLink.headers}")
+    Log.d(LOG_IC, "========== getVideoInterceptor CALLED ==========")
+    Log.d(LOG_IC, "  url = ${extractorLink.url}")
+    Log.d(LOG_IC, "  headers = ${extractorLink.headers}")
 
     return Interceptor { chain ->
-        Log.d("YACINE_IC", ">>>>>>>>>> INTERCEPTOR START <<<<<<<<<<")
+        Log.d(LOG_IC, ">>>>>>>>>> INTERCEPTOR START <<<<<<<<<<")
         val req = chain.request()
-        Log.d("YACINE_IC", "  req.url = ${req.url}")
+        Log.d(LOG_IC, "  req.url = ${req.url}")
         for ((k, v) in req.headers) {
-            Log.d("YACINE_IC", "  req.header[$k] = $v")
+            Log.d(LOG_IC, "  req.header[$k] = $v")
         }
-        Log.d("YACINE_IC", ">>>>>>>>>> INTERCEPTOR PROCEEDING <<<<<<<<<<")
-        chain.proceed(req)
-    }
-    }
 
+        // احذف Referer المشوّه
+        val newReq = req.newBuilder()
+            .removeHeader("Referer")
+            .removeHeader("referer")
+            .build()
+
+        Log.d(LOG_IC, "  after removeHeader, headers:")
+        for ((k, v) in newReq.headers) {
+            Log.d(LOG_IC, "    $k = $v")
+        }
+        Log.d(LOG_IC, ">>>>>>>>>> INTERCEPTOR PROCEEDING <<<<<<<<<<")
+
+        chain.proceed(newReq)
+    }
+}
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse = withContext(Dispatchers.IO) {
         val cats = fetchYacine("categories")?.data ?: emptyList()
         val lists = cats.map { cat ->
