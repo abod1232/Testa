@@ -19,6 +19,7 @@ import java.net.URLEncoder
 class EgyWatchProvider : MainAPI() {
 
     companion object {
+        // الروابط المتاحة (الأساسي والاحتياطي)
         private val API_HOSTS = listOf(
             "https://rn62mwg.com/egywatchapp/public/api",
             "https://gateway.egywatch.live/egywatchapp/public/api"
@@ -42,6 +43,8 @@ class EgyWatchProvider : MainAPI() {
     )
 
     private var cachedHostsConfig: List<HostConfigItem>? = null
+
+    // استخراج المسار الصافي للطلب دون الدومين
     private fun getCleanPath(urlOrPath: String): String {
         return when {
             urlOrPath.contains("/public/api/") -> urlOrPath.substringAfter("/public/api/").removePrefix("/")
@@ -49,6 +52,8 @@ class EgyWatchProvider : MainAPI() {
             else -> urlOrPath.removePrefix("/")
         }
     }
+
+    // دالة فحص وتجربة الرابط الاحتياطي إذا كان الرد خاطئاً أو فارغاً
     private suspend fun fetchApiWithFallback(
         urlOrPath: String,
         validate: (String) -> Boolean = { it.isNotBlank() && !it.contains("not found", ignoreCase = true) }
@@ -90,6 +95,8 @@ class EgyWatchProvider : MainAPI() {
         request: MainPageRequest
     ): HomePageResponse? {
         val path = getCleanPath(request.data)
+
+        // محاولة جلب الأقسام؛ إذا كانت فارغة في السيرفر الأول يجرب الاحتياطي
         for (host in API_HOSTS) {
             try {
                 val responseText = app.get("$host/$path", headers = appHeaders, timeout = 12L).text
@@ -118,6 +125,8 @@ class EgyWatchProvider : MainAPI() {
                         if (itemTitle.isEmpty()) continue
 
                         val rawType = itemObj.optString("type").lowercase()
+                        val isAnime = sectionType == "animes" || rawType == "anime" || itemObj.optInt("is_anime", 0) == 1
+
                         val posterPath = itemObj.optString("poster_path").ifEmpty { 
                             itemObj.optString("profile_path") 
                         }.takeIf { it.isNotEmpty() }
@@ -127,6 +136,7 @@ class EgyWatchProvider : MainAPI() {
                             sectionType == "collections" -> "collections/media/show/$id"
                             sectionType == "actors" -> "filmographie/detail/$id/$apiKey"
                             rawType == "movie" -> "media/detail/$id/$apiKey"
+                            isAnime -> "animes/show/$id/$apiKey"
                             else -> "series/show/$id/$apiKey"
                         }
 
@@ -140,6 +150,9 @@ class EgyWatchProvider : MainAPI() {
                                 this.posterUrl = posterPath
                             }
                             rawType == "movie" -> newMovieSearchResponse(itemTitle, directApiUrl, TvType.Movie) {
+                                this.posterUrl = posterPath
+                            }
+                            isAnime -> newTvSeriesSearchResponse(itemTitle, directApiUrl, TvType.Anime) {
                                 this.posterUrl = posterPath
                             }
                             else -> newTvSeriesSearchResponse(itemTitle, directApiUrl, TvType.TvSeries) {
@@ -167,6 +180,8 @@ class EgyWatchProvider : MainAPI() {
     override suspend fun search(query: String): List<SearchResponse>? {
         val encodedQuery = URLEncoder.encode("$query|vide", "UTF-8")
         val searchPath = "search/$encodedQuery/$apiKey"
+
+        // إذا لم يعثر على نتائج في السيرفر الأول، يجرب الاحتياطي فوراً
         for (host in API_HOSTS) {
             try {
                 val responseText = app.get("$host/$searchPath", headers = appHeaders, timeout = 12L).text
@@ -182,22 +197,23 @@ class EgyWatchProvider : MainAPI() {
                     if (title.isEmpty()) continue
 
                     val type = item.optString("type").lowercase()
+                    val isAnime = type == "anime" || item.optInt("is_anime", 0) == 1
                     val posterPath = item.optString("poster_path").takeIf { it.isNotEmpty() }
 
-                    val targetPath = if (type == "movie") {
-                        "media/detail/$id/$apiKey"
-                    } else {
-                        "series/show/$id/$apiKey"
+                    val (targetPath, tvType) = when {
+                        type == "movie" -> "media/detail/$id/$apiKey" to TvType.Movie
+                        isAnime -> "animes/show/$id/$apiKey" to TvType.Anime
+                        else -> "series/show/$id/$apiKey" to TvType.TvSeries
                     }
 
                     val directApiUrl = "$host/$targetPath"
 
-                    val res = if (type == "movie") {
-                        newMovieSearchResponse(title, directApiUrl, TvType.Movie) {
+                    val res = if (tvType == TvType.Movie) {
+                        newMovieSearchResponse(title, directApiUrl, tvType) {
                             this.posterUrl = posterPath
                         }
                     } else {
-                        newTvSeriesSearchResponse(title, directApiUrl, TvType.TvSeries) {
+                        newTvSeriesSearchResponse(title, directApiUrl, tvType) {
                             this.posterUrl = posterPath
                         }
                     }
@@ -217,6 +233,8 @@ class EgyWatchProvider : MainAPI() {
 
     override suspend fun load(url: String): LoadResponse? {
         val path = getCleanPath(url)
+
+        // 1. معالجة القنوات والبث المباشر
         if (path.contains("stream/show/")) {
             val res = fetchApiParsed<MediaDetail>(path) { !it.contains("not found", true) } ?: return null
             val videosJson = res.videos?.toJson() ?: ""
@@ -225,6 +243,8 @@ class EgyWatchProvider : MainAPI() {
                 this.plot = res.overview
             }
         }
+
+        // 2. معالجة سلاسل الأفلام والمجموعات
         if (path.contains("collections/media/show/")) {
             val (episodes, poster) = fetchPaginatedMediaList(path)
             if (episodes.isNotEmpty()) {
@@ -233,6 +253,8 @@ class EgyWatchProvider : MainAPI() {
                 }
             }
         }
+
+        // 3. معالجة أعمال الممثلين
         if (path.contains("filmographie/detail/")) {
             val actorId = path.substringAfter("/detail/").substringBefore("/")
             val castInfo = fetchApiParsed<MediaDetail>("cast/detail/$actorId/$apiKey")
@@ -245,6 +267,8 @@ class EgyWatchProvider : MainAPI() {
                 }
             }
         }
+
+        // 4. معالجة الأفلام مع التحقق من وجود سيرفرات
         if (path.contains("media/detail/")) {
             for (host in API_HOSTS) {
                 val res = try {
@@ -265,11 +289,19 @@ class EgyWatchProvider : MainAPI() {
                 }
             }
         }
+
+        // 5. معالجة المسلسلات والأنمي
+        val isAnime = path.contains("animes/")
+        val seasonEndpoint = if (isAnime) "animes/season" else "series/season"
+        val mediaType = if (isAnime) TvType.Anime else TvType.TvSeries
+
         for (host in API_HOSTS) {
             try {
                 val fullUrl = "$host/$path"
                 val resText = app.get(fullUrl, headers = appHeaders, timeout = 12L).text
-                if (resText.contains("not found", ignoreCase = true) || resText.contains("Serie not found", ignoreCase = true)) {
+
+                // التحقق من أن العمل موجود وليس صفحة خطأ
+                if (resText.contains("not found", ignoreCase = true)) {
                     continue
                 }
 
@@ -280,7 +312,7 @@ class EgyWatchProvider : MainAPI() {
 
                 res.seasons.parallelMap { season ->
                     val seasonId = season.id ?: return@parallelMap
-                    val seasonRes = fetchApiParsed<SeasonDetail>("series/season/$seasonId/$apiKey")
+                    val seasonRes = fetchApiParsed<SeasonDetail>("$seasonEndpoint/$seasonId/$apiKey")
                     
                     seasonRes?.episodes?.forEach { ep ->
                         val epVideosJson = ep.videos?.toJson() ?: ""
@@ -296,10 +328,11 @@ class EgyWatchProvider : MainAPI() {
                         }
                     }
                 }
+
                 if (episodes.isNotEmpty()) {
                     episodes.sortBy { ((it.season ?: 1) * 10000) + (it.episode ?: 0) }
 
-                    return newTvSeriesLoadResponse(res.name ?: res.title ?: "", url, TvType.TvSeries, episodes) {
+                    return newTvSeriesLoadResponse(res.name ?: res.title ?: "", url, mediaType, episodes) {
                         this.posterUrl = res.posterPath
                         this.plot = res.overview
                         this.score = res.voteAverage?.let { Score.from10(it) }
@@ -369,6 +402,7 @@ class EgyWatchProvider : MainAPI() {
 
         if (data.startsWith("http")) {
             val path = getCleanPath(data)
+            // تجربة الرابط الاحتياطي إذا لم تكن هناك فيديوهات في الرابط الأساسي
             for (host in API_HOSTS) {
                 val res = fetchApiParsed<MediaDetail>("$host/$path")
                 if (!res?.videos.isNullOrEmpty()) {
