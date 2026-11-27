@@ -27,30 +27,22 @@ class AlooyTvProvider : MainAPI() {
 
     return try {
         val doc = app.get(mainUrl).document
-        val domain = doc.select("a")
-            .map { it.attr("abs:href") }
-            .firstOrNull { link ->
-                try {
-                    val url = java.net.URL(link)
-                    val host = url.host.lowercase()
-                    host.contains("alooytv") && !host.contains("t.me") && !host.contains("instagram")
-                } catch (_: Exception) {
-                    false
-                }
-            }?.let { validLink ->
-                val url = java.net.URL(validLink)
-                val portSuffix = if (url.port != -1 && url.port != url.defaultPort) ":${url.port}" else ""
-                "${url.protocol}://${url.host}$portSuffix"
-            }
 
-        if (!domain.isNullOrBlank()) {
+        // نبحث عن الرابط الموجود داخل زر "أحدث الحلقات" مباشرة فهو الرابط الشغال دائماً
+        val targetLink = doc.select("a").firstOrNull { 
+            it.text().contains("أحدث الحلقات") || it.attr("href").contains("alooy")
+        }?.attr("abs:href")
+
+        if (!targetLink.isNullOrBlank()) {
+            val uri = java.net.URI(targetLink)
+            val domain = "${uri.scheme}://${uri.host}"
             actualDomain = domain
             domain
         } else {
-            "https://h.alooytv16.com"
+            "https://bh.alooy-tv.xyz" // تم تحديث الرابط الاحتياطي أيضاً
         }
     } catch (e: Exception) {
-        "https://h.alooytv16.com"
+        "https://bh.alooy-tv.xyz"
     }
 }
 
