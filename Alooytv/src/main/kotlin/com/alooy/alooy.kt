@@ -23,25 +23,40 @@ class AlooyTvProvider : MainAPI() {
         "/genre/farisi.html" to "مسلسلات فارسية"
     )
     private suspend fun getActualDomain(): String {
-        actualDomain?.let { return it }
+    actualDomain?.let { return it }
 
-        return try {
-            val doc = app.get(mainUrl).document
-            val link = doc.select("a[href*='alooytv']").map { it.attr("href") }
-                .firstOrNull { it.startsWith("http") && !it.contains("t.me") && !it.contains("instagram") }
-
-            if (link != null) {
-                val uri = java.net.URI(link)
-                val domain = "${uri.scheme}://${uri.host}"
-                actualDomain = domain
-                domain
-            } else {
-                "https://h.alooytv16.com"
+    return try {
+        val doc = app.get(mainUrl).document
+        
+        // جلب جميع الروابط وتحويلها لروابط كاملة فوراً عبر abs:href
+        val domain = doc.select("a")
+            .map { it.attr("abs:href") }
+            .firstOrNull { link ->
+                try {
+                    val url = java.net.URL(link)
+                    val host = url.host.lowercase()
+                    // نتأكد أن اسم الموقع نفسه يحتوي على alooytv وأنه ليس موقع تواصل
+                    host.contains("alooytv") && !host.contains("t.me") && !host.contains("instagram")
+                } catch (_: Exception) {
+                    false
+                }
+            }?.let { validLink ->
+                val url = java.net.URL(validLink)
+                // إعادة بناء الدومين مع المنفذ إن وُجد
+                val portSuffix = if (url.port != -1 && url.port != url.defaultPort) ":${url.port}" else ""
+                "${url.protocol}://${url.host}$portSuffix"
             }
-        } catch (e: Exception) {
+
+        if (!domain.isNullOrBlank()) {
+            actualDomain = domain
+            domain
+        } else {
             "https://h.alooytv16.com"
         }
+    } catch (e: Exception) {
+        "https://h.alooytv16.com"
     }
+}
 
     private fun Element.toSearchResult(domain: String): SearchResponse? {
         val a = this.selectFirst(".movie-title h3 a") ?: return null
