@@ -37,10 +37,10 @@ class AlooyTvProvider : MainAPI() {
             actualDomain = domain
             domain
         } else {
-            "https://h.alooytv16.com" // تم تحديث الرابط الاحتياطي أيضاً
+            "https://bh.alooy-tv.xyz" // تم تحديث الرابط الاحتياطي أيضاً
         }
     } catch (e: Exception) {
-        "https://h.alooytv16.com"
+        "https://bh.alooy-tv.xyz"
     }
 }
 
