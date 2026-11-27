@@ -55,8 +55,6 @@ class EgyWatchProvider : MainAPI() {
     )
 
     private var cachedHostsConfig: List<HostConfigItem>? = null
-
-    // دالة لجلب الطلبات مع التبديل التلقائي إلى الرابط الاحتياطي في حال فشل الأساسي
     private suspend fun safeGet(url: String, headers: Map<String, String> = appHeaders): NiceResponse {
         return try {
             val res = app.get(url, headers = headers)
@@ -398,8 +396,6 @@ class EgyWatchProvider : MainAPI() {
                 this.score = res.voteAverage?.let { Score.from10(it) }
             }
         }
-
-        // المسلسلات والأنمي
         val isAnime = url.contains("/animes/")
         val seasonEndpoint = if (isAnime) "animes/season" else "series/season"
         val tvType = if (isAnime) TvType.Anime else TvType.TvSeries
