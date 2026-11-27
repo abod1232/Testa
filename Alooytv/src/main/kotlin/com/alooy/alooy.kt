@@ -27,22 +27,18 @@ class AlooyTvProvider : MainAPI() {
 
     return try {
         val doc = app.get(mainUrl).document
-        
-        // جلب جميع الروابط وتحويلها لروابط كاملة فوراً عبر abs:href
         val domain = doc.select("a")
             .map { it.attr("abs:href") }
             .firstOrNull { link ->
                 try {
                     val url = java.net.URL(link)
                     val host = url.host.lowercase()
-                    // نتأكد أن اسم الموقع نفسه يحتوي على alooytv وأنه ليس موقع تواصل
                     host.contains("alooytv") && !host.contains("t.me") && !host.contains("instagram")
                 } catch (_: Exception) {
                     false
                 }
             }?.let { validLink ->
                 val url = java.net.URL(validLink)
-                // إعادة بناء الدومين مع المنفذ إن وُجد
                 val portSuffix = if (url.port != -1 && url.port != url.defaultPort) ":${url.port}" else ""
                 "${url.protocol}://${url.host}$portSuffix"
             }
